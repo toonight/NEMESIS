@@ -22,8 +22,10 @@ from nemesis.calibration.freeze import (
     observed_values,
     unregistered_calibration_constants,
 )
-from nemesis.core.confidence import Opinion
+from nemesis.core.confidence import ConfidenceBand, Opinion, band_of
 from nemesis.core.fusion import cumulative_belief_fusion, weighted_belief_fusion
+from nemesis.core.proposition import ROBUSTNESS_MARGIN, PropositionClass
+from nemesis.core.relationships import METHOD_RELIABILITY_CEILING, PivotMethod
 
 pytestmark = pytest.mark.invariant
 
@@ -71,7 +73,10 @@ def test_the_registry_reads_the_real_modules() -> None:
     values = observed_values()
 
     assert len(values) == len(CALIBRATION_CONSTANTS)
-    assert all(isinstance(value, int | float) for value in values.values())
+    # Scalars *and* tables. The registry originally held only scalars, which is precisely why
+    # `BAND_RANGES` could move without breaking anything: a dict is not a lesser dial.
+    assert any(isinstance(value, dict) for value in values.values())
+    assert all(isinstance(value, int | float | dict) for value in values.values())
     # Spot-check two that carry very different meanings, so a wholesale rewiring of the
     # registry to a single module could not pass this.
     assert values["nemesis.resolve.signals:STYLOMETRY_BELIEF_CEILING"] == 0.15
@@ -129,3 +134,64 @@ def test_a_vacuous_opinion_stays_vacuous_through_fusion() -> None:
 
     assert cumulative_belief_fusion((nothing, nothing)).uncertainty == 1.0
     assert weighted_belief_fusion((nothing, nothing)).uncertainty == 1.0
+
+
+# --- End to end: what a reader actually sees ---------------------------------
+
+
+def test_the_published_confidence_bands_have_not_moved() -> None:
+    """The gap a reviewer walked through: the fusion vectors froze fusion and nothing else.
+
+    Changing `BAND_RANGES` alone moved a published figure from *likely* to *almost certain*
+    while the digest and the scanner both stayed green — because the scanner matched only
+    `NAME = <digit>` and a band table is a dict.
+
+    A table is not a lesser dial than a scalar. `BAND_RANGES` decides the **word** a reader
+    sees, which is the only output most consumers of this platform will ever read: nobody acts
+    on 0.83, they act on "very likely".
+    """
+
+    def at(probability: float, uncertainty: float = 0.1) -> Opinion:
+        belief = max(0.0, min(1.0 - uncertainty, probability - 0.5 * uncertainty))
+        return Opinion(
+            belief=belief,
+            disbelief=1.0 - uncertainty - belief,
+            uncertainty=uncertainty,
+            base_rate=0.5,
+        )
+
+    assert band_of(at(0.50)) is ConfidenceBand.ROUGHLY_EVEN
+    assert band_of(at(0.70)) is ConfidenceBand.LIKELY
+    assert band_of(at(0.88)) is ConfidenceBand.VERY_LIKELY
+    assert band_of(at(0.95)) is ConfidenceBand.ALMOST_CERTAIN
+
+
+def test_the_refusal_threshold_has_not_moved() -> None:
+    """Correct refusals are a graded outcome in the protocol, so the line that produces them is
+    frozen too. A system that cannot be graded on refusing will be tuned to stop refusing, and
+    the cheapest way to improve every other metric is to quietly lower this."""
+    thin = Opinion(belief=0.2, disbelief=0.05, uncertainty=0.75, base_rate=0.5)
+    at_the_line = Opinion(belief=0.25, disbelief=0.05, uncertainty=0.70, base_rate=0.5)
+
+    assert band_of(thin) is ConfidenceBand.INSUFFICIENT_BASIS
+    # The threshold is inclusive: exactly at the line still refuses. An off-by-one here would
+    # be invisible in every aggregate and would change which cases get answered at all.
+    assert band_of(at_the_line) is ConfidenceBand.INSUFFICIENT_BASIS
+
+
+def test_the_robustness_margin_and_method_ceilings_have_not_moved() -> None:
+    """Two tables that decide as much as any scalar, in modules the first scan never opened.
+
+    The margin is what makes a conclusion survive losing a plantable fact; the ceilings are
+    what stop a fallible technique from becoming decisive. Both are exactly the dials an
+    evaluation would reward loosening.
+    """
+    assert ROBUSTNESS_MARGIN[PropositionClass.OBSERVATION] == 0
+    assert ROBUSTNESS_MARGIN[PropositionClass.SHARED_ORIGIN] == 1
+    assert ROBUSTNESS_MARGIN[PropositionClass.ACTOR_ATTRIBUTION] == 1
+
+    assert METHOD_RELIABILITY_CEILING[PivotMethod.CRYPTOGRAPHIC_IDENTITY] == 1.0
+    assert METHOD_RELIABILITY_CEILING[PivotMethod.LINGUISTIC_SIMILARITY] == 0.3
+    assert METHOD_RELIABILITY_CEILING[PivotMethod.BEHAVIORAL_PATTERN] == 0.45
+    # Stylometry must stay far below anything that could carry a conclusion alone.
+    assert METHOD_RELIABILITY_CEILING[PivotMethod.LINGUISTIC_SIMILARITY] < 0.5

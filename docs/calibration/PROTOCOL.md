@@ -3,6 +3,16 @@
 **Status: milestone 1 `IMPLEMENTED`, milestones 2 and 6 `PROPOSED` (specified below),
 milestones 3–5 `REQUIRES_EXTERNAL_DATA`.**
 
+> **Correction, 2026-08-20.** Milestone 1 was first labelled `IMPLEMENTED` when it was partial,
+> and an external review demonstrated the gap in one run: changing `BAND_RANGES` moved a
+> published band from *likely* to *almost certain* while both checks stayed green. The scanner
+> matched only `NAME = <digit>`, so every dial that is a **table** was invisible; it compared
+> bare names, so a homonym elsewhere counted as registered; and the golden vectors froze fusion
+> and nothing else. Over-labelling is the defect this project rejects, committed inside the
+> mechanism built to prevent silent drift. The registry now holds **26** constants including
+> tables, the scan is AST-based and fully qualified over **8** modules, and the vectors cover
+> bands, refusals, robustness margins and method ceilings.
+
 No confidence figure this platform produces has ever been scored against a known-correct
 answer. That is the project's largest declared weakness, and it is not a mathematics problem:
 attribution rarely has ground truth, so the usual instruments have nothing to measure against.
@@ -23,13 +33,19 @@ each is a dial, and each moves a number somebody is about to grade.
 
 `nemesis.calibration.freeze` makes the freeze mechanical rather than a promise:
 
-- **16 registered constants** across `core.confidence`, `core.fusion`, `attribute.engine`,
-  `resolve.engine` and `resolve.signals`, folded into a digest. A change breaks the digest.
-- **A scan for unregistered constants**, because the way to defeat a freeze is to add a dial
-  and not list it, and an enumerated registry cannot notice its own omissions.
-- **Golden vectors** pinning the fusion operators' *answers* rather than their source. Hashing
-  the source would break on a reworded comment and survive a changed sign — the wrong
-  sensitivity in both directions.
+- **26 registered constants** across 8 modules, **scalars and tables alike**, folded into a
+  digest. `BAND_RANGES`, `ROBUSTNESS_MARGIN`, `METHOD_RELIABILITY_CEILING`, `BELIEF_CEILING`,
+  `DEFAULT_BASE_RATE` and `PLANTING_BELIEF_BY_COST` are dictionaries and decide as much as any
+  scalar — `BAND_RANGES` decides the *word* a reader sees, which is the only output most
+  consumers ever read.
+- **An AST-based scan for unregistered constants**, compared fully qualified. A regex matching
+  `NAME = <digit>` could not see a table, and a bare-name comparison let a homonym in another
+  module count as registered. Numerical-stability epsilons are registered rather than excused:
+  "it is only an epsilon" is exactly the reasoning that lets a dial escape.
+- **Golden vectors** pinning *answers* rather than source — fusion, published bands, the
+  refusal threshold at and above the line, robustness margins per proposition class, and method
+  reliability ceilings. Hashing the source would break on a reworded comment and survive a
+  changed sign.
 
 Changing a constant is allowed. Changing it *silently*, or *during* an evaluation, is what this
 prevents: updating `FROZEN_DIGEST` is one line, in its own commit, with a reason, at a moment
@@ -111,6 +127,30 @@ available? A refusal rate reported without both halves rewards a system that nev
 **Robustness per attack class.** Accuracy under each adversarial category separately — planted
 artifacts, laundered lineage, shared-infrastructure coincidence — because a single average
 hides the one class an adversary will choose.
+
+### The definitions, frozen with the constants
+
+Written as formulas rather than prose, because a metric described in words is one that gets
+reinterpreted after results exist — and "we meant macro-averaged" is a sentence nobody can
+disprove six months later.
+
+- **Reliability.** Bin predictions into the seven `BAND_RANGES` intervals. For each bin *b*
+  with *n_b* cases: `observed_b = (true positives in b) / n_b`, plotted against the bin's
+  midpoint. Bins with *n_b* < 20 are reported with their count and excluded from any summary
+  statistic, never silently merged.
+- **Brier score**, decomposed: `BS = reliability − resolution + uncertainty`, over the same
+  bins, using the Murphy decomposition. The three terms are reported separately; a single `BS`
+  hides whether a model is badly calibrated or merely facing a hard problem.
+- **Discrimination.** AUC over *linkable* vs *not linkable* only. The *ambiguous* class is
+  **excluded** from AUC and graded solely under refusals, because scoring a case with no true
+  answer as a discrimination failure rewards guessing.
+- **Correct refusals.** Two numbers, always together:
+  `refusal_precision = (refusals on ambiguous) / (all refusals)` and
+  `refusal_recall = (refusals on ambiguous) / (all ambiguous)`. Reporting either alone rewards
+  a system that never answers or one that never declines.
+- **Robustness.** Accuracy computed **per adversarial class** — planted artifact, laundered
+  lineage, shared-infrastructure coincidence — and never averaged across them. The average
+  hides the class an adversary will choose, which is the only class that matters.
 
 Every figure is reported with its population (§2), its ground-truth standard (§2), the freeze
 digest it was measured under (§1), and the number of times the sealed set has been opened (§5).

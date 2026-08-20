@@ -47,12 +47,15 @@ from typing import Final
 CALIBRATION_CONSTANTS: Final[tuple[str, ...]] = (
     # Subjective-logic machinery: how belief, disbelief and uncertainty combine.
     "nemesis.core.confidence:VACUITY_THRESHOLD",
+    "nemesis.core.confidence:BAND_RANGES",
     "nemesis.core.fusion:CONFLICT_ALERT_THRESHOLD",
     # Attribution: how much a planted artifact may move a conclusion, and what deception is
     # assumed to cost before any evidence is seen.
     "nemesis.attribute.engine:PLANTED_EVIDENCE_DISBELIEF_CEILING",
     "nemesis.attribute.engine:CONTRA_INDICATOR_DISCOUNT",
     "nemesis.attribute.engine:DECEPTION_BASE_RATE",
+    "nemesis.attribute.engine:DEFAULT_BASE_RATE",
+    "nemesis.attribute.engine:PLANTING_BELIEF_BY_COST",
     # Persona resolution: the base rate a linkage is measured against, and the floors and
     # ceilings that keep a fallible technique from becoming decisive.
     "nemesis.resolve.engine:ASSUMED_PERSONAS_PER_OPERATOR",
@@ -67,6 +70,18 @@ CALIBRATION_CONSTANTS: Final[tuple[str, ...]] = (
     "nemesis.resolve.signals:MIN_POSTS_FOR_A_ROUTINE",
     "nemesis.resolve.signals:OPEN_WORLD_STYLOMETRY_PENALTY",
     "nemesis.resolve.signals:OBFUSCATION_STYLOMETRY_PENALTY",
+    "nemesis.resolve.signals:BELIEF_CEILING",
+    # Tables that decide as much as any scalar, and that the first scanner could not see
+    # because it only matched `NAME = <digit>`.
+    "nemesis.core.proposition:ROBUSTNESS_MARGIN",
+    "nemesis.core.relationships:METHOD_RELIABILITY_CEILING",
+    "nemesis.disrupt.options:OWNERSHIP_CONFIDENCE_FLOOR",
+    "nemesis.disrupt.options:IMPACT_RANK",
+    # Numerical-stability epsilons. Registered rather than excused: they decide behaviour at
+    # boundaries, and "it is only an epsilon" is exactly the reasoning that lets a dial escape.
+    # Registering one is free; missing one is not.
+    "nemesis.core.confidence:_TOLERANCE",
+    "nemesis.core.fusion:_EPS",
 )
 """Every number that moves a confidence figure, named as ``module:NAME``.
 
@@ -78,7 +93,7 @@ calibration constant *out* is the way to defeat this whole mechanism, which is w
 :func:`unregistered_calibration_constants` exists to make that omission visible too.
 """
 
-FROZEN_DIGEST: Final = "af97083a3df09f0bb0e30d745964856cf047dead10097883986a7ea99d5f96fa"
+FROZEN_DIGEST: Final = "747ba63d427d3f3f5afda82c8fc504e64421f3edae9da883baccb613c53dc1f1"
 """The digest of the values above, frozen 2026-08-20, before any evaluation exists.
 
 Updated **only** as a documented event, in its own commit, with the reason. A mismatch is not
@@ -110,11 +125,19 @@ def observed_values() -> dict[str, object]:
 CALIBRATED_MODULES: Final[tuple[str, ...]] = (
     "nemesis/core/confidence.py",
     "nemesis/core/fusion.py",
+    "nemesis/core/proposition.py",
+    "nemesis/core/relationships.py",
     "nemesis/attribute/engine.py",
     "nemesis/resolve/engine.py",
     "nemesis/resolve/signals.py",
+    "nemesis/disrupt/options.py",
 )
-"""Where confidence figures are decided. Scanned for constants the registry forgot."""
+"""Where confidence figures are decided. Scanned for constants the registry forgot.
+
+Widened after a review: `ROBUSTNESS_MARGIN` and `METHOD_RELIABILITY_CEILING` are among the most
+consequential dials in the platform and lived in modules this list did not name, so the scan
+could not have found them however good it was. An incomplete module list defeats a scanner as
+thoroughly as a bad pattern."""
 
 _NOT_CALIBRATION: Final[tuple[str, ...]] = (
     "MAX_",
@@ -129,35 +152,60 @@ dial; it is not a dial that changes what the platform believes."""
 
 
 def unregistered_calibration_constants() -> tuple[str, ...]:
-    """Module-level numeric constants in the scoring modules that nobody registered.
+    """Module-level constants in the scoring modules that nobody registered.
 
-    **The way to defeat a freeze is to add a dial and not list it**, and an enumerated registry
-    cannot notice its own omissions. This scans the modules where confidence is decided and
-    reports numbers that are not in :data:`CALIBRATION_CONSTANTS` — so a new constant has to be
-    either registered or explicitly recognised as operational, rather than quietly escaping
-    both.
+    **Parsed with `ast`, not matched with a regex, and compared fully qualified.** The first
+    version did neither, and a reviewer walked through both holes in one demonstration: it saw
+    only ``NAME = <digit>``, so every dial that is a *table* — `BAND_RANGES`,
+    `DEFAULT_BASE_RATE`, `BELIEF_CEILING`, `ROBUSTNESS_MARGIN`,
+    `METHOD_RELIABILITY_CEILING` — was invisible; and it compared bare names, so a homonym in
+    another module counted as registered. Changing `BAND_RANGES` alone moved a published
+    confidence band from *likely* to *almost certain* while both checks stayed green.
 
-    Deliberately crude: it reads source rather than importing, and it will occasionally flag
-    something that is not really a calibration dial. A false positive costs one line in the
-    exclusion list; a false negative costs the credibility of every number the evaluation
-    produces.
+    A table is not a lesser dial than a scalar. `BAND_RANGES` decides the word a reader
+    actually sees, which is the only number most consumers of this platform will ever read.
+
+    Still deliberately crude in one direction: it flags anything upper-case holding a number
+    that is not registered or excluded. A false positive costs one line; a false negative costs
+    the credibility of every figure the evaluation produces.
     """
-    import re
+    import ast
     from pathlib import Path
 
     root = Path(__file__).resolve().parent.parent
-    registered = {reference.split(":")[1] for reference in CALIBRATION_CONSTANTS}
+    registered = set(CALIBRATION_CONSTANTS)
     stray: list[str] = []
+
+    def holds_a_number(node: ast.AST) -> bool:
+        return any(
+            isinstance(child, ast.Constant)
+            and isinstance(child.value, int | float)
+            and not isinstance(child.value, bool)
+            for child in ast.walk(node)
+        )
+
     for relative in CALIBRATED_MODULES:
-        source = (root.parent / relative).read_text(encoding="utf-8")
         module = relative.removesuffix(".py").replace("/", ".")
-        for match in re.finditer(
-            r"^([A-Z][A-Z0-9_]{3,})(?:\s*:[^=\n]+)?\s*=\s*[0-9]", source, re.MULTILINE
-        ):
-            name = match.group(1)
-            if name in registered or any(mark in name for mark in _NOT_CALIBRATION):
+        tree = ast.parse((root.parent / relative).read_text(encoding="utf-8"))
+        for node in tree.body:
+            name: str | None = None
+            value: ast.expr | None = None
+            if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                name, value = node.target.id, node.value
+            elif (
+                isinstance(node, ast.Assign)
+                and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+            ):
+                name, value = node.targets[0].id, node.value
+            if name is None or value is None or not name.lstrip("_").isupper():
                 continue
-            stray.append(f"{module}:{name}")
+            if not holds_a_number(value):
+                continue
+            reference = f"{module}:{name}"
+            if reference in registered or any(mark in name for mark in _NOT_CALIBRATION):
+                continue
+            stray.append(reference)
     return tuple(sorted(stray))
 
 
