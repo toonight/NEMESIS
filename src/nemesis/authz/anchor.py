@@ -55,6 +55,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Sequence
 from datetime import datetime
+from enum import StrEnum
 from pathlib import Path
 from typing import Final, Protocol
 
@@ -64,6 +65,42 @@ from nemesis.authz.keys import CapabilitySigningKey
 from nemesis.core.canonical import canonical_bytes
 from nemesis.core.temporal import utcnow
 from nemesis.ports.authorization import CapabilityVerifier
+
+
+class AnchorIndependence(StrEnum):
+    """How far the anchor sits from the thing it attests — which decides what it defends against.
+
+    **The tier is the security argument.** An anchor is worth exactly the trust boundary
+    between it and the adversary, and "external" is not one boundary but a ladder. The first
+    version of this module carried a boolean, which could say *ours* or *not ours* and could
+    not say the thing that actually matters: independent of the pilot, and not of `root`.
+
+    Each tier names the adversary it defeats **and the one it does not**, because a tier that
+    only advertised its strength would be read as the tier above it.
+    """
+
+    NONE = "none"
+    """Same account, same host as the chain. Defeats an accident, a partial restore, a
+    half-finished copy — and nothing that wants to get past it. Whoever can truncate the table
+    can delete the anchor."""
+
+    SEPARATE_ACCOUNT = "separate_account"
+    """A second system account with its own ACLs, which the platform's account cannot write.
+    **Defeats a compromised pilot**, which is this MVP's named adversary: the model runs with
+    the platform's credentials and cannot reach the anchor. **Does not defeat `root`, nor the
+    machine's administrator** — both hold every account on the host."""
+
+    SEPARATE_HOST = "separate_host"
+    """A remote service with credentials and administration held separately. **Defeats a
+    compromised application host**, since owning the machine no longer implies owning the
+    attestation. **Does not defeat an operator who administers both.**"""
+
+    THIRD_PARTY = "third_party"
+    """An independent party: RFC 3161 timestamping, or a transparency log. **Defeats a
+    malicious internal operator**, because the attestation is held by someone with no
+    obligation to us. The only tier that makes evidence defensible against ourselves, which is
+    the standing this project's own threat model puts the vault operator in."""
+
 
 LOCAL_ANCHOR_AUTHORITY: Final = "nemesis"
 """The authority stamped on an anchor this platform signed itself.
@@ -97,6 +134,12 @@ class ChainAnchor(BaseModel):
     tip_hash: str = Field(min_length=1)
     anchored_at: datetime
     authority: str = Field(min_length=1)
+
+    independence: AnchorIndependence = AnchorIndependence.NONE
+    """Declared by whoever published it, and covered by the signature so it cannot be promoted
+    afterwards. Defaults to the weakest tier: a store that forgot to declare its placement is
+    treated as having none, because the alternative is inheriting a claim nobody made."""
+
     signature: str | None = None
 
     def signing_payload(self) -> bytes:
@@ -111,13 +154,19 @@ class ChainAnchor(BaseModel):
 
     @property
     def is_externally_held(self) -> bool:
-        """Whether this anchor is held by a party that is not us.
+        """Whether a party with no obligation to us holds this attestation.
 
-        False for anything this platform signed. The distinction is the entire value of an
-        anchor: one we hold proves the chain is self-consistent, which the chain already
-        claimed, and proves nothing about an insider who can rewrite both.
+        True only at :attr:`AnchorIndependence.THIRD_PARTY`. A second system account and a
+        separate host are *separated*, not *external* — they raise the adversary's required
+        move without putting the attestation beyond our own reach, and an operator who
+        administers the estate holds both. Collapsing that distinction is what a boolean did
+        before this enum existed.
         """
-        return self.authority != LOCAL_ANCHOR_AUTHORITY
+        return self.independence is AnchorIndependence.THIRD_PARTY
+
+    def defeats_a_compromised_pilot(self) -> bool:
+        """The MVP's named adversary: the model running with the platform's own credentials."""
+        return self.independence is not AnchorIndependence.NONE
 
 
 class AnchorStore(Protocol):
@@ -156,9 +205,21 @@ def chain_digest(links: Sequence[str]) -> str:
 
 
 def anchor_for(
-    chain_id: str, links: Sequence[str], *, epoch: int, anchored_at: datetime | None = None
+    chain_id: str,
+    links: Sequence[str],
+    *,
+    epoch: int,
+    anchored_at: datetime | None = None,
+    independence: AnchorIndependence = AnchorIndependence.NONE,
 ) -> ChainAnchor:
-    """Describe a chain as it stands, unsigned. Signing is the caller's, and deliberate."""
+    """Describe a chain as it stands, unsigned. Signing is the caller's, and deliberate.
+
+    ``independence`` defaults to the weakest tier. A deployment that has actually put the
+    anchor somewhere its platform account cannot write declares that here — and the code takes
+    it on trust, because nothing in Python can verify that a path really sits behind an ACL the
+    running process cannot cross. What the field buys is that the *claim* is explicit, signed,
+    and reportable, instead of a reader assuming the strongest tier from the word "anchor".
+    """
     return ChainAnchor(
         chain_id=chain_id,
         epoch=epoch,
@@ -166,6 +227,7 @@ def anchor_for(
         tip_hash=chain_digest(links),
         anchored_at=anchored_at or utcnow(),
         authority=LOCAL_ANCHOR_AUTHORITY,
+        independence=independence,
     )
 
 
@@ -241,6 +303,7 @@ __all__ = [
     "REVOCATION_CHAIN",
     "SPEND_CHAIN",
     "AnchorEpochError",
+    "AnchorIndependence",
     "AnchorStore",
     "AnchorVerifier",
     "ChainAnchor",
@@ -294,10 +357,21 @@ class FileAnchorStore:
     make `retained_epoch` the only defence against replay.
     """
 
-    __slots__ = ("_path",)
+    __slots__ = ("_independence", "_path")
 
-    def __init__(self, path: Path | str) -> None:
+    def __init__(
+        self,
+        path: Path | str,
+        *,
+        independence: AnchorIndependence = AnchorIndependence.NONE,
+    ) -> None:
+        """``independence`` is what the *deployment* claims about this path, not what the code
+        checked. A file under a directory owned by a second system account genuinely defeats a
+        compromised pilot; the same file beside the database defeats an accident. Python cannot
+        tell those apart from the path alone, so the placement is declared and signed rather
+        than inferred — and it defaults to the weakest reading."""
         self._path = Path(path)
+        self._independence = independence
         self._path.parent.mkdir(parents=True, exist_ok=True)
 
     def _read(self) -> list[ChainAnchor]:
@@ -313,6 +387,11 @@ class FileAnchorStore:
         """The highest-epoch anchor for a chain, or None when nothing was ever attested."""
         for_chain = [a for a in self._read() if a.chain_id == chain_id]
         return max(for_chain, key=lambda a: a.epoch, default=None)
+
+    @property
+    def independence(self) -> AnchorIndependence:
+        """What this store claims about its own placement."""
+        return self._independence
 
     def publish(self, anchor: ChainAnchor) -> ChainAnchor:
         current = self.latest(anchor.chain_id)

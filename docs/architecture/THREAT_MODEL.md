@@ -247,18 +247,35 @@ for which the adversary obtained a *fresh, legitimately issued* anchor — epoch
 signature valid, tip matching, every check passing. **The epoch is monotonic, not honest:** it
 orders anchors, it does not vouch for their contents.
 
-**And under the MVP's own constraints there is no placement that defeats the modelled
-adversary.** One laptop, one user account, and an adversary — the autonomous agent — running
-with that account's shell. The anchor file, the epoch counter and the verifier's retained state
-are all files that account can write, so integrity cannot be bootstrapped from storage the
-adversary controls, and the argument applies recursively to the anchor itself. Stated plainly
-here rather than implied away by shipping an anchor that looks like a control.
+**The placement is a ladder, not a boundary — and which rung you need depends on the adversary
+you name.** An earlier version of this section said flatly that no placement defeats the
+modelled adversary. That is true of the MVP's *named* adversary and it collapsed three distinct
+threats into one, which is the kind of simplification that makes a control look impossible when
+it is merely unbuilt:
 
-What it is still worth: it changes the adversary's required move from a silent `DELETE` into
-either a detectable mismatch or a destructive rewrite needing fresh gateway signatures. And the
-moment any one of {anchor, retained tip, retained epoch} crosses a real trust boundary — a
-second local account owning the gateway, an offline copy, a remote the agent cannot reach — the
-corresponding detection becomes real without touching the design.
+| Adversary | Placement that defeats it | What it still does not defeat |
+|---|---|---|
+| **A compromised pilot** — the model running with the platform's own credentials. The MVP's named adversary. | A second system account with strict ACLs, which the platform's account cannot write. | `root`, and the machine's administrator. Both hold every account on the host. |
+| **A compromised application host** — owning the machine. | A remote service with credentials *and administration* held separately. | An operator who administers both ends. |
+| **A malicious internal operator** — the standing this project's threat model already puts the vault operator in. | An independent third party: RFC 3161 timestamping, or a transparency log. | Nothing at this level; this is the rung that makes evidence defensible against ourselves. |
+
+The code encodes the ladder rather than a flag. `AnchorIndependence` carries the four rungs
+(`NONE`, `SEPARATE_ACCOUNT`, `SEPARATE_HOST`, `THIRD_PARTY`), each documented with the adversary
+it stops **and the one it does not**, because a tier advertising only its strength gets read as
+the tier above it. `ChainAnchor.is_externally_held` is true only at `THIRD_PARTY`: a second
+account and a separate host are *separated*, not *external*. The tier is inside the signature,
+so an anchor cannot be promoted to a rung it was not signed at — that attack costs nothing
+otherwise, since writing a stronger word into a file is free.
+
+What the code cannot do is verify the claim. Nothing in Python can confirm that a path really
+sits behind an ACL the running process cannot cross, so the placement is *declared* by the
+deployment and defaults to the weakest rung. The value is that the claim is explicit, signed
+and reportable, rather than a reader inferring the strongest tier from the word "anchor".
+
+**The MVP ships at `NONE`.** `FileAnchorStore` beside the database defends against an accident,
+a partial restore, a half-finished copy — and against nothing that wants to get past it. The
+open decision is therefore not technical: it is **what level of independence NEMESIS should be
+able to claim**, which fixes which rung is required and what it costs to operate.
 
 This analysis is `PROPOSED`. It was produced with Kimi K3 (Moonshot) as an external
 counter-check and verified against the code here; the impossibility result and the

@@ -21,6 +21,7 @@ import pytest
 from nemesis.authz.anchor import (
     REVOCATION_CHAIN,
     AnchorEpochError,
+    AnchorIndependence,
     ChainAnchor,
     FileAnchorStore,
     LocalAnchorSigner,
@@ -171,25 +172,68 @@ def test_records_added_without_re_anchoring_are_named_as_unattested() -> None:
 # --- What the anchor is worth, said by the code ------------------------------
 
 
-def test_a_locally_signed_anchor_never_claims_to_be_external() -> None:
-    """The honesty guard, copied from the vault's local head signer for the same reason.
+def test_an_anchor_cannot_be_promoted_to_a_tier_it_was_not_signed_at() -> None:
+    """The honesty guard, moved to the field that now carries the claim.
 
-    An insider who rewrote the chain holds this key too, so an anchor we signed proves the
-    chain is self-consistent — which the chain already claimed. Structurally unable to pose as
-    more: the authority is stamped by the signer and covered by the signature, so editing it
-    afterwards invalidates the thing that made it worth reading.
+    Independence is a ladder, not a flag: a second system account defeats a compromised pilot
+    and not `root`; a separate host defeats a compromised host and not the operator who
+    administers both; only a third party defeats us. `is_externally_held` is therefore true
+    only at the top rung — a separated anchor is *separated*, not *external*.
+
+    The claim is inside the signature, so editing it afterwards invalidates the thing that made
+    it worth reading. Promotion is the attack worth naming: it costs nothing to write a
+    stronger word into a file, and it is exactly what somebody would do to make an
+    attestation look like more than it is.
     """
     anchor, signer = _signed(LINKS)
 
+    assert anchor.independence is AnchorIndependence.NONE
     assert not anchor.is_externally_held
-    assert anchor.authority == "nemesis"
+    assert not anchor.defeats_a_compromised_pilot()
 
-    promoted = anchor.model_copy(update={"authority": "a-notary-we-do-not-run"})
-    assert promoted.is_externally_held  # it *says* external...
+    promoted = anchor.model_copy(update={"independence": AnchorIndependence.THIRD_PARTY})
+    assert promoted.is_externally_held  # it *says* independent...
     assert any(  # ...and the signature no longer covers what it says
         "not signed by the attesting authority" in d
         for d in verify_against_anchor(LINKS, promoted, verifier=signer.verifying_key)
     )
+
+
+def test_each_tier_says_what_it_does_not_defeat() -> None:
+    """A tier that only advertised its strength would be read as the tier above it.
+
+    This pins the ladder itself, because the distinction is the whole security argument and it
+    is the kind of thing a later refactor flattens back into a boolean — which is what this
+    module shipped with, before an external reviewer pointed out that "external" is not one
+    boundary.
+    """
+
+    def at(tier: AnchorIndependence) -> ChainAnchor:
+        return ChainAnchor(
+            chain_id=REVOCATION_CHAIN,
+            epoch=1,
+            record_count=1,
+            tip_hash="x",
+            anchored_at=NOW,
+            authority="whoever",
+            independence=tier,
+        )
+
+    # Same account as the chain: an accident, not an adversary.
+    assert not at(AnchorIndependence.NONE).defeats_a_compromised_pilot()
+    assert not at(AnchorIndependence.NONE).is_externally_held
+
+    # A second system account stops the pilot — and not root, and not the administrator.
+    assert at(AnchorIndependence.SEPARATE_ACCOUNT).defeats_a_compromised_pilot()
+    assert not at(AnchorIndependence.SEPARATE_ACCOUNT).is_externally_held
+
+    # A separate host stops a compromised host — and not an operator who administers both.
+    assert at(AnchorIndependence.SEPARATE_HOST).defeats_a_compromised_pilot()
+    assert not at(AnchorIndependence.SEPARATE_HOST).is_externally_held
+
+    # Only a third party is beyond our own reach, which is where the vault operator sits in
+    # this project's threat model.
+    assert at(AnchorIndependence.THIRD_PARTY).is_externally_held
 
 
 def test_a_clean_local_anchor_is_not_reported_as_a_defect() -> None:
