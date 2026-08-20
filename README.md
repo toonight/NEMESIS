@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/toonight/NEMESIS/actions/workflows/ci.yml/badge.svg)](https://github.com/toonight/NEMESIS/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.13-1f6feb)
-![Tests](https://img.shields.io/badge/tests-889-2ea043)
+![Tests](https://img.shields.io/badge/tests-894-2ea043)
 ![Typing](https://img.shields.io/badge/mypy-strict-2ea043)
 ![Plane contracts](https://img.shields.io/badge/plane%20contracts-9%20enforced-ff8a3d)
 ![Status](https://img.shields.io/badge/status-simulated%20only-e8536b)
@@ -217,6 +217,7 @@ the refusal is in code it cannot reach.
 | [`docs/adr/`](docs/adr/) | why decisions were made — including where they were wrong |
 | [`CLAUDE.md`](CLAUDE.md) | project rules and the fifteen invariants |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | what is welcome, and the terms a patch carries |
+| [`docs/calibration/PROTOCOL.md`](docs/calibration/PROTOCOL.md) | how the confidence figures will be validated, written before the corpus exists |
 
 Every artifact carries its epistemic status, and these labels are never silently upgraded:
 `IMPLEMENTED` · `SIMULATED` · `PROPOSED` · `REQUIRES_EXTERNAL_DATA` ·
