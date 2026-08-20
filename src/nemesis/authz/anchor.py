@@ -248,36 +248,68 @@ class RegisteredAnchorAuthority:
             )
 
 
-def registered_authorities(
-    *authorities: RegisteredAnchorAuthority,
-) -> tuple[RegisteredAnchorAuthority, ...]:
-    """A deployment's anchor registry, with the misconfigurations that look fine refused.
+class AnchorRegistry:
+    """The attesting authorities a deployment believes, indexed by name and bijective.
 
-    **One key under two names is the failure this catches**, and it is not hypothetical: this
-    module's own first test registered a local key under the name ``an-rfc3161-notary`` at the
-    `THIRD_PARTY` ceiling. Nothing objected, because nothing looked. That configuration
-    demonstrates the *contract* and proves nothing about independence — the whole ladder rests
-    on the trusted key belonging to the party the name claims.
+    **A mapping, not a list, and that is the fix rather than the style.** The first version
+    took a sequence and looked authorities up with ``next(a for a in authorities if ...)``, so
+    two entries sharing a name meant the first one registered won — and which anchors verified
+    depended on the order somebody happened to write the registry in. Order-dependence in a
+    security check is the kind of defect that is invisible until the day it decides something.
 
-    What a registry can check is that two names are not one key. What it **cannot** check is
-    key provenance: whether ``an-rfc3161-notary``'s key really belongs to a notary is settled
-    by how that key reached the deployment, not by anything visible here. A `THIRD_PARTY` rung
-    is therefore only evidence when its trusted key is pinned from a boundary the operator does
-    not control. That is an explicit deployment limit, and stating it is the honest thing this
-    function can do about it.
+    Three configurations are refused, and the third is the one that looks harmless:
+
+    * **one key under two names** — one signer with two ceilings, the higher winning by
+      accident, which is how a locally held key comes to attest third-party independence;
+    * **one name over two keys** — a name is what an anchor cites, so two keys behind it means
+      an anchor's authority is whichever entry is found first;
+    * **the same name twice at all**, even with the same key, because the two entries may carry
+      different ceilings and nothing about the duplicate says which was meant.
+
+    What this cannot check is key provenance: whether the key behind a third-party name belongs
+    to that third party is settled by how it reached the deployment. A bijective registry
+    removes the ambiguity in the mapping; it does not manufacture independence.
     """
-    by_key: dict[str, str] = {}
-    for authority in authorities:
-        seen = by_key.get(authority.verifier.key_id)
-        if seen is not None and seen != authority.name:
-            raise AnchorRegistryError(
-                f"{authority.name!r} and {seen!r} are registered against the same key "
-                f"({authority.verifier.key_id}). Two names for one key are two ceilings for "
-                "one signer, and the higher one wins by accident — which is exactly how a "
-                "locally held key comes to attest third-party independence."
-            )
-        by_key[authority.verifier.key_id] = authority.name
-    return authorities
+
+    __slots__ = ("_by_name",)
+
+    def __init__(self, *authorities: RegisteredAnchorAuthority) -> None:
+        by_name: dict[str, RegisteredAnchorAuthority] = {}
+        by_key: dict[str, str] = {}
+        for authority in authorities:
+            if authority.name in by_name:
+                raise AnchorRegistryError(
+                    f"{authority.name!r} is registered twice. Even with the same key the two "
+                    "entries may carry different ceilings, and nothing about a duplicate says "
+                    "which was meant — so the answer would depend on registration order."
+                )
+            key_id = authority.verifier.key_id
+            seen = by_key.get(key_id)
+            if seen is not None:
+                raise AnchorRegistryError(
+                    f"{authority.name!r} and {seen!r} are registered against the same key "
+                    f"({key_id}). Two names for one key are two ceilings for one signer, and "
+                    "the higher one wins by accident — which is exactly how a locally held key "
+                    "comes to attest third-party independence."
+                )
+            by_name[authority.name] = authority
+            by_key[key_id] = authority.name
+        self._by_name = by_name
+
+    def for_name(self, name: str) -> RegisteredAnchorAuthority | None:
+        """The single authority registered under this name, or None. Never ambiguous."""
+        return self._by_name.get(name)
+
+    def __len__(self) -> int:
+        return len(self._by_name)
+
+    def __contains__(self, name: object) -> bool:
+        return name in self._by_name
+
+
+def registered_authorities(*authorities: RegisteredAnchorAuthority) -> AnchorRegistry:
+    """Build a deployment's anchor registry, refusing the configurations that look fine."""
+    return AnchorRegistry(*authorities)
 
 
 def local_anchor_authority(verifier: AnchorVerifier) -> RegisteredAnchorAuthority:
@@ -334,7 +366,7 @@ def verify_against_anchor(
     links: Sequence[str],
     anchor: ChainAnchor | None,
     *,
-    authorities: Sequence[RegisteredAnchorAuthority],
+    authorities: AnchorRegistry,
     retained_epoch: int | None = None,
 ) -> tuple[str, ...]:
     """Check a chain against what was attested about it. Returns defects, empty when sound.
@@ -357,7 +389,7 @@ def verify_against_anchor(
             "more of them: truncation is invisible from inside.",
         )
 
-    registered = next((a for a in authorities if a.name == anchor.authority), None)
+    registered = authorities.for_name(anchor.authority)
     if registered is None:
         defects.append(
             f"the anchor names {anchor.authority!r}, which this deployment has not registered "
@@ -427,6 +459,7 @@ __all__ = [
     "AnchorEpochError",
     "AnchorIndependence",
     "AnchorPlacementError",
+    "AnchorRegistry",
     "AnchorRegistryError",
     "AnchorStore",
     "AnchorVerifier",

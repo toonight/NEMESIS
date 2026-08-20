@@ -274,9 +274,7 @@ and reportable, rather than a reader inferring the strongest tier from the word 
 **A rung is only as good as its key's provenance, and that is a deployment limit rather than a
 model flaw.** The registry maps a *name* to a *key*, so nothing stops a deployment associating
 `an-rfc3161-notary` with a key the operator already holds — and this module's own first test did
-exactly that, demonstrating the contract while proving nothing about independence. Two names for
-one key is now refused, because it grants one signer two ceilings and the higher one wins by
-accident. What no code can settle is whether the key behind a third-party name belongs to that
+exactly that, demonstrating the contract while proving nothing about independence. The registry is **bijective and indexed by name**, refusing three configurations: one key under two names, one name over two keys, and the same name twice even with the same key. The first grants one signer two ceilings; the second and third made the answer depend on registration order, because the lookup took the first entry it found — order-dependence in a security check being the kind of defect that stays invisible until the day it decides something. What no code can settle is whether the key behind a third-party name belongs to that
 third party: that is decided by how the key reached the deployment. **`THIRD_PARTY` is evidence
 only when its trusted key is pinned from a boundary the operator does not control.**
 

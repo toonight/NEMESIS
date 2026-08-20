@@ -23,6 +23,7 @@ from nemesis.authz.anchor import (
     AnchorEpochError,
     AnchorIndependence,
     AnchorPlacementError,
+    AnchorRegistry,
     AnchorRegistryError,
     ChainAnchor,
     FileAnchorStore,
@@ -42,9 +43,9 @@ NOW = datetime(2026, 8, 20, tzinfo=UTC)
 LINKS = ("aa" * 32, "bb" * 32, "cc" * 32, "dd" * 32)
 
 
-def _local(signer: LocalAnchorSigner) -> list[RegisteredAnchorAuthority]:
+def _local(signer: LocalAnchorSigner) -> AnchorRegistry:
     """The deployment's registry with only our own key in it, at the only ceiling it can hold."""
-    return [local_anchor_authority(signer.verifying_key)]
+    return registered_authorities(local_anchor_authority(signer.verifying_key))
 
 
 def _signed(links: tuple[str, ...], *, epoch: int = 1) -> tuple[ChainAnchor, LocalAnchorSigner]:
@@ -514,3 +515,63 @@ def test_one_key_cannot_hold_two_authority_names() -> None:
         ),
     )
     assert len(accepted) == 2
+
+
+def test_the_registry_is_bijective_and_therefore_order_independent() -> None:
+    """The defect a reviewer found after the one-key-two-names check shipped.
+
+    That check closed one direction and left the other open, so a registry could hold two
+    entries under one name — and the lookup took the *first* one, which made verification
+    depend on the order somebody happened to write the configuration in. Order-dependence in a
+    security check is invisible until the day it decides something.
+
+    The mapping is now name → authority, built once and validated in both directions, so there
+    is no ordering left for a result to depend on.
+    """
+    ours = CapabilitySigningKey.generate()
+    theirs = CapabilitySigningKey.generate()
+
+    def authority(name: str, key: CapabilitySigningKey, tier: AnchorIndependence):  # type: ignore[no-untyped-def]
+        return RegisteredAnchorAuthority(
+            name=name, verifier=key.verifying_key, independence_ceiling=tier
+        )
+
+    # One name over two keys: an anchor cites a name, so two keys behind it means its authority
+    # is whichever entry is found first.
+    with pytest.raises(AnchorRegistryError, match="registered twice"):
+        registered_authorities(
+            authority("notary", ours, AnchorIndependence.THIRD_PARTY),
+            authority("notary", theirs, AnchorIndependence.THIRD_PARTY),
+        )
+
+    # The same name twice with the SAME key — the one that looks harmless. The two entries may
+    # carry different ceilings, and nothing about the duplicate says which was meant.
+    with pytest.raises(AnchorRegistryError, match="registered twice"):
+        registered_authorities(
+            authority("notary", ours, AnchorIndependence.NONE),
+            authority("notary", ours, AnchorIndependence.THIRD_PARTY),
+        )
+
+    # And the direction closed earlier still holds.
+    with pytest.raises(AnchorRegistryError, match="same key"):
+        registered_authorities(
+            authority("nemesis", ours, AnchorIndependence.NONE),
+            authority("notary", ours, AnchorIndependence.THIRD_PARTY),
+        )
+
+    # A well-formed registry accepts, and lookup is unambiguous whichever order it was built in.
+    forwards = registered_authorities(
+        authority("nemesis", ours, AnchorIndependence.NONE),
+        authority("notary", theirs, AnchorIndependence.THIRD_PARTY),
+    )
+    backwards = registered_authorities(
+        authority("notary", theirs, AnchorIndependence.THIRD_PARTY),
+        authority("nemesis", ours, AnchorIndependence.NONE),
+    )
+    for registry in (forwards, backwards):
+        assert len(registry) == 2
+        assert "notary" in registry
+        notary = registry.for_name("notary")
+        assert notary is not None
+        assert notary.independence_ceiling is AnchorIndependence.THIRD_PARTY
+        assert notary.verifier.key_id == theirs.verifying_key.key_id
