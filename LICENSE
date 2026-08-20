@@ -1,17 +1,24 @@
 Copyright (c) 2026 Toonight. All rights reserved.
 
 This source code is made publicly readable for review, research and evaluation.
-It is not open-source software and no licence is granted by its publication.
+It is not open-source software. Except for the permissions expressly granted
+below, no licence is granted by its publication.
 
 You MAY:
   - read, fetch and inspect this repository;
   - run it locally, unmodified, against its own synthetic fixtures, to evaluate it;
-  - quote short excerpts with attribution, for commentary, review or research.
+  - quote short excerpts with attribution, for commentary, review or research;
+  - fork this repository within GitHub, and view and fork the forks, as provided
+    by the GitHub Terms of Service. Publishing here necessarily grants that, so
+    it is stated rather than contradicted: see
+    https://docs.github.com/en/site-policy/github-terms/github-terms-of-service
+    section D.5. Nothing in that grant permits the uses withheld below.
 
 You MAY NOT, without prior written permission from the copyright holder:
   - use this software or any derivative of it in production, in a commercial
     setting, or in the provision of a service;
-  - redistribute, sublicense, or publish this software or a derivative of it;
+  - redistribute, sublicense, or publish this software or a derivative of it,
+    other than the GitHub forking permitted above;
   - remove or alter this notice.
 
 NO WARRANTY. This software is provided "as is", without warranty of any kind,

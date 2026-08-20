@@ -4,7 +4,8 @@ version = "0.1.0"
 description = "Networked Engine for Malicious Entity Surveillance, Identification & Suppression"
 readme = "README.md"
 requires-python = ">=3.13"
-license = { file = "LICENSE" }
+license = "LicenseRef-Nemesis-Source-Available"
+license-files = ["LICENSE"]
 dependencies = [
     "pydantic>=2.11",
     "annotated-types>=0.7",

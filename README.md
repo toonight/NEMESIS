@@ -216,6 +216,7 @@ the refusal is in code it cannot reach.
 | [`FOUNDER_DECISIONS.md`](docs/architecture/FOUNDER_DECISIONS.md) | open questions that turn on direction, not engineering |
 | [`docs/adr/`](docs/adr/) | why decisions were made — including where they were wrong |
 | [`CLAUDE.md`](CLAUDE.md) | project rules and the fifteen invariants |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | what is welcome, and the terms a patch carries |
 
 Every artifact carries its epistemic status, and these labels are never silently upgraded:
 `IMPLEMENTED` · `SIMULATED` · `PROPOSED` · `REQUIRES_EXTERNAL_DATA` ·
@@ -224,6 +225,9 @@ Every artifact carries its epistemic status, and these labels are never silently
 ## Licence
 
 **Source-available, not open-source.** Copyright (c) 2026 Toonight, all rights reserved.
+Except for the permissions expressly granted in [`LICENSE`](LICENSE), none is granted by
+publication — with one carve-out stated rather than contradicted: publishing here grants
+GitHub users the right to fork within GitHub, and the licence says so.
 Publication grants no licence: you may read, inspect, and run it locally against its own
 synthetic fixtures to evaluate it. Production, commercial or service use, redistribution and
 derivative works require prior written permission. See [`LICENSE`](LICENSE), which also states
