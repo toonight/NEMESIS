@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # `.python-version` pins the interpreter. Without it `requires-python = ">=3.13"` lets
+      # uv take whatever the runner image ships, so the build would silently change interpreter
+      # the day GitHub updates it. Two of this branch's CI failures were environment drift
+      # already; this is the cheapest one to remove.
+      - run: uv python install
+      - run: uv sync --all-extras
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Format
+        run: uv run ruff format --check .
+
+      - name: Types
+        run: uv run mypy
+
+      # Plane separation is a security control, not a style preference.
+      # A broken contract here means a trust boundary has been crossed.
+      - name: Plane separation contracts
+        run: uv run lint-imports
+
+      - name: Invariant tests
+        run: uv run pytest -m invariant
+
+      - name: Full test suite
+        run: uv run pytest --cov --cov-report=term-missing
+
+      # An external review found that a minimal `pip install` shipped a `nemesis` executable
+      # that died on `import typer`, because the CLI dependencies are an optional extra while
+      # `[project.scripts]` installs the command unconditionally. Nothing in CI would have
+      # caught it: every other step runs `uv sync --all-extras`. This builds the wheel and
+      # installs it *without* extras, which is what a stranger following the packaging does.
+      - name: The package installs and its CLI fails usefully without extras
+        run: |
+          uv build --wheel
+          uv venv /tmp/minimal
+          uv pip install --python /tmp/minimal/bin/python dist/*.whl
+          /tmp/minimal/bin/python -c "import nemesis; print('core imports without extras')"
+          if /tmp/minimal/bin/nemesis --help 2>/tmp/cli.txt; then
+            echo "expected the CLI to refuse without its extra"; exit 1
+          fi
+          grep -q "nemesis\[cli\]" /tmp/cli.txt || {
+            echo "the CLI failed without telling the user how to fix it:"; cat /tmp/cli.txt; exit 1; }
+          echo "CLI refuses with an actionable message"
+
+      # Fails the build if anything that must never be committed appears.
+      - name: Secret and prohibited-content scan
+        run: uv run python scripts/check_prohibited.py
+
+      # A number a document states about itself is a claim, and a claim that contradicts the
+      # code is a defect here — including when it is only a badge. The badge read 845 within
+      # an hour of being written, by the author who then added eleven tests.
+      - name: Documented counts match the repository
+        run: uv run python scripts/check_documented_counts.py

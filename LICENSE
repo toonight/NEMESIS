@@ -1,0 +1,30 @@
+Copyright (c) 2026 Toonight. All rights reserved.
+
+This source code is made publicly readable for review, research and evaluation.
+It is not open-source software and no licence is granted by its publication.
+
+You MAY:
+  - read, fetch and inspect this repository;
+  - run it locally, unmodified, against its own synthetic fixtures, to evaluate it;
+  - quote short excerpts with attribution, for commentary, review or research.
+
+You MAY NOT, without prior written permission from the copyright holder:
+  - use this software or any derivative of it in production, in a commercial
+    setting, or in the provision of a service;
+  - redistribute, sublicense, or publish this software or a derivative of it;
+  - remove or alter this notice.
+
+NO WARRANTY. This software is provided "as is", without warranty of any kind,
+express or implied, including but not limited to the warranties of
+merchantability, fitness for a particular purpose and non-infringement. In no
+event shall the copyright holder be liable for any claim, damages or other
+liability arising from, out of or in connection with this software or its use.
+
+INTENDED USE. NEMESIS is defensive. It pursues, attributes and prepares the
+lawful disruption of hostile infrastructure; it does not attack. The repository
+ships with synthetic fixtures only and contacts no infrastructure it does not
+own. Capabilities that would require lawful authority exist as declared
+interfaces with no implementation. Using this software, or any derivative, to
+gain unauthorised access to systems, to conduct surveillance without lawful
+basis, or in breach of applicable law, is outside the permission granted above
+and is expressly disclaimed by the author.

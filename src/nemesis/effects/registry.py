@@ -1,0 +1,586 @@
+"""The adapter registry and the guards every adapter runs before it acts.
+
+This plane is assumed compromised. Nothing here trusts its caller: the orchestrator that
+built the request may itself be the attacker, so every check the orchestrator performed is
+performed again, from the capability object, immediately before acting.
+
+Three things live here because all four adapters need them and none of them may be skipped:
+
+``preflight`` — the ordered verification (capability, then target state, then stop
+conditions). Ordered deliberately: a target-state check on an unauthorized operation would
+leak that the target is known to us before establishing any right to look at it.
+
+``sanitize`` — flattening of caller-supplied strings before they reach a document. A draft
+is a NEMESIS-branded artifact that leaves the system's epistemic controls behind; a
+parameter value carrying newlines could forge its banner lines and make it read as though
+it carried authority nobody granted.
+
+``EffectsRegistry`` — the operation-class lookup. Its most important behaviour is what it
+does for the classes with no adapter: it refuses, with a record, rather than raising or
+improvising. Those are the ``REQUIRES_LEGAL_AUTHORITY`` classes, and their refusal is the
+feature, not a gap waiting to be filled.
+"""
+
+from __future__ import annotations
+
+import hmac
+import re
+from datetime import datetime
+from typing import Final
+
+from pydantic import BaseModel, ConfigDict
+
+from nemesis.authz.verification import verify_capability
+from nemesis.core.authorization import (
+    MVP_IMPLEMENTED_OPERATIONS,
+    NO_CAPABILITY,
+    AuthorizationCapability,
+    AuthorizationDecision,
+    OperationClass,
+    TargetFingerprint,
+)
+from nemesis.core.disclosure import scan_for_internal_material
+from nemesis.core.temporal import utcnow
+from nemesis.ports.authorization import CapabilityVerifier, RevocationOracle, TrustAnchor
+from nemesis.ports.effects import EffectOutcome, EffectRequest, EffectResult, EffectsAdapter
+
+__all__ = [
+    "REGISTRY_NAME",
+    "STOP_CONDITION_CLEARED",
+    "STOP_CONDITION_PARAMETER_PREFIX",
+    "EffectsRegistry",
+    "Preflight",
+    "TrustAnchor",
+    "default_registry",
+    "preflight",
+    "refusal_record",
+    "sanitize",
+]
+
+REGISTRY_NAME: Final = "effects-registry"
+
+STOP_CONDITION_PARAMETER_PREFIX: Final = "stop_condition."
+"""Prefix under which a caller states that a blocking stop condition was checked."""
+
+STOP_CONDITION_CLEARED: Final = "cleared"
+"""The only value that clears a stop condition. Anything else, including absence, refuses.
+
+A stop condition an adapter cannot evaluate and silently treats as satisfied is decoration.
+The adapter has no way to observe "the registrant has contested ownership", so it demands
+that whoever can observe it says so explicitly, per operation, in the request it signed up
+to. Fail-closed is the only direction that leaves the condition meaning anything.
+"""
+
+_CONTROL_CHARACTERS: Final = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+_RUNS_OF_SPACE: Final = re.compile(r"\s{2,}")
+
+
+def sanitize(value: str, *, limit: int = 400) -> str:
+    """Reduce a caller-supplied string to one harmless line.
+
+    Control characters — newlines above all — are what turn a data field into document
+    structure. The layout of a draft is not negotiable by whoever supplied its parameters.
+    """
+    flattened = _RUNS_OF_SPACE.sub(" ", _CONTROL_CHARACTERS.sub(" ", value)).strip()
+    if len(flattened) > limit:
+        return f"{flattened[:limit]} [truncated at {limit} characters]"
+    return flattened or "<empty>"
+
+
+class Preflight(BaseModel):
+    """The outcome of the pre-execution checks, refusal or not.
+
+    Carries the decision either way: a refusal that does not record what was evaluated is
+    indistinguishable, after the fact, from an adapter that was never called.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    decision: AuthorizationDecision
+    approved_target: TargetFingerprint | None = None
+    refusal: EffectOutcome | None = None
+    detail: str = ""
+
+    granted: AuthorizationCapability | None = None
+    """The grant as reconstructed from the signed bytes. Present whenever the signature and
+    the structure both checked out, and ``None`` otherwise.
+
+    **An adapter must compose its document from this, never from the capability it was
+    handed.** The two can differ while the bytes and the signature are both genuine: a
+    ``str`` subclass whose content is the approved authority reference but whose ``__str__``
+    returns something else produced a provider notification citing a fabricated court order.
+    The drafting adapter's own docstring said a document must not cite "the caller's idea of
+    its own legal basis", and that is precisely what it was doing."""
+
+    @property
+    def may_act(self) -> bool:
+        return self.refusal is None
+
+
+def refusal_record(
+    request: EffectRequest,
+    *,
+    operation: OperationClass,
+    capability_id: str,
+    now: datetime,
+    reasons: tuple[str, ...],
+) -> AuthorizationDecision:
+    """The decision written into the audit trail when the grant cannot be trusted.
+
+    Built here from values this plane knows, never by calling ``authorizes()`` on the object
+    under suspicion. Two reviews found the same shape: a refused operation was recorded with
+    ``permitted: true`` and no denial reasons, and on the forged path the record was composed
+    by the attacker — including a ``capability_id`` pointing an investigator at a grant with
+    nothing to do with the event. Both records went into the hash-chained trail and the chain
+    verified, which is the worst of both worlds: a tamper-evident record of the wrong thing.
+    """
+    return AuthorizationDecision(
+        permitted=False,
+        capability_id=capability_id,
+        operation=operation,
+        target_fingerprint=request.target_fingerprint,
+        evaluated_at=now,
+        denial_reasons=reasons,
+    )
+
+
+def preflight(
+    request: EffectRequest,
+    capability: AuthorizationCapability,
+    *,
+    operation: OperationClass,
+    anchor: TrustAnchor,
+) -> Preflight:
+    """Verify authenticity, then revocation, then scope, target and stop conditions.
+
+    ``anchor`` is required, with no default, and it is the adapter's own — never the
+    caller's. An earlier version checked nothing at all, and a capability with
+    ``signature=None`` whose only approval the attacker had granted themselves produced a
+    drafted document. The version after that checked against a key the caller passed in,
+    which is the same hole wearing a signature.
+
+    ``operation`` is the class the *adapter* implements, never the one the request claims.
+    A request labelled ``simulation`` handed to the takedown drafter would otherwise be
+    authorized as a simulation and executed as a takedown.
+
+    The clock is read here rather than accepted as an argument. A caller-supplied "now" is
+    all an attacker needs to make an expired capability valid again, which is precisely the
+    thing invariant 9 exists to prevent.
+
+    **The capability argument is an envelope.** Once its signature verifies, every check
+    below runs against ``verification.authenticated`` — the grant reconstructed from the
+    signed bytes — and never against the object that arrived. An adversarial review handed
+    this function a capability whose permitted operations serialized as ``simulation`` and
+    compared as ``provider_notification``, and a provider notification was drafted from a
+    rehearsal grant. The signature was genuine; the object was not what it said.
+    """
+    now = utcnow()
+
+    # Authenticity first. Everything below reasons about the capability's contents, and
+    # reasoning about the contents of a document nobody signed is how a forgery gets
+    # treated as a policy question.
+    verification = verify_capability(capability, anchor.verifying_key, now=now)
+    if not verification.is_authentic or verification.authenticated is None:
+        return Preflight(
+            # The structured verdict carries no capability id, because nothing here
+            # authenticated one. The id the caller *claimed* goes into the free-text detail,
+            # labelled as a claim: it is evidence about what was presented, and it must not
+            # sit in a field an investigator reads as "the grant this concerned". A review
+            # found the recorded decision on this path — id included — was authored by the
+            # attacker, and written into the hash-chained trail, which then verified.
+            decision=refusal_record(
+                request,
+                operation=operation,
+                capability_id=NO_CAPABILITY,
+                now=now,
+                reasons=(
+                    "the capability's signature does not verify against the key this plane holds",
+                    *verification.structural_failures,
+                ),
+            ),
+            refusal=EffectOutcome.REFUSED_UNVERIFIED_CAPABILITY,
+            detail=(
+                "refused: the capability's signature does not verify against the key this "
+                f"plane holds — {verification.signature_failure or 'no signature present'}"
+                + (
+                    f"; structural failures: {'; '.join(verification.structural_failures)}"
+                    if verification.structural_failures
+                    else ""
+                )
+                + "; the capability presented claimed the id "
+                f"{sanitize(verification.capability_id, limit=64)!r}"
+            ),
+        )
+
+    # Then revocation, which needs state and therefore cannot be answered offline. Fails
+    # closed: an oracle we cannot reach is not an oracle reporting no revocation.
+    #
+    # The presented object's own `revoked_at` is honoured too, and only in the refusing
+    # direction. It is outside the signature, so an attacker can strip it — which is why it
+    # cannot be relied on to refuse — but adding one buys an attacker nothing except a
+    # refusal, and an honest caller that stamps a withdrawal it already knows about should
+    # not have it ignored. A signal that can only ever say no is safe to read from anywhere.
+    granted = verification.authenticated
+    decision = granted.authorizes(
+        operation=operation,
+        target_fingerprint=request.target_fingerprint,
+        now=now,
+    )
+
+    if capability.is_revoked:
+        reason = sanitize(capability.revocation_reason or "no reason recorded", limit=120)
+        return Preflight(
+            decision=refusal_record(
+                request,
+                operation=operation,
+                capability_id=granted.capability_id,
+                now=now,
+                reasons=(f"the capability presented is marked revoked: {reason}",),
+            ),
+            refusal=EffectOutcome.REFUSED_REVOKED,
+            detail=f"refused: the capability presented is marked revoked ({reason})",
+        )
+    try:
+        revoked = anchor.revocations.is_revoked(granted.capability_id)
+    except Exception as exc:
+        return Preflight(
+            decision=refusal_record(
+                request,
+                operation=operation,
+                capability_id=granted.capability_id,
+                now=now,
+                reasons=(f"the revocation oracle could not be consulted ({type(exc).__name__})",),
+            ),
+            refusal=EffectOutcome.REFUSED_REVOKED,
+            detail=(
+                f"refused: the revocation oracle could not be consulted "
+                f"({type(exc).__name__}). An unreachable oracle is not an absent revocation."
+            ),
+        )
+    if revoked:
+        # The reconstruction cannot carry revocation state — those fields are outside the
+        # signature by design — so the record has to be built here. Recording `permitted`
+        # for an operation the oracle just refused was a regression that survived a full
+        # green suite, because nothing asserted what the *record* said.
+        return Preflight(
+            decision=refusal_record(
+                request,
+                operation=operation,
+                capability_id=granted.capability_id,
+                now=now,
+                reasons=("the issuing authority has withdrawn this capability",),
+            ),
+            refusal=EffectOutcome.REFUSED_REVOKED,
+            detail=(
+                "refused: the issuing authority has withdrawn this capability. The copy "
+                "presented here may predate the withdrawal; the oracle, not the object, "
+                "is what says whether a grant still stands."
+            ),
+        )
+
+    # Founder decision D1's wall, at the only boundary that can enforce it here. Effects
+    # receives its content as a string dictionary, which no type can constrain, so this is
+    # where internal-classified material would leak into a document. Checked before the
+    # capability verdict is acted on: a leak is not something to weigh against having been
+    # authorized, and an authorized operation carrying persona-linkage prose is exactly the
+    # case worth refusing loudest.
+    leaked = scan_for_internal_material(request.parameters)
+    if leaked:
+        return Preflight(
+            decision=decision,
+            refusal=EffectOutcome.REFUSED_UNAUTHORIZED,
+            detail=(
+                "refused: the request carries internal-classified material into a plane "
+                "that produces documents for external recipients — "
+                + "; ".join(leaked)
+                + ". Persona linkage is an investigative lead, never a deliverable "
+                "(founder decision D1). Supply an ExternalAttributionProduct instead; it "
+                "has no field capable of holding one."
+            ),
+        )
+
+    if request.operation is not operation:
+        return Preflight(
+            decision=decision,
+            refusal=EffectOutcome.REFUSED_UNAUTHORIZED,
+            detail=(
+                f"request is labelled {request.operation.value} but was handed to the "
+                f"{operation.value} adapter; the adapter performs its own class, so this "
+                "request would have been authorized as one operation and executed as another"
+            ),
+        )
+
+    if not decision.permitted:
+        return Preflight(
+            decision=decision,
+            refusal=EffectOutcome.REFUSED_UNAUTHORIZED,
+            detail=decision.render(),
+        )
+
+    approved = next(
+        (
+            target
+            for target in granted.targets
+            if hmac.compare_digest(target.fingerprint, request.target_fingerprint)
+        ),
+        None,
+    )
+    if approved is None:
+        # Unreachable through `authorizes`, which already checks membership. Kept because
+        # a future widening of that check must not silently drop the target binding.
+        return Preflight(
+            decision=decision,
+            refusal=EffectOutcome.REFUSED_UNAUTHORIZED,
+            detail="no approved target matches this fingerprint",
+        )
+
+    missing = sorted(
+        key for key in approved.bound_attributes if key not in request.current_target_attributes
+    )
+    if missing:
+        return Preflight(
+            decision=decision,
+            approved_target=approved,
+            refusal=EffectOutcome.REFUSED_TARGET_CHANGED,
+            detail=(
+                f"the target's current state was not observed for bound attribute(s) "
+                f"{', '.join(missing)}; an unobserved attribute is not an unchanged one, and "
+                "accepting the omission would let a caller defeat target binding by simply "
+                "not looking"
+            ),
+        )
+
+    observed = {key: request.current_target_attributes[key] for key in approved.bound_attributes}
+    recomputed = TargetFingerprint.compute(
+        entity_id=approved.entity_id,
+        entity_type=approved.entity_type,
+        natural_key=request.target_natural_key,
+        bound_attributes=observed,
+    )
+    if not hmac.compare_digest(recomputed, approved.fingerprint):
+        # The natural key goes into the recomputation on purpose: an approval for
+        # evil.example must not be spendable on a request that names innocent.example
+        # while quoting the approved fingerprint.
+        changed = sorted(
+            key for key, value in approved.bound_attributes.items() if observed[key] != value
+        )
+        divergence = (
+            f"bound attribute(s) {', '.join(changed)} differ from the approved state"
+            if changed
+            else f"the request names target {sanitize(request.target_natural_key, limit=120)!r}, "
+            f"which is not the approved target's natural key"
+        )
+        return Preflight(
+            decision=decision,
+            approved_target=approved,
+            refusal=EffectOutcome.REFUSED_TARGET_CHANGED,
+            detail=(
+                f"{divergence}; the approval was granted against a state this target no "
+                "longer has — it may have been transferred, reassigned or rebuilt for a "
+                "legitimate owner since"
+            ),
+        )
+
+    uncleared = tuple(
+        condition
+        for condition in decision.stop_conditions_to_check
+        if request.parameters.get(f"{STOP_CONDITION_PARAMETER_PREFIX}{condition}")
+        != STOP_CONDITION_CLEARED
+    )
+    if uncleared:
+        return Preflight(
+            decision=decision,
+            approved_target=approved,
+            refusal=EffectOutcome.REFUSED_STOP_CONDITION,
+            detail=(
+                f"blocking stop condition(s) {', '.join(sanitize(c, limit=80) for c in uncleared)} "
+                "were not stated as checked; this adapter cannot observe them and will not "
+                "assume they hold"
+            ),
+        )
+
+    return Preflight(decision=decision, approved_target=approved, granted=granted)
+
+
+class EffectsRegistry:
+    """Maps an operation class to the one adapter that may perform it.
+
+    A mutable store rather than a record, and the only mutation point is registration at
+    wiring time. Two guards make that point the place where a dangerous change becomes
+    visible: an adapter that declares external contact is refused, and an adapter for a
+    class outside ``MVP_IMPLEMENTED_OPERATIONS`` is refused. Both refusals are loud,
+    because both represent NEMESIS gaining a capability it is not supposed to have.
+    """
+
+    def __init__(self, *, verifying_key: CapabilityVerifier, revocations: RevocationOracle) -> None:
+        self._anchor = TrustAnchor(verifying_key=verifying_key, revocations=revocations)
+        self._adapters: dict[OperationClass, EffectsAdapter] = {}
+
+    def register(self, adapter: EffectsAdapter) -> None:
+        """Add an adapter, keyed by the class it declares it implements.
+
+        Keyed by ``adapter.operation`` rather than by a separate argument, so a wiring
+        mistake cannot file a takedown drafter under ``simulation``.
+        """
+        anchor = getattr(adapter, "anchor", None)
+        if anchor is None:
+            raise ValueError(
+                f"adapter {adapter.name!r} declares no trust anchor, so it verifies against "
+                "nothing it was wired with; an adapter that cannot name its authorizer "
+                "cannot refuse a capability from anyone else"
+            )
+        # Key material, not a self-reported label. `key_id` is a property on the object
+        # being registered, so comparing key ids let an adapter carrying a verifier that
+        # merely *claimed* the right id — and accepted everything — pass this guard. keys.py
+        # says it plainly: the identifier selects which key to check against, the signature
+        # is what decides.
+        #
+        # What this guard is for, stated honestly: catching a **wiring mistake**, an adapter
+        # constructed around the wrong authorizer. It is not a defence against a hostile
+        # adapter object, and cannot be — such an object lies about `public_pem()` as easily
+        # as about `key_id`, and in any case need never be registered to be called.
+        if not hmac.compare_digest(
+            anchor.verifying_key.public_pem(), self._anchor.verifying_key.public_pem()
+        ):
+            raise ValueError(
+                f"adapter {adapter.name!r} verifies against key "
+                f"{anchor.verifying_key.key_id!r}, which is not the key object this registry "
+                f"was wired with ({self._anchor.verifying_key.key_id!r}): an adapter that "
+                "believes a different authorizer would accept grants this plane must refuse"
+            )
+        if adapter.makes_external_contact:
+            raise ValueError(
+                f"adapter {adapter.name!r} declares that it makes external contact; the MVP "
+                "acts against no infrastructure it does not own (invariant 15). Registering "
+                "one is a product and legal decision, not a wiring change"
+            )
+        if adapter.operation not in MVP_IMPLEMENTED_OPERATIONS:
+            raise ValueError(
+                f"{adapter.operation.value} is not in MVP_IMPLEMENTED_OPERATIONS; it is a "
+                "REQUIRES_LEGAL_AUTHORITY class and its refusal is the intended behaviour"
+            )
+        existing = self._adapters.get(adapter.operation)
+        if existing is not None:
+            raise ValueError(
+                f"{adapter.operation.value} is already served by {existing.name!r}; silently "
+                f"replacing it with {adapter.name!r} would swap out a reviewed adapter"
+            )
+        self._adapters[adapter.operation] = adapter
+
+    def adapter_for(self, operation: OperationClass) -> EffectsAdapter | None:
+        return self._adapters.get(operation)
+
+    @property
+    def adapters(self) -> tuple[EffectsAdapter, ...]:
+        """Every registered adapter, for properties that must hold across all of them."""
+        return tuple(self._adapters[operation] for operation in sorted(self._adapters))
+
+    @property
+    def operations(self) -> frozenset[OperationClass]:
+        return frozenset(self._adapters)
+
+    async def execute(
+        self, request: EffectRequest, capability: AuthorizationCapability
+    ) -> EffectResult:
+        """Dispatch to the adapter for the requested class, or refuse.
+
+        The adapter is looked up before the capability is evaluated, so an operation NEMESIS
+        cannot perform is refused as unimplemented even when it is fully authorized. An
+        analyst reading the record then sees the true reason — we are not permitted to build
+        this — rather than an authorization problem they might try to fix.
+        """
+        adapter = self._adapters.get(request.operation)
+        if adapter is None:
+            return self._refuse_no_adapter(request, capability)
+        try:
+            return await adapter.execute(request, capability)
+        except Exception as exc:
+            # An adapter that raises has violated the port contract, which says refusals are
+            # returned and not thrown. Converting it here keeps one uncaught bug from
+            # becoming an effect whose outcome nobody recorded.
+            return EffectResult(
+                operation_id=request.operation_id,
+                operation=request.operation,
+                outcome=EffectOutcome.FAILED,
+                executed_at=utcnow(),
+                adapter_name=adapter.name,
+                # Built locally. This handler exists so that one uncaught adapter bug
+                # cannot become an effect whose outcome nobody recorded — and it used to
+                # call `authorizes()` on the same untrusted object that had just caused the
+                # failure, so a capability whose `authorizes` raised defeated the very
+                # guarantee this block is for.
+                authorization=refusal_record(
+                    request,
+                    operation=request.operation,
+                    capability_id=NO_CAPABILITY,
+                    now=utcnow(),
+                    reasons=(f"adapter raised {type(exc).__name__} before any verdict",),
+                ),
+                detail=(
+                    f"adapter {adapter.name!r} raised {type(exc).__name__} instead of "
+                    "returning a refusal; treated as a failed operation"
+                ),
+                external_contact_made=False,
+            )
+
+    def _refuse_no_adapter(
+        self, request: EffectRequest, capability: AuthorizationCapability
+    ) -> EffectResult:
+        # No adapter means nothing verified this capability, so nothing may be read off it.
+        # The record says what this plane knows: which class was asked for, and that it has
+        # no implementation here.
+        decision = refusal_record(
+            request,
+            operation=request.operation,
+            capability_id=NO_CAPABILITY,
+            now=utcnow(),
+            reasons=(f"no adapter is registered for {request.operation.value}",),
+        )
+        if request.operation in MVP_IMPLEMENTED_OPERATIONS:
+            detail = (
+                f"{request.operation.value} is implemented but no adapter is registered for "
+                "it; this is a wiring defect, not a policy refusal"
+            )
+        else:
+            detail = (
+                f"{request.operation.value} is REQUIRES_LEGAL_AUTHORITY: it is a declared "
+                "operation class with no implementation, so that the planner can propose it "
+                "and NEMESIS cannot perform it"
+            )
+        return EffectResult(
+            operation_id=request.operation_id,
+            operation=request.operation,
+            outcome=EffectOutcome.REFUSED_NO_ADAPTER,
+            executed_at=utcnow(),
+            adapter_name=REGISTRY_NAME,
+            authorization=decision,
+            detail=detail,
+            external_contact_made=False,
+        )
+
+
+def default_registry(
+    *, verifying_key: CapabilityVerifier, revocations: RevocationOracle
+) -> EffectsRegistry:
+    """The registry the platform wires up: every implemented class, nothing else.
+
+    Both arguments are required. There is no way to obtain a registry that will act without
+    a key to verify against and an oracle to ask, because the version that could was the
+    version that drafted a document from a capability nobody had signed.
+    """
+    # Imported inside the function so the adapter modules can depend on the guards above
+    # without the two importing each other. The dependency runs adapters -> registry.
+    from nemesis.effects.drafting import (
+        EvidenceExportAdapter,
+        ProviderNotificationAdapter,
+        TakedownRequestDraftAdapter,
+    )
+    from nemesis.effects.simulation import SimulationEffectsAdapter
+
+    anchor = TrustAnchor(verifying_key=verifying_key, revocations=revocations)
+    registry = EffectsRegistry(verifying_key=verifying_key, revocations=revocations)
+    registry.register(SimulationEffectsAdapter(anchor))
+    registry.register(ProviderNotificationAdapter(anchor))
+    registry.register(TakedownRequestDraftAdapter(anchor))
+    registry.register(EvidenceExportAdapter(anchor))
+    return registry

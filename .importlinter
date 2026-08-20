@@ -1,0 +1,142 @@
+; Plane separation is enforced here, not by convention.
+; Every contract below encodes an invariant from CLAUDE.md.
+; A violation is a security defect, not a style issue.
+
+[importlinter]
+root_package = nemesis
+include_external_packages = True
+
+; --- Invariant: the domain model has no I/O and no internal dependencies ------
+[importlinter:contract:core-is-independent]
+name = Core domain model depends on nothing internal
+type = forbidden
+source_modules =
+    nemesis.core
+forbidden_modules =
+    nemesis.graph
+    nemesis.evidence
+    nemesis.audit
+    nemesis.collect
+    nemesis.pursuit
+    nemesis.resolve
+    nemesis.attribute
+    nemesis.disrupt
+    nemesis.authz
+    nemesis.effects
+    nemesis.api
+    nemesis.cli
+
+[importlinter:contract:core-has-no-io]
+name = Core domain model performs no I/O
+type = forbidden
+source_modules =
+    nemesis.core
+forbidden_modules =
+    socket
+    http
+    urllib
+    sqlite3
+    subprocess
+    asyncio
+
+; --- Invariant 8: Effects have no ambient authority ---------------------------
+; The Effects plane may see only the domain model, its ports, and the capability
+; it was handed. It cannot reach the intelligence platform, the graph, the
+; collection plane, or the evidence vault. If it could read them, a compromised
+; effects adapter would be an exfiltration path out of the whole investigation.
+[importlinter:contract:effects-no-ambient-authority]
+name = Effects plane cannot reach the intelligence platform
+type = forbidden
+source_modules =
+    nemesis.effects
+forbidden_modules =
+    nemesis.graph
+    nemesis.collect
+    nemesis.pursuit
+    nemesis.resolve
+    nemesis.attribute
+    nemesis.disrupt
+    nemesis.evidence
+
+; --- Invariant 6: least privilege for collectors ------------------------------
+; A collector has no disruption, authorization or effects capability. Content it
+; handles is hostile; it must not sit upstream of anything consequential.
+[importlinter:contract:collectors-cannot-act]
+name = Collection plane has no effect, authorization or planning capability
+type = forbidden
+source_modules =
+    nemesis.collect
+forbidden_modules =
+    nemesis.effects
+    nemesis.authz
+    nemesis.disrupt
+
+; --- Least privilege: analysis planes need no network -------------------------
+[importlinter:contract:analysis-has-no-network]
+name = Resolution and attribution planes have no collection or effect capability
+type = forbidden
+source_modules =
+    nemesis.resolve
+    nemesis.attribute
+forbidden_modules =
+    nemesis.collect
+    nemesis.effects
+
+; --- Invariant 10: the evidence vault is not downstream of anything -----------
+[importlinter:contract:evidence-vault-isolation]
+name = Evidence vault depends only on core and ports
+type = forbidden
+source_modules =
+    nemesis.evidence
+forbidden_modules =
+    nemesis.graph
+    nemesis.collect
+    nemesis.pursuit
+    nemesis.resolve
+    nemesis.attribute
+    nemesis.disrupt
+    nemesis.effects
+    nemesis.authz
+
+; --- Founder decision D1: the organization/operator wall ----------------------
+; A disruption package and an evidence export are things that leave the platform.
+; Neither may reach the persona-resolution plane, so persona linkage cannot travel
+; into one by import. Effects is already denied resolve by the ambient-authority
+; contract above; this closes the same door on the planner.
+[importlinter:contract:disruption-cannot-reach-persona-linkage]
+name = Disruption planning cannot reach persona linkage
+type = forbidden
+source_modules =
+    nemesis.disrupt
+forbidden_modules =
+    nemesis.resolve
+
+; --- The untrusted pilot cannot reach the withheld band ------------------------
+; The pilot plane is the seat an external, untrusted model drives. It orchestrates
+; pursuit and effects, but it must not be able to reach persona linkage — the
+; internal lead D1 keeps off every deliverable. Denied by import so the briefing the
+; pilot receives cannot be widened, one careless commit at a time, into a channel that
+; hands an untrusted model the one thing the platform refuses to serve anyone.
+[importlinter:contract:pilot-cannot-reach-persona-linkage]
+name = The pilot seam cannot reach persona linkage
+type = forbidden
+source_modules =
+    nemesis.pilot
+forbidden_modules =
+    nemesis.resolve
+
+; --- Overall layering ---------------------------------------------------------
+[importlinter:contract:layers]
+name = Plane layering
+type = layers
+layers =
+    nemesis.cli : nemesis.ui
+    nemesis.slice : nemesis.calibration
+    nemesis.api
+    nemesis.pilot
+    nemesis.pursuit
+    nemesis.disrupt : nemesis.attribute : nemesis.resolve : nemesis.effects
+    nemesis.authz
+    nemesis.graph : nemesis.evidence : nemesis.collect : nemesis.audit
+    nemesis.ports
+    nemesis.core : nemesis.sandbox

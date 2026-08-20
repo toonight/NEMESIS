@@ -1,0 +1,135 @@
+[project]
+name = "nemesis"
+version = "0.1.0"
+description = "Networked Engine for Malicious Entity Surveillance, Identification & Suppression"
+readme = "README.md"
+requires-python = ">=3.13"
+license = { file = "LICENSE" }
+dependencies = [
+    "pydantic>=2.11",
+    "annotated-types>=0.7",
+    # Ed25519 signing for authorization capabilities and evidence-vault log heads.
+    # Used only in nemesis.authz and nemesis.evidence; core stays dependency-light.
+    "cryptography>=44.0",
+]
+
+[project.optional-dependencies]
+api = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+]
+cli = [
+    "typer>=0.15",
+    "rich>=13.9",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-cov>=6.0",
+    "hypothesis>=6.122",
+    "mypy>=1.14",
+    "ruff>=0.9",
+    "import-linter>=2.1",
+    "httpx>=0.28",
+    # Required, despite never appearing in an `import` here. Starlette's TestClient
+    # deprecates httpx in favour of httpx2, and this project turns warnings into errors,
+    # so its absence fails collection in three test modules. Three separate reviewers have
+    # now flagged this line as an unused dependency or a typo — including one who removed
+    # it and broke the suite in thirty seconds. "Not imported" is not "not needed".
+    "httpx2>=2.10.0",
+]
+
+[project.scripts]
+nemesis = "nemesis.cli.main:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nemesis"]
+
+# ---------------------------------------------------------------------------
+# Lint / format
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",    # pycodestyle
+    "F",         # pyflakes
+    "I",         # isort
+    "N",         # pep8-naming
+    "UP",        # pyupgrade
+    "B",         # bugbear
+    "A",         # builtins shadowing
+    "C4",        # comprehensions
+    "DTZ",       # naive datetimes are a correctness bug in a temporal system
+    "S",         # bandit — security
+    "SIM",       # simplify
+    "TID",       # tidy imports
+    "RUF",
+    "ANN",       # missing annotations
+    "PTH",
+    "ERA",       # commented-out code
+]
+ignore = [
+    "ANN401",    # explicit Any is allowed where commented (see CLAUDE.md)
+    "S101",      # assert is fine in tests; guarded below for src
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "ANN", "S105", "S106", "S311"]
+
+# This file is copied verbatim into every evidence export and is run by the RECIPIENT, on
+# whatever interpreter their machine has — which is routinely the one their operating system
+# shipped, not this project's. Modernizing it to the project's target version is therefore a
+# correctness regression rather than an improvement: `UP017` rewrote `timezone.utc` to
+# `datetime.UTC` and the shipped verifier stopped starting on Python 3.9. A verifier a
+# recipient cannot run verifies nothing.
+"src/nemesis/evidence/standalone_verifier.py" = ["UP"]
+
+# `Depends()` in a parameter default is FastAPI's dependency-injection idiom, not a mutable
+# default argument. The `Annotated` form ruff would prefer does not survive
+# `from __future__ import annotations` here: FastAPI resolves hints as strings against module
+# globals, where a locally-defined alias does not exist, and every route silently became a
+# required query parameter.
+"src/nemesis/api/app.py" = ["B008"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "parents"
+
+# ---------------------------------------------------------------------------
+# Types
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.13"
+strict = true
+warn_unreachable = true
+disallow_any_explicit = false
+plugins = ["pydantic.mypy"]
+files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers --strict-config"
+markers = [
+    "invariant: enforces a non-negotiable invariant from CLAUDE.md",
+    "slice: exercises the end-to-end vertical slice",
+]
+filterwarnings = ["error"]
+
+[tool.coverage.run]
+source = ["src/nemesis"]
+branch = true
