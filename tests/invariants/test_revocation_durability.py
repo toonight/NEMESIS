@@ -669,8 +669,12 @@ def _permissive() -> CapabilityVerifier:
 
 @pytest.mark.xfail(
     strict=True,
-    reason="tail truncation needs an external anchor; PROPOSED, not built. Remove this "
-    "marker the day it is — a strict xfail turns red when the gap closes.",
+    reason=(
+        "a chain cannot notice records that are no longer in it — this marker records a "
+        "limit of `verify_chain`, not a missing feature. The anchored check in "
+        "test_chain_anchor.py DOES catch it; remove this marker only if `verify_chain` "
+        "itself is ever given memory outside the store."
+    ),
 )
 def test_deleting_the_newest_revocation_is_currently_invisible(tmp_path: Path) -> None:
     """A KNOWN, MEASURED GAP — marked xfail so it turns red the day it is closed.
