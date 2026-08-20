@@ -37,7 +37,31 @@ from __future__ import annotations
 from dataclasses import dataclass
 from itertools import pairwise
 
+from nemesis.core.confidence import BAND_RANGES
+
 DEFAULT_BINS: tuple[float, ...] = (0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0001)
+"""Deciles. Conventional, and *not* what the calibration protocol grades on."""
+
+PUBLISHED_BAND_BINS: tuple[float, ...] = (
+    *sorted({edge for low, high in BAND_RANGES.values() for edge in (low, high)})[:-1],
+    1.0001,
+)
+"""The edges of the seven bands this platform actually publishes.
+
+Derived from `BAND_RANGES` and required by `docs/calibration/PROTOCOL.md`, because calibration
+should be measured on **what a reader is told**, not on an arbitrary decile grid. Nobody acts on
+0.83; they act on "very likely", and a model can be well calibrated across deciles while
+systematically misplacing the band boundary that decides the word.
+
+Kept beside `DEFAULT_BINS` rather than replacing it: deciles remain useful for a finer-grained
+diagnostic, and a protocol that forbids looking at the data another way is a protocol that gets
+ignored. The distinction is which one a *reported* figure uses.
+"""
+
+MIN_BIN_COUNT: int = 20
+"""Below this, a bin's observed frequency is noise. The protocol requires such bins to be
+reported **with their count** and excluded from summary statistics — never silently merged into
+a neighbour, which would hide exactly where the evidence ran out."""
 
 
 @dataclass(frozen=True)
@@ -54,6 +78,16 @@ class ReliabilityBin:
     def gap(self) -> float:
         """Forecast minus outcome. Positive means over-confident in this bucket."""
         return self.mean_forecast - self.observed_frequency
+
+    @property
+    def underpowered(self) -> bool:
+        """Too few cases for the observed frequency to mean anything.
+
+        Reported rather than dropped. A bin of three cases that all came out true reads as
+        perfect calibration at whatever band it sits in, and silently merging it into a
+        neighbour would hide precisely where the evidence ran out.
+        """
+        return self.count < MIN_BIN_COUNT
 
 
 @dataclass(frozen=True)
@@ -79,6 +113,34 @@ class BrierDecomposition:
         if self.uncertainty <= 0:
             return 0.0
         return 1.0 - (self.brier_score / self.uncertainty)
+
+    @property
+    def underpowered_bins(self) -> tuple[ReliabilityBin, ...]:
+        """Bins below `MIN_BIN_COUNT`, kept visible and excluded from the reported figure."""
+        return tuple(b for b in self.bins if b.underpowered)
+
+    @property
+    def reported_reliability(self) -> float | None:
+        """Reliability over adequately populated bins only — the protocol's reported figure.
+
+        `reliability` itself stays over the whole sample, because the Murphy identity is only
+        exact that way and a score that quietly drops its inconvenient cases is not a score.
+        This is the separate number the protocol grades on, and it comes with
+        `cases_excluded_as_underpowered` attached so nobody can read it without the count.
+
+        ``None`` when every bin is underpowered: no reportable calibration figure exists at that
+        sample size, and returning 0.0 there would look like perfect calibration.
+        """
+        powered = [b for b in self.bins if not b.underpowered]
+        cases = sum(b.count for b in powered)
+        if not cases:
+            return None
+        return sum(b.count * b.gap**2 for b in powered) / cases
+
+    @property
+    def cases_excluded_as_underpowered(self) -> int:
+        """How many cases sit in bins too thin to report. Always shown beside the figure."""
+        return sum(b.count for b in self.underpowered_bins)
 
     @property
     def binning_discrepancy(self) -> float:
@@ -107,6 +169,15 @@ class BrierDecomposition:
             f"skill vs base    {self.skill_against_base_rate:+.4f}   "
             f"(0 = no better than always saying {self.base_rate:.2f})",
         ]
+        thin = self.underpowered_bins
+        if thin:
+            reported = self.reported_reliability
+            shown = "none — every bin is underpowered" if reported is None else f"{reported:.4f}"
+            lines.append(
+                f"  reported rel.  {shown}   over {len(self.bins) - len(thin)} of "
+                f"{len(self.bins)} bins; {self.cases_excluded_as_underpowered} case(s) in "
+                f"{len(thin)} bin(s) below n={MIN_BIN_COUNT} are excluded, not merged"
+            )
         if self.resolution < 0.01:
             lines.append(
                 "  ! resolution is near zero: these forecasts barely vary with the outcome. "
@@ -189,3 +260,21 @@ def discrimination_auc(forecasts: list[float], outcomes: list[bool]) -> float | 
             elif positive == negative:
                 wins += 0.5
     return wins / (len(positives) * len(negatives))
+
+
+def published_band_decomposition(
+    forecasts: list[float], outcomes: list[bool]
+) -> BrierDecomposition:
+    """The decomposition the calibration protocol reports, binned on the published bands.
+
+    `brier_decomposition` defaults to deciles, which are conventional and are **not** what
+    `docs/calibration/PROTOCOL.md` grades on. The protocol and the implementation disagreed on
+    this from the day the protocol was written — a reviewer found it — and the disagreement was
+    the ordinary doc-versus-code defect, not a subtlety: a metric frozen in prose while a
+    contradicting implementation already existed.
+
+    The bands are what a reader is told. Nobody acts on 0.83; they act on "very likely", and a
+    model can be well calibrated across deciles while systematically misplacing the boundary
+    that decides the word.
+    """
+    return brier_decomposition(forecasts, outcomes, bins=PUBLISHED_BAND_BINS)

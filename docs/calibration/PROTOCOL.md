@@ -3,15 +3,74 @@
 **Status: milestone 1 `IMPLEMENTED`, milestones 2 and 6 `PROPOSED` (specified below),
 milestones 3–5 `REQUIRES_EXTERNAL_DATA`.**
 
-> **Correction, 2026-08-20.** Milestone 1 was first labelled `IMPLEMENTED` when it was partial,
-> and an external review demonstrated the gap in one run: changing `BAND_RANGES` moved a
-> published band from *likely* to *almost certain* while both checks stayed green. The scanner
-> matched only `NAME = <digit>`, so every dial that is a **table** was invisible; it compared
-> bare names, so a homonym elsewhere counted as registered; and the golden vectors froze fusion
-> and nothing else. Over-labelling is the defect this project rejects, committed inside the
-> mechanism built to prevent silent drift. The registry now holds **26** constants including
-> tables, the scan is AST-based and fully qualified over **8** modules, and the vectors cover
-> bands, refusals, robustness margins and method ceilings.
+> **What `IMPLEMENTED` claims here, and what it does not.** It claims that the freeze is
+> mechanical and enforced by tests seen to fail without it, over three overlapping scopes:
+> a normalised syntax digest covering **103 modules** — every file in `src/nemesis`, so literals
+> in function bodies, class defaults and pure logic are all inside it; a derived digest of
+> **356 dials** with no list to be absent from; and **43 constants frozen by imported value**
+> for a named diagnostic. Plus golden vectors that run real inputs through the attribution and
+> resolution engines to their published bands. It claims nothing about whether the frozen values
+> are **right** — freezing a choice does not validate it — and nothing about milestones 2–6.
+>
+> **How it got here, because the history is the argument.** Milestone 1 was labelled
+> `IMPLEMENTED` four times while partial, and external review walked through five different
+> holes, every one the same shape: something a human had to remember to list.
+>
+> 1. The scanner matched only `NAME = <digit>`, so every dial that is a **table** was invisible.
+>    Changing `BAND_RANGES` alone moved a published band from *likely* to *almost certain* with
+>    both checks green. It also compared bare names, so a homonym elsewhere counted as
+>    registered.
+> 2. Two of the most consequential tables — `ROBUSTNESS_MARGIN`, `METHOD_RELIABILITY_CEILING` —
+>    lived in **modules the list did not name**, so no scanner could have found them.
+> 3. `CORRELATION_GROUP_OF` is **categorical**: moving `ALIAS_SIMILARITY` between correlation
+>    groups changed a published band from *unlikely* to *roughly even* while containing no
+>    digits at all, which a numeric scan is structurally incapable of noticing. The same review
+>    found the Admiralty weights inlined inside a method body, where a module-level scan is
+>    blind, and that the metrics were specified in this document and contradicted by the code.
+>
+> 4. Found here rather than by a reviewer, by deriving the module set from the imports instead
+>    of remembering it: `DARK_BAZAAR_PERSONA_POPULATION` and `CLUSTER_MIN_CONFIDENCE` in
+>    `slice/scenario.py` — the first being the denominator of the base rate every persona
+>    linkage in the demonstration rests on.
+> 5. The derivation was applied to the scanner and **not** to `engine_digest()`, which still
+>    hashed the old hand-written list. So `LINKAGE_PROPOSITION` in `calibration/harness.py` was
+>    discovered by one mechanism and hashed by neither: flipping it from `ACTOR_ATTRIBUTION` to
+>    `OBSERVATION` took both reported false-match rates from 0.0 to 1.0 and the mean forecast
+>    from 0.4956 to 0.5884, with every check green. Worse, the derivation itself was wrong —
+>    `core/provenance.py` imports none of the confidence machinery and holds
+>    `UNPLANTABLE_SOURCE_CLASSES`, the table deciding which evidence gets inverted. A tree-wide
+>    count then found dozens of categorical dials — constants holding no numeric literal
+>    anywhere — of which the freeze had registered exactly one.
+>
+> 6. Found internally by auditing the exclusion rule that instance 5's fix introduced. A dial
+>    was skipped when every literal in its value was a string — which let a **lookup table of
+>    strings** out through the same door as a sentence. `LOW_PLANTING_COSTS =
+>    frozenset({"trivial", "low"})` is the table `_is_cheaply_plantable` reads: delete one word
+>    and the attribution engine stops inverting cheaply plantable evidence, so a planted group
+>    name reads as *support* for whoever the adversary named. `UNSIGNED_FIELDS`,
+>    `OBSERVABLE_STOP_CONDITIONS` and every validation regex were escaping identically. The rule
+>    is now structural — a value that **constructs or looks up** is a table however much of it is
+>    text — and coverage went from 150 dials to 174.
+>
+> 7. Found by an adversarial sweep run against the fix for instance 6. Every mechanism so far
+>    read **module-level assignments**, so a bare `6.0` inside a function body was invisible:
+>    `pursuit/materialize.py::_confidence_from` sets the evidence weight for every edge with no
+>    measurable selectivity, and changing it to `20.0` moves the GLASS ANVIL attribution's
+>    ORGANIZATION dimension from *unlikely* (0.4470) to *likely* (0.5873) — the direction
+>    reverses — with all four checks clean and all 913 tests passing. Dataclass field defaults
+>    (`GeneratorAssumptions`) escaped the same way, and with them every number `nemesis
+>    calibrate` prints.
+> 8. From the same sweep, and the one that settled the architecture: `attribute/disclosure.py`
+>    can be made to publish the pre-margin opinion by changing **two lines and no constant**,
+>    moving the ORGANIZATION band in the *external deliverable* — the artefact handed to a
+>    provider or a regulator — from *unlikely* to *roughly even*. No digest of values, however
+>    complete, can see that. Only the logic can.
+>
+> The lesson is not "the list was too short" — that was the conclusion after instances 2, 3 and
+> 4, and it was wrong three times. It is that **enumeration loses**, including the clever
+> derivations that replace it: "modules that import the confidence machinery" is still a rule
+> somebody has to get right. What holds is scope with no seam at all. Every dial in the tree is
+> now hashed, and a dial that *appears* is reported alongside one that moves.
 
 No confidence figure this platform produces has ever been scored against a known-correct
 answer. That is the project's largest declared weakness, and it is not a mathematics problem:
@@ -33,23 +92,88 @@ each is a dial, and each moves a number somebody is about to grade.
 
 `nemesis.calibration.freeze` makes the freeze mechanical rather than a promise:
 
-- **26 registered constants** across 8 modules, **scalars and tables alike**, folded into a
-  digest. `BAND_RANGES`, `ROBUSTNESS_MARGIN`, `METHOD_RELIABILITY_CEILING`, `BELIEF_CEILING`,
-  `DEFAULT_BASE_RATE` and `PLANTING_BELIEF_BY_COST` are dictionaries and decide as much as any
-  scalar — `BAND_RANGES` decides the *word* a reader sees, which is the only output most
-  consumers ever read.
-- **An AST-based scan for unregistered constants**, compared fully qualified. A regex matching
-  `NAME = <digit>` could not see a table, and a bare-name comparison let a homonym in another
-  module count as registered. Numerical-stability epsilons are registered rather than excused:
-  "it is only an epsilon" is exactly the reasoning that lets a dial escape.
+- **One scope, `frozen_modules()`** — every `.py` under `src/nemesis` except `freeze.py` itself
+  — read by all three digests, so they cannot disagree about what is covered. They did disagree
+  once, and that was instance 5. The self-exclusion is the one real hole left, closed socially
+  rather than mechanically: a diff touching `MODULE_DIGESTS`, `CONSTANT_DIGESTS` or
+  `FROZEN_VALUE_DIGESTS` is the thing a reviewer is meant to stop at. The scope takes an
+  argument, so the freeze can be exercised against a tampered **copy** of the tree — which is
+  how the tests demonstrate it rather than asserting around it. A test creates a module that
+  exists only in the copy and requires its dial and its path by name; another asks the syntax
+  tree of `freeze.py` whether any function accepts `tree` and never reads it, because an
+  argument that exists and is never read is a promise in a signature.
+- **Every dial in the tree, hashed by normalised syntax** (`discovered_constants`), **242 of
+  them holding no numeric literal at all** — which is the whole lesson in one number: most of
+  what decides a published figure here is not a number, and four scans that looked for digits
+  found four different subsets of nothing. **A dial is any module-level upper-case assignment,
+  with no classification rule at all.** Two rules were tried — "not all-strings", then "anything
+  that constructs or looks up" — and each excluded something load-bearing, most recently four
+  security tables of plain strings. Including the genuine prose costs nothing, because rewording
+  a message already moves that module's syntax digest. A constant that *appears* is reported as
+  well as one that moves, which closes "add a dial and don't register it".
+- **43 constants additionally frozen by imported value**, for the diagnostic a syntax tree
+  cannot give: `drifted()` names the one that moved. Both mechanisms are needed, and
+  `PUBLISHED_BAND_BINS` is the case that proves it — derived from `BAND_RANGES`, its own syntax
+  never changes when the band edges move, and only reading the value notices.
+- **Values canonicalised, not `repr()`-ed.** Sets are sorted because their order carries no
+  meaning; sequences are not, because theirs does. Registering the first categorical dials made
+  the digest depend on CPython's per-process hash randomisation: five seeds gave five different
+  digests. CI would have gone red at random, and an intermittently red tripwire teaches a reader
+  that a red tripwire means nothing.
+- **A normalised syntax digest covering 103 modules** — every file in the tree — docstrings
+  stripped, one digest per module so a failure names which files moved. This covers what no value-based mechanism can: literals
+  inside function bodies, dataclass field defaults, and pure logic changes that touch no
+  constant at all. It was narrowed to fourteen hand-picked modules on the argument that hashing
+  everything would fire too often to stay armed; an adversarial sweep went through that argument
+  twice within the hour, and **measuring it showed the argument was wrong anyway** — replayed
+  over this repository's history, eight of the last ten commits move it, each naming one to
+  three modules. That is a readable question, not noise. Rewording a docstring still changes
+  nothing, which is the property that keeps it armed.
+- **Regeneration is scripted**, `scripts/refreeze_calibration.py`, not hand-edited — and it
+  **measures in a subprocess under a fresh `PYTHONPYCACHEPREFIX`**. CPython validates a `.pyc` on
+  *size and whole-second mtime*, and every rewrite here swaps one 64-character digest for
+  another, so the size never changes. Dropping the one module's cache was the first fix and was
+  not enough: the values are imported from every other module, each with a cache of its own.
+  Demonstrated on the real tree — with a poisoned cache an ordinary interpreter read
+  `DECEPTION_BASE_RATE` as 0.25 while the source said 0.99. A refreeze that appears to work and
+  does not is worse than one that fails.
 - **Golden vectors** pinning *answers* rather than source — fusion, published bands, the
   refusal threshold at and above the line, robustness margins per proposition class, and method
-  reliability ceilings. Hashing the source would break on a reworded comment and survive a
-  changed sign.
+  reliability ceilings. *(Corrected: this bullet used to justify them by claiming a source hash
+  would "survive a changed sign". That is simply false — a hash of the bytes breaks on any edit,
+  including that one. The real argument is narrower and is about false positives: a byte hash
+  also breaks on a reworded comment, so it cannot distinguish a changed sign from a changed
+  adjective, and a check that fires on both gets switched off. The syntax digests above are what
+  make that distinction; these vectors pin the **answers**, which is a different guarantee again
+  — code can be rewritten wholesale and still have to produce 0.697368.)*
+- **Two end-to-end vectors that traverse the engines**, because everything above pins a table
+  and none of it would notice a change in how the engines *use* those tables. Signals in,
+  published band out: one cryptographic fingerprint alone yields *likely* evidentially and
+  *insufficient basis* publicly, because the robustness margin removes the single plantable fact
+  and nothing survives; a group name embedded in a binary, offered as **supporting** evidence,
+  comes out as disbelief 0.30 because the engine inverts what an adversary could plant cheaply.
+  Both were watched failing with their control removed. Every figure in them was read off the
+  engine and written down afterwards — an earlier draft of the fusion vectors guessed four
+  numbers and got all four wrong, inside the mechanism built to stop exactly that.
 
 Changing a constant is allowed. Changing it *silently*, or *during* an evaluation, is what this
 prevents: updating `FROZEN_DIGEST` is one line, in its own commit, with a reason, at a moment
 somebody chose.
+
+**What this still does not stop.** Anyone who can edit a dial can regenerate the tables in the
+same commit; this is a tripwire for drift and for self-deception, not a control against a
+determined author.
+
+*(Corrected: this paragraph previously also claimed that a probability hard-coded inline, in a
+module importing nothing from `core.confidence`, would escape. That was true of the derived scan
+it was written against and stopped being true when the syntax digest was widened to the whole
+tree — which is exactly the case it now exists to catch. A stale limitation reads as modesty and
+is the same defect as a stale capability.)*
+
+The one real scope hole left is `calibration/freeze.py` itself, excluded because the frozen
+tables live in it and would be self-referential. It is closed socially rather than mechanically:
+a diff touching `MODULE_DIGESTS`, `CONSTANT_DIGESTS` or `FROZEN_VALUE_DIGESTS` is the thing a
+reviewer is meant to stop at.
 
 ## 2. Population, case categories, ground-truth rules — `PROPOSED`
 
@@ -134,10 +258,35 @@ Written as formulas rather than prose, because a metric described in words is on
 reinterpreted after results exist — and "we meant macro-averaged" is a sentence nobody can
 disprove six months later.
 
-- **Reliability.** Bin predictions into the seven `BAND_RANGES` intervals. For each bin *b*
-  with *n_b* cases: `observed_b = (true positives in b) / n_b`, plotted against the bin's
-  midpoint. Bins with *n_b* < 20 are reported with their count and excluded from any summary
-  statistic, never silently merged.
+- **Reliability.** Bin predictions into the seven `BAND_RANGES` intervals — `PUBLISHED_BAND_BINS`
+  in `calibration.scoring`, derived from `BAND_RANGES` rather than copied, so the two cannot
+  drift. Deciles remain available as a finer diagnostic; a *reported* figure uses the published
+  bands, because calibration should be measured on what a reader is told. Nobody acts on 0.83;
+  they act on "very likely", and a model can be well calibrated across deciles while
+  systematically misplacing the boundary that decides the word.
+  For each bin *b* with *n_b* cases: `observed_b = (true positives in b) / n_b`, plotted against
+  the bin's **mean forecast**. *(Corrected: this document first said "midpoint", and the
+  implementation was right and the protocol wrong — the Murphy decomposition is defined on the
+  mean forecast, and a midpoint introduces bias whenever predictions are not uniform within a
+  bin.)*
+
+  **Underpowered bins**, *n_b* < `MIN_BIN_COUNT` (20), are handled in exactly two ways, and the
+  distinction is load-bearing:
+
+  - They are **excluded from the reported reliability figure and from the plotted curve**
+    (`BrierDecomposition.reported_reliability`), and reported **with their count**
+    (`cases_excluded_as_underpowered`). Never merged into a neighbour — merging hides exactly
+    where the evidence ran out. What a reader over-trusts is the curve point, not the weighted
+    contribution: "at *almost certain* we were right every time" reads as calibration when it is
+    three cases.
+  - They are **retained in the Brier score and in all three Murphy terms**. *(Corrected: this
+    document first said they were excluded from "any summary statistic", and the implementation
+    kept them. Here too the code was right. A Brier score is over cases, not over bins; dropping
+    the inconvenient ones makes it a score of a chosen subset, and the decomposition identity
+    `BS = REL − RES + UNC` only holds over the whole sample.)*
+
+  When **every** bin is underpowered there is no reported figure at all — `None`, not zero.
+  Zero would read as perfect calibration on the strength of five cases.
 - **Brier score**, decomposed: `BS = reliability − resolution + uncertainty`, over the same
   bins, using the Murphy decomposition. The three terms are reported separately; a single `BS`
   hides whether a model is badly calibrated or merely facing a hard problem.

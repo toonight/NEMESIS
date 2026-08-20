@@ -110,7 +110,63 @@ def measure_invariants() -> int:
     return len(re.findall(r"^\d+\. \*\*", text, flags=re.MULTILINE))
 
 
+def _freeze_module() -> object:
+    """Import the freeze module, so these counts come from the mechanism and not from a regex.
+
+    The alternative — parsing `freeze.py` — is what the freeze itself stopped doing after four
+    reviews, and for the same reason: a parser agrees with a stale copy of the source.
+    """
+    import importlib
+    import sys
+
+    sys.path.insert(0, str(ROOT / "src"))
+    return importlib.import_module("nemesis.calibration.freeze")
+
+
+def measure_calibration_dials() -> int:
+    """Every module-level dial in `src/nemesis`, as the freeze itself counts them."""
+    return len(_freeze_module().discovered_constants())  # type: ignore[attr-defined]
+
+
+def measure_categorical_dials() -> int:
+    """Dials holding no numeric literal at all — the class four numeric scans could not see."""
+    import ast
+
+    freeze = _freeze_module()
+    total = 0
+    for relative in freeze.frozen_modules():  # type: ignore[attr-defined]
+        for value in freeze._module_constants(relative).values():  # type: ignore[attr-defined]
+            if not any(
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, int | float)
+                and not isinstance(node.value, bool)
+                for node in ast.walk(value)
+            ):
+                total += 1
+    return total
+
+
+def measure_frozen_modules() -> int:
+    return len(_freeze_module().frozen_modules())  # type: ignore[attr-defined]
+
+
+def measure_calibration_constants() -> int:
+    """Read from the registry itself, so the protocol cannot claim a freeze wider than it is.
+
+    This one matters more than the others: a document overstating how many dials are frozen is
+    a document overstating how trustworthy every figure the evaluation produces will be. The
+    count has already been wrong twice while the prose around it read as settled.
+    """
+    text = (ROOT / "src/nemesis/calibration/freeze.py").read_text(encoding="utf-8")
+    block = text.split("CALIBRATION_CONSTANTS", 1)[1].split(")", 1)[0]
+    return len(re.findall(r'^\s+"[\w.]+:\w+",', block, flags=re.MULTILINE))
+
+
 MEASUREMENTS: Final[dict[str, Callable[[], int]]] = {
+    "calibration_constants": measure_calibration_constants,
+    "calibration_dials": measure_calibration_dials,
+    "categorical_dials": measure_categorical_dials,
+    "frozen_modules": measure_frozen_modules,
     "tests": measure_tests_collected,
     "contracts": measure_contracts,
     "mypy_files": measure_mypy_files,
@@ -134,6 +190,33 @@ class Claim:
 
 CLAIMS: Final[tuple[Claim, ...]] = (
     Claim("README.md", r"tests-(\d+)-2ea043", "tests", "the badge that started this"),
+    Claim(
+        "docs/calibration/PROTOCOL.md",
+        r"\*\*(\d+) constants additionally frozen by imported value\*\*",
+        "calibration_constants",
+    ),
+    Claim(
+        "docs/calibration/PROTOCOL.md",
+        r"\*\*(\d+) constants frozen by imported value\*\*",
+        "calibration_constants",
+    ),
+    Claim("docs/calibration/PROTOCOL.md", r"\*\*(\d+) dials\*\*", "calibration_dials"),
+    Claim("docs/architecture/PROJECT_STATE.md", r"\*\*(\d+) dials\*\*", "calibration_dials"),
+    Claim(
+        "docs/architecture/PROJECT_STATE.md",
+        r"\*\*(\d+)\*\* additionally frozen by imported value so `drifted\(\)` names",
+        "calibration_constants",
+    ),
+    Claim(
+        "docs/calibration/PROTOCOL.md",
+        r"\*\*(\d+) of\n  them holding no numeric literal at all\*\*",
+        "categorical_dials",
+    ),
+    Claim(
+        "docs/calibration/PROTOCOL.md",
+        r"normalised syntax digest covering \*?\*?(\d+) modules",
+        "frozen_modules",
+    ),
     Claim("README.md", r"plane%20contracts-(\d+)%20enforced", "contracts"),
     Claim("README.md", r"(\d+) `import-linter` contracts", "contracts"),
     Claim("docs/architecture/PROJECT_STATE.md", r"\*\*(\d+) tests\.\*\*", "tests"),

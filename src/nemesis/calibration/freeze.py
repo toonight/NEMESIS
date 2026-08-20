@@ -16,19 +16,32 @@ becomes inconvenient.
 
 WHAT IS FROZEN, AND HOW
 
-Two things, by two different mechanisms, because they fail differently.
+Three mechanisms over one scope, because they fail differently and cover each other.
 
-**The constants** are read from the modules that hold them and folded into a digest. A change
-to any of them changes the digest, and the frozen value below no longer matches. That is not a
-prohibition — constants *should* change when there is a reason — it is a requirement that the
-change be **deliberate and visible**: updating the manifest is a line in a diff, with a commit
-message, at a moment somebody chose.
+**Every module** in `src/nemesis` — all of it except this file — is hashed as a normalised
+syntax tree, one digest each, in `MODULE_DIGESTS`. Docstrings are stripped, so rewording an
+explanation changes nothing while changing a comparison does. This is the completeness
+guarantee, and it is the only one that sees a bare literal inside a function body, a dataclass
+field default, or a two-line logic change that touches no constant at all. `engine_drifted()`
+names the modules that moved.
 
-**The behaviour** is pinned by golden vectors: fixed inputs, fixed outputs, in
-`tests/invariants/test_calibration_freeze.py`. Hashing the source of the fusion operators would
-have been easier and worse — a reworded comment would break it while a changed sign would not,
-which is the wrong sensitivity in both directions. What matters is not that the code is
-identical but that it *answers the same*.
+**Every module-level constant**, by normalised syntax, in `CONSTANT_DIGESTS` — 356 of them,
+with no classification whatsoever. A dial does not have to hold a digit and does not have to
+look like a table; four rules for deciding what counted were tried and all four excluded
+something load-bearing. `constants_drifted()` names what moved, appeared or vanished.
+
+**Forty-three constants by imported value**, in `FROZEN_VALUE_DIGESTS`, folded through
+`canonical()` so the digest does not depend on the interpreter's hash seed. This catches what a
+syntax tree cannot: `PUBLISHED_BAND_BINS` is derived from `BAND_RANGES`, so its own syntax never
+changes when the band edges move. `drifted()` names the culprit.
+
+Behaviour is additionally pinned by golden vectors in
+`tests/invariants/test_calibration_freeze.py`: fixed inputs, fixed outputs, including two that
+run real cases through the attribution and resolution engines to their published bands.
+
+None of this is a prohibition — constants *should* change when there is a reason. It is a
+requirement that the change be **deliberate and visible**: `scripts/refreeze_calibration.py`,
+in its own commit, with the reason.
 
 WHAT THIS DOES NOT DO
 
@@ -36,17 +49,46 @@ It does not make the constants right. They remain choices, and freezing a choice
 validate it — it only stops the choice from moving while it is being examined. It also cannot
 tell an honest recalibration from a convenient one; it makes both visible, and visibility is
 what an evaluation needs to be worth reading.
+
+And it does not stop a determined author: anyone who can edit a dial can regenerate the tables
+in the same commit. This is a tripwire against drift and against self-deception. The residual
+scope hole is this file itself, excluded because the tables live in it — closed socially rather
+than mechanically, by a reviewer looking at any diff that touches `FROZEN_*`, `MODULE_DIGESTS`
+or `CONSTANT_DIGESTS`.
 """
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import importlib
+from collections.abc import Mapping
+from enum import Enum
+from pathlib import Path
+from types import MappingProxyType
 from typing import Final
 
 CALIBRATION_CONSTANTS: Final[tuple[str, ...]] = (
     # Subjective-logic machinery: how belief, disbelief and uncertainty combine.
+    "nemesis.calibration.scoring:PUBLISHED_BAND_BINS",
+    "nemesis.calibration.scoring:DEFAULT_BINS",
+    "nemesis.calibration.scoring:MIN_BIN_COUNT",
+    "nemesis.attribute.dimensions:DEFAULT_TEMPORAL_GAP_TOLERANCE",
+    "nemesis.calibration.coherence:TOLERANCE",
+    "nemesis.slice.scenario:CLUSTER_MIN_CONFIDENCE",
+    "nemesis.slice.scenario:DARK_BAZAAR_PERSONA_POPULATION",
+    # Categorical dials: they hold no digits, which is exactly why four numeric scans in a row
+    # could not see them. Each decides a published figure as directly as any scalar.
+    "nemesis.calibration.harness:LINKAGE_PROPOSITION",
+    "nemesis.calibration.harness:ACTIONABLE_BANDS",
+    "nemesis.core.provenance:UNPLANTABLE_SOURCE_CLASSES",
+    "nemesis.attribute.engine:DIMENSION_PROPOSITION",
+    "nemesis.attribute.engine:LOW_PLANTING_COSTS",
+    "nemesis.core.relationships:IDENTITY_ASSERTING_RELATIONS",
     "nemesis.core.confidence:VACUITY_THRESHOLD",
+    "nemesis.core.confidence:ADMIRALTY_CREDIBILITY_BELIEF",
+    "nemesis.core.confidence:ADMIRALTY_RELIABILITY_WEIGHT",
+    "nemesis.core.confidence:UNJUDGEABLE_CREDIBILITY_WEIGHT_CEILING",
     "nemesis.core.confidence:BAND_RANGES",
     "nemesis.core.fusion:CONFLICT_ALERT_THRESHOLD",
     # Attribution: how much a planted artifact may move a conclusion, and what deception is
@@ -71,6 +113,11 @@ CALIBRATION_CONSTANTS: Final[tuple[str, ...]] = (
     "nemesis.resolve.signals:OPEN_WORLD_STYLOMETRY_PENALTY",
     "nemesis.resolve.signals:OBFUSCATION_STYLOMETRY_PENALTY",
     "nemesis.resolve.signals:BELIEF_CEILING",
+    # Categorical, and arguably the heaviest dial here: it decides which generating process
+    # each signal is a trace of, and therefore whether two signals compound as independent
+    # evidence or average as one dependence group. It holds no numbers, so a numeric scan was
+    # structurally unable to see it — moving one entry changed a published band.
+    "nemesis.resolve.signals:CORRELATION_GROUP_OF",
     # Tables that decide as much as any scalar, and that the first scanner could not see
     # because it only matched `NAME = <digit>`.
     "nemesis.core.proposition:ROBUSTNESS_MARGIN",
@@ -83,17 +130,26 @@ CALIBRATION_CONSTANTS: Final[tuple[str, ...]] = (
     "nemesis.core.confidence:_TOLERANCE",
     "nemesis.core.fusion:_EPS",
 )
-"""Every number that moves a confidence figure, named as ``module:NAME``.
+"""The curated epistemic subset, named as ``module:NAME`` and frozen by **imported value**.
 
-Enumerated rather than discovered. A scan for module-level numbers would sweep in timeouts,
-buffer sizes and scenario populations, and the difference between "a dial that changes what the
-platform believes" and "a dial that changes how long it waits" is exactly the judgement a
-regex cannot make. Adding a constant here is therefore a deliberate act — and leaving a new
-calibration constant *out* is the way to defeat this whole mechanism, which is why
-:func:`unregistered_calibration_constants` exists to make that omission visible too.
+Not "every number": most of what decides a published figure here is not a number at all — of the
+356 dials `discovered_constants()` covers, 242 hold no numeric literal. And not the completeness
+guarantee either, which is the job of the two syntactic digests; this list is deliberately
+curated, so it is allowed to be incomplete in a way they are not.
+
+What it buys is the diagnostic. `drifted()` names *which* dial moved, and it reads the value the
+interpreter actually holds rather than the syntax that produces it — the distinction that
+matters for `PUBLISHED_BAND_BINS`, which is derived from `BAND_RANGES` and whose own syntax never
+changes when the band edges do.
+
+Leaving a new constant out of this list is therefore a lost diagnostic, not a lost tripwire:
+`constants_drifted()` reports the appearance of any module-level constant anywhere in the tree.
+An earlier design put the tripwire here and guarded the omission with a scan over a second list
+of modules; the scan and its list were the last enumeration in this file, and every enumeration
+before it had already been defeated.
 """
 
-FROZEN_DIGEST: Final = "747ba63d427d3f3f5afda82c8fc504e64421f3edae9da883baccb613c53dc1f1"
+FROZEN_DIGEST: Final = "752ec461155673cb4c202f9907299c9289d90f1fe8454e5e58b720d80e6726bb"
 """The digest of the values above, frozen 2026-08-20, before any evaluation exists.
 
 Updated **only** as a documented event, in its own commit, with the reason. A mismatch is not
@@ -122,91 +178,807 @@ def observed_values() -> dict[str, object]:
     return values
 
 
-CALIBRATED_MODULES: Final[tuple[str, ...]] = (
-    "nemesis/core/confidence.py",
-    "nemesis/core/fusion.py",
-    "nemesis/core/proposition.py",
-    "nemesis/core/relationships.py",
-    "nemesis/attribute/engine.py",
-    "nemesis/resolve/engine.py",
-    "nemesis/resolve/signals.py",
-    "nemesis/disrupt/options.py",
+CONSTANT_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
+    {
+        "nemesis.api.app:API_VERSION": "94bbcf8f64e83f7e",
+        "nemesis.api.app:SIMULATED_NOTICE": "7319718c8313a0b1",
+        "nemesis.api.submission:DEFAULT_SUBMISSIONS_PER_HOUR": "940f567ac7d5a7a9",
+        "nemesis.api.submission:MAY_SUBMIT": "da4d3b3ebf186cdb",
+        "nemesis.api.submission:SUBMISSION_NOTICE": "e24250fc88eb13d5",
+        "nemesis.api.tenancy:UNREGISTERED_TENANT_REFUSAL": "f76fc90c11dccdea",
+        "nemesis.attribute.dimensions:DEFAULT_TEMPORAL_GAP_TOLERANCE": "687a6957d88beda6",
+        "nemesis.attribute.dimensions:DIMENSION_QUESTION": "4835dc361f29f06b",
+        "nemesis.attribute.disclosure:DELIVERABLE_DIMENSIONS": "90a5ec5b163e399e",
+        "nemesis.attribute.disclosure:DIMENSION_DISCLOSURE": "e361b48273c2e556",
+        "nemesis.attribute.disclosure:_WITHHOLDING_REASON": "65d9894a71a9ce77",
+        "nemesis.attribute.engine:CONTRA_INDICATOR_DISCOUNT": "14a8ecb0e489bec0",
+        "nemesis.attribute.engine:DECEPTION_BASE_RATE": "5097d8d3c07c0f02",
+        "nemesis.attribute.engine:DEFAULT_BASE_RATE": "c7f54eb3c2804e6c",
+        "nemesis.attribute.engine:DIMENSION_PROPOSITION": "a6e4dd5a1223a27d",
+        "nemesis.attribute.engine:LOW_PLANTING_COSTS": "b32c8197cf2f7b04",
+        "nemesis.attribute.engine:NEGLIGIBLE_CONTRIBUTION_NOTE": "3c1811a49b869c51",
+        "nemesis.attribute.engine:PLANTED_EVIDENCE_DISBELIEF_CEILING": "176ae9fcc8b1a09f",
+        "nemesis.attribute.engine:PLANTING_BELIEF_BY_COST": "ec64de3bf72ebc12",
+        "nemesis.attribute.engine:REFUSED_IDENTITY_HYPOTHESIS": "67779367ca77fecc",
+        "nemesis.attribute.engine:_REFUSAL_REMEDY": "24109a331ddcfacc",
+        "nemesis.audit.trail:HASH_PREFIX": "72ecce8fdbb5d19f",
+        "nemesis.audit.trail:MAX_RENDERED_RESULTS": "18f95d3ec3fcb890",
+        "nemesis.audit.trail:_UNATTRIBUTABLE_ACTORS": "e84dd687bbb54059",
+        "nemesis.authz.anchor:INDEPENDENCE_RANK": "4fd7a0d571760a5a",
+        "nemesis.authz.anchor:LOCAL_ANCHOR_AUTHORITY": "43d1f5fc0b66a291",
+        "nemesis.authz.anchor:REVOCATION_CHAIN": "6aa6166ba58cd6cc",
+        "nemesis.authz.anchor:SPEND_CHAIN": "f9f3982fffc68563",
+        "nemesis.authz.attestation:AUDIENCE": "a3563a90163a03bc",
+        "nemesis.authz.envelope:DEFAULT_AUTONOMOUS_EFFECT_BUDGET": "37d10dc09a311b23",
+        "nemesis.authz.gateway:MAX_CAPABILITY_LIFETIME": "3866862a69bfd65d",
+        "nemesis.authz.keys:_ED25519_SIGNATURE_BYTES": "196effcb6590f357",
+        "nemesis.authz.keys:_KEY_ID_HEX_CHARS": "a3c0f15d78c6c84e",
+        "nemesis.authz.providers:ASSERTION_LIFETIME": "548e4295146e89b4",
+        "nemesis.authz.providers:PROVIDER_NAME": "1d4d826842ad2df7",
+        "nemesis.authz.rbac:APPROVAL_ROLES": "b84efd949978f141",
+        "nemesis.authz.rbac:DEFAULT_MINIMUM_ASSURANCE": "0cb4562348ae7903",
+        "nemesis.authz.rbac:MINIMUM_ASSURANCE": "82edbd5cea9aa9f2",
+        "nemesis.authz.rbac:REQUEST_ROLES": "95633cccff954b43",
+        "nemesis.authz.store:SCHEMA_VERSION": "855fe64e00145f1f",
+        "nemesis.authz.store:_SCHEMA": "ec56dc4337b468dc",
+        "nemesis.authz.verification:SIGNATURE_SCHEME": "279ecd288193f512",
+        "nemesis.authz.verification:_ED25519_SIGNATURE_BYTES": "6d2c75a7a1708b33",
+        "nemesis.authz.verification:_KEY_ID_HEX_CHARS": "36e05c58cedda8b4",
+        "nemesis.calibration.coherence:TOLERANCE": "09d94cbf2f01ec5f",
+        "nemesis.calibration.harness:ACTIONABLE_BANDS": "d263b963eee112f8",
+        "nemesis.calibration.harness:LINKAGE_PROPOSITION": "bc1841ac1b6d3927",
+        "nemesis.calibration.scoring:DEFAULT_BINS": "dd60760fbb7a8524",
+        "nemesis.calibration.scoring:MIN_BIN_COUNT": "18578fe28c9d8897",
+        "nemesis.calibration.scoring:PUBLISHED_BAND_BINS": "c28cf92be6fa0bed",
+        "nemesis.cli.main:BANNER": "5b32641a3b67e4fa",
+        "nemesis.cli.main:NOT_DEMONSTRATED": "e41c22bbab46065a",
+        "nemesis.cli.main:_RULE": "a534e579c0df6936",
+        "nemesis.collect.base:CONNECTOR_VERSION": "d1134bd96f5e31fb",
+        "nemesis.collect.base:FIXTURE_SET": "8149c197f890fe74",
+        "nemesis.collect.base:QUALIFIER_GLOBALLY_UNIQUE": "9988864a7b7ef12e",
+        "nemesis.collect.base:QUALIFIER_HEURISTIC": "72503309bc232a6c",
+        "nemesis.collect.base:QUALIFIER_HEURISTIC_FAILURE_MODE": "2061b0899a6a464f",
+        "nemesis.collect.base:QUALIFIER_HOSTILE_CONTENT": "a04050462aead6df",
+        "nemesis.collect.base:QUALIFIER_PIVOT_METHOD": "0695f00ea692ab60",
+        "nemesis.collect.base:QUALIFIER_POPULATION_CORPUS": "c309f11138fd57af",
+        "nemesis.collect.base:QUALIFIER_POPULATION_SIZE": "9b18956bb8116c6e",
+        "nemesis.collect.base:QUALIFIER_QUOTED_VERBATIM": "181e3362fec52edf",
+        "nemesis.collect.base:QUALIFIER_SHARED_ATTRIBUTE": "14d41e5a7350470d",
+        "nemesis.collect.base:QUALIFIER_SHARED_INFRASTRUCTURE_JUSTIFICATION": "6dfa3a8fb129d400",
+        "nemesis.collect.fixtures.glass_anvil:ACME_EMAIL_GATEWAY": "37bbf921e8e96363",
+        "nemesis.collect.fixtures.glass_anvil:ACME_WAF": "b7728a3719cd76e0",
+        "nemesis.collect.fixtures.glass_anvil:BUILD_PATH": "8116aa9434f019f6",
+        "nemesis.collect.fixtures.glass_anvil:BUILD_PATH_DECEPTION": "52efc8e0661a704f",
+        "nemesis.collect.fixtures.glass_anvil:BULLETPROOF_ASN": "a17331e4c15c8f78",
+        "nemesis.collect.fixtures.glass_anvil:BULLETPROOF_HOST": "f1e92a8c8a62d3db",
+        "nemesis.collect.fixtures.glass_anvil:CDN_ASN": "ab2b159da65d9692",
+        "nemesis.collect.fixtures.glass_anvil:CDN_IP": "56909144e25b256b",
+        "nemesis.collect.fixtures.glass_anvil:CDN_OPERATOR": "7c6f82e263ab2e20",
+        "nemesis.collect.fixtures.glass_anvil:CDN_POPULATION": "88966d5a305ab718",
+        "nemesis.collect.fixtures.glass_anvil:CERTIFICATE_CORPUS": "e6807f165394f85d",
+        "nemesis.collect.fixtures.glass_anvil:CERTIFICATE_CORPUS_RESURGENCE": "c58d5fd3fb61d003",
+        "nemesis.collect.fixtures.glass_anvil:CERTIFICATE_POPULATION": "697453dc18a947e1",
+        "nemesis.collect.fixtures.glass_anvil:CERTIFICATE_POPULATION_AFTER_RESURGENCE": (
+            "74dd3bd3a3867fbd"
+        ),
+        "nemesis.collect.fixtures.glass_anvil:CERT_FINGERPRINT": "826cc01c7f11c29c",
+        "nemesis.collect.fixtures.glass_anvil:CLUSTERING_FAILURE_MODE": "a30d5377006e5130",
+        "nemesis.collect.fixtures.glass_anvil:CLUSTERING_HEURISTIC": "2552cb4bb79808ad",
+        "nemesis.collect.fixtures.glass_anvil:CLUSTER_DOMAINS": "67e33b6afc61263f",
+        "nemesis.collect.fixtures.glass_anvil:CLUSTER_IP": "c714097c6c07e8a2",
+        "nemesis.collect.fixtures.glass_anvil:CLUSTER_NETBLOCK": "900e3cb89b905b8e",
+        "nemesis.collect.fixtures.glass_anvil:CLUSTER_POPULATION": "3d1f5f4b7f11ca32",
+        "nemesis.collect.fixtures.glass_anvil:DARK_WEB_CORPUS": "6fc5075c6a1595fd",
+        "nemesis.collect.fixtures.glass_anvil:DETECTED_AT": "473f75f965ce5b0f",
+        "nemesis.collect.fixtures.glass_anvil:EXCHANGE": "c79b0b3bab6c1683",
+        "nemesis.collect.fixtures.glass_anvil:EXFIL_ADDRESS": "526d8f9864b4632f",
+        "nemesis.collect.fixtures.glass_anvil:FALSE_FLAG_DECEPTION": "8ffe104a81b18e8f",
+        "nemesis.collect.fixtures.glass_anvil:FALSE_FLAG_STRING": "c5e96832fbc19488",
+        "nemesis.collect.fixtures.glass_anvil:FORUM_CURRENT": "4f3458e1728005a0",
+        "nemesis.collect.fixtures.glass_anvil:FORUM_RESURGENT": "bf772796db3209ef",
+        "nemesis.collect.fixtures.glass_anvil:FRAMED_ORGANIZATION": "ef736c0dca339c0e",
+        "nemesis.collect.fixtures.glass_anvil:INBOUND_PAYMENT_COUNT": "1c831178d264aeb9",
+        "nemesis.collect.fixtures.glass_anvil:INJECTION_DECEPTION": "9ab15dd70df6f5be",
+        "nemesis.collect.fixtures.glass_anvil:KIT_HOST_IP": "3f827d70a707baaf",
+        "nemesis.collect.fixtures.glass_anvil:KIT_SHA256": "d88d0f974ea2d98f",
+        "nemesis.collect.fixtures.glass_anvil:LANGUAGE_DECEPTION": "cb78fbe483424eac",
+        "nemesis.collect.fixtures.glass_anvil:LEDGER_CORPUS": "f2ca6b4ebda5ebfd",
+        "nemesis.collect.fixtures.glass_anvil:MARKETPLACE_HISTORICAL": "f5729a8702b63fc0",
+        "nemesis.collect.fixtures.glass_anvil:NAMED_PERSON": "a6502de2253fe933",
+        "nemesis.collect.fixtures.glass_anvil:PASSIVE_DNS_CORPUS": "1186e4536fdf5f67",
+        "nemesis.collect.fixtures.glass_anvil:PERSONA_CURRENT": "aa533c56272522f4",
+        "nemesis.collect.fixtures.glass_anvil:PERSONA_HISTORICAL": "20cd63d8ab6f1cc7",
+        "nemesis.collect.fixtures.glass_anvil:PERSONA_INFORMANT": "0f6f5d9d80425667",
+        "nemesis.collect.fixtures.glass_anvil:PERSONA_RESURGENT": "b7b8298775a34b92",
+        "nemesis.collect.fixtures.glass_anvil:PGP_FINGERPRINT": "11c5d244dd17b770",
+        "nemesis.collect.fixtures.glass_anvil:PHISHING_SOURCE_IP": "a23798bc825eeb43",
+        "nemesis.collect.fixtures.glass_anvil:PLANTED_IDENTITY_DECEPTION": "93b463272a83ed4c",
+        "nemesis.collect.fixtures.glass_anvil:PLANTED_IDENTITY_POST": "efc8b644d4134e9f",
+        "nemesis.collect.fixtures.glass_anvil:PROMPT_INJECTION_POST": "0402a56b5dab4128",
+        "nemesis.collect.fixtures.glass_anvil:RDAP_CORPUS": "3c76a070937c4b37",
+        "nemesis.collect.fixtures.glass_anvil:REGISTRAR": "57b54e718660874f",
+        "nemesis.collect.fixtures.glass_anvil:REGISTRATION_WINDOW_JUSTIFICATION": (
+            "475da82235cf2dd1"
+        ),
+        "nemesis.collect.fixtures.glass_anvil:RESURGENCE_ASN": "42010dbf3a472194",
+        "nemesis.collect.fixtures.glass_anvil:RESURGENCE_AS_OF": "39cec9711bccd49a",
+        "nemesis.collect.fixtures.glass_anvil:RESURGENCE_DOMAIN": "f2307865d8ad3bb8",
+        "nemesis.collect.fixtures.glass_anvil:RESURGENCE_HOST": "4f9f79068cf95839",
+        "nemesis.collect.fixtures.glass_anvil:RESURGENCE_IP": "edccf7ef6a90a300",
+        "nemesis.collect.fixtures.glass_anvil:RESURGENCE_REGISTRAR": "320ab2de079f0ddb",
+        "nemesis.collect.fixtures.glass_anvil:SCENARIO_PRESENT": "da3aaf1c682af9b5",
+        "nemesis.collect.fixtures.glass_anvil:SEED_DOMAIN": "41124ec2fb5b2890",
+        "nemesis.collect.fixtures.glass_anvil:SENDER_DOMAIN": "32788bbaf3171e1f",
+        "nemesis.collect.fixtures.glass_anvil:TELEGRAM_CHANNEL": "1af503350346f3c8",
+        "nemesis.collect.fixtures.glass_anvil:THIRD_CERT_IP": "4b37b59076722841",
+        "nemesis.collect.fixtures.glass_anvil:WALLET_EXCHANGE_DEPOSIT": "2c2c15bd7deaf7d2",
+        "nemesis.collect.fixtures.glass_anvil:WALLET_PRIMARY": "128e892a7f2dfdcc",
+        "nemesis.collect.fixtures.glass_anvil:WALLET_SECOND": "e69c83e9f5f25790",
+        "nemesis.collect.fixtures.glass_anvil:_ACME_OPERATOR": "02507812a68d1326",
+        "nemesis.collect.fixtures.glass_anvil:_FIRST_SEEN": "7902da6d4acfddfd",
+        "nemesis.collect.fixtures.glass_anvil:_FORUM_ACTIVE_FROM": "897313ad90eec64e",
+        "nemesis.collect.fixtures.glass_anvil:_FORUM_ACTIVE_UNTIL": "c78af2b3d5032541",
+        "nemesis.collect.fixtures.glass_anvil:_LAST_SEEN": "60a666ec230bfe56",
+        "nemesis.collect.fixtures.glass_anvil:_LEDGER_FROM": "a6e5f4558ecf427e",
+        "nemesis.collect.fixtures.glass_anvil:_LEDGER_UNTIL": "27fc40b2f9cc2c1c",
+        "nemesis.collect.fixtures.glass_anvil:_MARKETPLACE_2024_FROM": "e007e80697d113a2",
+        "nemesis.collect.fixtures.glass_anvil:_MARKETPLACE_2024_UNTIL": "b5bc4070aa678ce6",
+        "nemesis.collect.fixtures.glass_anvil:_RDAP_OBSERVED": "93181591874b25c8",
+        "nemesis.collect.fixtures.glass_anvil:_REGISTERED_FIRST": "5d350ca3c9d84d81",
+        "nemesis.collect.fixtures.glass_anvil:_REGISTERED_LAST": "b20083561032c064",
+        "nemesis.collect.fixtures.glass_anvil:_REGISTRATION_EXPIRES": "f3043885742bfc5a",
+        "nemesis.collect.fixtures.glass_anvil:_RESURGENCE_EXPIRES": "230ee1458d3a0051",
+        "nemesis.collect.fixtures.glass_anvil:_RESURGENCE_FROM": "8b85a907dd7c1b08",
+        "nemesis.collect.fixtures.glass_anvil:_RESURGENCE_UNTIL": "6eec49e0bb54335e",
+        "nemesis.collect.isolation:DEFAULT_DEADLINE_SECONDS": "555016a71b57c351",
+        "nemesis.collect.isolation:WORKER_MODULE": "501c1273d74f3132",
+        "nemesis.collect.quarantine:HELD_CLASSIFICATIONS": "6791ff6dd57cb037",
+        "nemesis.collect.quarantine:MAX_ARTIFACT_BYTES": "7979bbf4b77a0d2c",
+        "nemesis.collect.simulated:FIXTURE_OPERATOR": "4a89103daa4f874d",
+        "nemesis.collect.simulated:TOR_SANDBOX_PROFILE": "a2743d61df27ea52",
+        "nemesis.collect.worker:FORBIDDEN_PREFIXES": "cd1a2182397bb7a0",
+        "nemesis.core.authorization:GENESIS_HASH": "52adf62b90ed892d",
+        "nemesis.core.authorization:IRREVERSIBLE_OPERATIONS": "30aff57e2d8e9f47",
+        "nemesis.core.authorization:MVP_IMPLEMENTED_OPERATIONS": "bc81d5544de71dae",
+        "nemesis.core.authorization:NO_CAPABILITY": "239147e21d1f8af4",
+        "nemesis.core.authorization:UNSIGNED_FIELDS": "a7d6878bb3295ff4",
+        "nemesis.core.claims:EPISTEMIC_STRENGTH": "12f2983b4926ed17",
+        "nemesis.core.claims:_EVIDENCE_BACKED_KINDS": "9d7ba3d073c82380",
+        "nemesis.core.claims:_MODEL_DERIVATIONS": "9c86b8f80c1a67d7",
+        "nemesis.core.confidence:ADMIRALTY_CREDIBILITY_BELIEF": "d56632db9e4d2273",
+        "nemesis.core.confidence:ADMIRALTY_RELIABILITY_WEIGHT": "a51749c0db400a62",
+        "nemesis.core.confidence:BAND_RANGES": "96e991debeaf5ae4",
+        "nemesis.core.confidence:UNJUDGEABLE_CREDIBILITY_WEIGHT_CEILING": "61a51fc57c09d078",
+        "nemesis.core.confidence:VACUITY_THRESHOLD": "aded317dc89093d4",
+        "nemesis.core.confidence:_TOLERANCE": "9ced8479b9d6999f",
+        "nemesis.core.disclosure:ENTITY_DISCLOSURE": "2593f9ef0498ea0e",
+        "nemesis.core.disclosure:INTERNAL_MARKERS": "6fa252569e93773e",
+        "nemesis.core.disclosure:PERSONA_ENTITY_TYPES": "303725dbb5ea3026",
+        "nemesis.core.disclosure:_ORDER": "ad51cdfd3675c519",
+        "nemesis.core.entities:CATEGORY_OF": "2857a5f2a9925743",
+        "nemesis.core.entities:SHARED_INFRASTRUCTURE_TYPES": "5ee401e6b14d0ecf",
+        "nemesis.core.entities:_ASN_RE": "f9715ffe430e80dc",
+        "nemesis.core.entities:_DOMAIN_RE": "37efe747ecd6553b",
+        "nemesis.core.entities:_HEX_RE": "a58040d6639883b7",
+        "nemesis.core.evidence:SHA256_HEX": "be8fbe938d3191c8",
+        "nemesis.core.fusion:CONFLICT_ALERT_THRESHOLD": "b5c73b55390566c3",
+        "nemesis.core.fusion:UNKNOWN_FACT": "90e3684c336c664b",
+        "nemesis.core.fusion:_EPS": "1fd55f10c2edca25",
+        "nemesis.core.identity:DEFAULT_TENANT": "25ce1109971e630f",
+        "nemesis.core.ids:_CONTENT_ID": "9bf45a5df060160e",
+        "nemesis.core.ids:_UUID7_ID": "7ca68ac7a934426d",
+        "nemesis.core.proposition:ROBUSTNESS_MARGIN": "1045edd14c14ee07",
+        "nemesis.core.provenance:UNPLANTABLE_SOURCE_CLASSES": "c6a425a5d8f50fce",
+        "nemesis.core.relationships:IDENTITY_ASSERTING_RELATIONS": "c77e4f0929e92e79",
+        "nemesis.core.relationships:METHOD_RELIABILITY_CEILING": "e8f06ccdaf5e7e74",
+        "nemesis.core.retention:DEFAULT_RETENTION": "94c7d1790c656d48",
+        "nemesis.core.retention:VAULT_RETENTION_NOTICE": "d0250681c8e8dc15",
+        "nemesis.disrupt.options:IMPACT_RANK": "a59ef14bbb0102d3",
+        "nemesis.disrupt.options:OWNERSHIP_CONFIDENCE_FLOOR": "3f1afcb62b124021",
+        "nemesis.disrupt.options:_WHACK_A_MOLE": "5b5621d4b2a871bd",
+        "nemesis.disrupt.planner:_DISPOSITION_CEILING": "e99c38bc364d2104",
+        "nemesis.disrupt.planner:_DISPOSITION_REASON": "6610933876620224",
+        "nemesis.effects.drafting:DRAFT_BANNER": "16b83e11f79a7249",
+        "nemesis.effects.drafting:EVIDENCE_IDS_PARAMETER": "d09b68738bfb8544",
+        "nemesis.effects.drafting:EXPORT_PURPOSE_PARAMETER": "2034a253dd5beef2",
+        "nemesis.effects.drafting:MAX_LISTED_EVIDENCE_IDS": "7e6dd5043bdf9893",
+        "nemesis.effects.drafting:NOT_SENT_FOOTER": "47b503075da12b5c",
+        "nemesis.effects.drafting:OBSERVED_ACTIVITY_PARAMETER": "a9ba43f357225f6e",
+        "nemesis.effects.drafting:OUTPUT_DIRECTORY_PARAMETER": "62c260de8f97f0b1",
+        "nemesis.effects.drafting:RECIPIENT_PARAMETER": "19ad1cb034fd5479",
+        "nemesis.effects.drafting:SEPARATOR": "5f4a9469861442d1",
+        "nemesis.effects.drafting:SUPPORTING_MATERIAL_NOTICE": "5fc92f404bfe9472",
+        "nemesis.effects.drafting:_UNSPECIFIED": "17485baf8e36d179",
+        "nemesis.effects.drafting:_UNSPECIFIED_RECIPIENT": "f584a6dcdd2cda7e",
+        "nemesis.effects.isolation:CREDENTIAL_PATHS": "acd9277322ce2375",
+        "nemesis.effects.isolation:DEFAULT_ADDRESS_SPACE_BYTES": "f08fef95a9c1ca6c",
+        "nemesis.effects.isolation:DEFAULT_CPU_SECONDS": "0724e761dc96a42c",
+        "nemesis.effects.isolation:DEFAULT_DEADLINE_SECONDS": "c87b13df3b32f005",
+        "nemesis.effects.isolation:DEFAULT_OUTPUT_BYTES": "86b3f9d8db847482",
+        "nemesis.effects.isolation:MAX_ARTIFACTS": "cc9aeb7733df4b8a",
+        "nemesis.effects.isolation:MAX_DETAIL_CHARACTERS": "ac485ff9cf653c08",
+        "nemesis.effects.isolation:MAX_STDERR_BYTES": "f6bcebcc8ee1e3ba",
+        "nemesis.effects.isolation:MAX_WORKER_OUTPUT_BYTES": "380c580c3458cd1f",
+        "nemesis.effects.isolation:SANDBOX_PROFILE": "8cefc79e3d095bc0",
+        "nemesis.effects.isolation:WORKER_MODULE": "cf51371d9c20683f",
+        "nemesis.effects.isolation:_REAP_SECONDS": "c8f851c27ea2b563",
+        "nemesis.effects.registry:REGISTRY_NAME": "1b964eee4b6d417d",
+        "nemesis.effects.registry:STOP_CONDITION_CLEARED": "9c14282e7a11930c",
+        "nemesis.effects.registry:STOP_CONDITION_PARAMETER_PREFIX": "0d2560db50da71a7",
+        "nemesis.effects.registry:_CONTROL_CHARACTERS": "2a432efd118cbf64",
+        "nemesis.effects.registry:_RUNS_OF_SPACE": "049e24fcedcbdced",
+        "nemesis.effects.simulation:ADAPTER_NAME": "a19dac7321082235",
+        "nemesis.effects.simulation:RECIPIENT_PARAMETER": "8eef7fa623e78652",
+        "nemesis.effects.simulation:REHEARSED_OPERATION_PARAMETER": "827dcf221697a505",
+        "nemesis.effects.simulation:SIMULATED_LABEL": "26b4a2cee17896bb",
+        "nemesis.effects.simulation:_UNSPECIFIED": "da2140012c586999",
+        "nemesis.effects.worker:ENV_ADDRESS_SPACE": "7d9703ef8eeffb0d",
+        "nemesis.effects.worker:ENV_CPU_SECONDS": "61075d89e917e242",
+        "nemesis.effects.worker:ENV_OUTPUT_BYTES": "6da3b5145a12aa3e",
+        "nemesis.effects.worker:FORBIDDEN_PREFIXES": "923bb6d5987b19f8",
+        "nemesis.evidence.anchoring:LOCAL_ANCHOR_AUTHORITY": "a86fea38a8a2bcb3",
+        "nemesis.evidence.anchoring:LOCAL_ANCHOR_TYPE": "82066f004c1d325f",
+        "nemesis.evidence.anchoring:SIGNATURE_SCHEME": "b4791d3bfaeeb143",
+        "nemesis.evidence.anchoring:_ED25519_SIGNATURE_BYTES": "4220e21afb58511b",
+        "nemesis.evidence.anchoring:_KEY_ID_HEX_CHARS": "1d596560eb0c9add",
+        "nemesis.evidence.escalation:DEFAULT_DEADLINE": "197338b6b9177e76",
+        "nemesis.evidence.escalation:MAY_DISCHARGE": "03991323135b5791",
+        "nemesis.evidence.export:ANCHORS_FILE": "1ba73b3136ca797f",
+        "nemesis.evidence.export:ARTIFACTS_DIR": "bb1834b82b6626e2",
+        "nemesis.evidence.export:DROPPED_NOTICE": "505c774523cb1f1e",
+        "nemesis.evidence.export:EXTERNAL_ANCHOR_PRESENT": "ab2725d2d2be5e32",
+        "nemesis.evidence.export:LOG_FILE": "46401777ff6c9551",
+        "nemesis.evidence.export:MANIFEST_FILE": "ef77a422816acb76",
+        "nemesis.evidence.export:NOTICE": "554e7b7378a2510b",
+        "nemesis.evidence.export:NOTICE_FILE": "3e319feec63d3b91",
+        "nemesis.evidence.export:NO_EXTERNAL_ANCHOR": "20bbc1bac39a522f",
+        "nemesis.evidence.export:SEAL_FILE": "6700b521975e1e77",
+        "nemesis.evidence.export:SIGNED_SEAL": "5e85d41c2734fd55",
+        "nemesis.evidence.export:UNSIGNED_SEAL": "5b2fff43ed0e15b5",
+        "nemesis.evidence.export:VERIFIER_FILE": "ccf1e6b24996a44c",
+        "nemesis.evidence.standalone_verifier:ANCHORS": "a8b22497da12d0e8",
+        "nemesis.evidence.standalone_verifier:ARTIFACTS": "f748f6a6fb6abd7e",
+        "nemesis.evidence.standalone_verifier:CHUNK": "545debdf3ca7e8ee",
+        "nemesis.evidence.standalone_verifier:GENESIS": "5796fae1d46f820f",
+        "nemesis.evidence.standalone_verifier:LOG": "3f1990744f9aabf5",
+        "nemesis.evidence.standalone_verifier:MANIFEST": "35a86df7233eb954",
+        "nemesis.evidence.standalone_verifier:MAX_ARTIFACT_BYTES": "50078e4fe8a0a95d",
+        "nemesis.evidence.standalone_verifier:SEAL": "abb612a4407733b1",
+        "nemesis.evidence.standalone_verifier:SEAL_ENTRY": "396c93a79e41a307",
+        "nemesis.evidence.vault:GENESIS_HASH": "5331b8352e875673",
+        "nemesis.evidence.vault:_ARTIFACT_MODE": "18489d94c4c2fbcc",
+        "nemesis.evidence.vault:_EVIDENCE_ID_RE": "fc179ed3159da6e7",
+        "nemesis.graph.journal:CLAIM_JOURNAL": "f544ac14824b4e8a",
+        "nemesis.graph.journal:GRAPH_JOURNAL": "343df7775bcd424a",
+        "nemesis.graph.journal:OP_CLAIM": "4dbe5bff29a4a8f7",
+        "nemesis.graph.journal:OP_ENTITY": "82489ac226ea5dc7",
+        "nemesis.graph.journal:OP_ERASE": "e934cf63ee48809e",
+        "nemesis.graph.journal:OP_RELATIONSHIP": "378a4b3d58996b24",
+        "nemesis.graph.journal:OP_SUPERSEDE": "72569fc1b332f5ca",
+        "nemesis.graph.memory:ATTRIBUTE_CONFLICT_MARKER": "9576f6751da0d880",
+        "nemesis.graph.memory:_MAX_EXPLAINED_PATHS": "69cd52c96e7bd402",
+        "nemesis.graph.recall:LONG_ACQUAINTANCE": "76dcde8893537f85",
+        "nemesis.pilot.anthropic_pilot:DEFAULT_MAX_TOKENS": "ef50f21e2ac1d6b7",
+        "nemesis.pilot.local_pilot:DEFAULT_ENDPOINT": "23c3880796c43ff2",
+        "nemesis.pilot.local_pilot:DEFAULT_MODEL": "5ce2da5b6c64180d",
+        "nemesis.pilot.local_pilot:DEFAULT_TIMEOUT_SECONDS": "6eb6377dfe6b8419",
+        "nemesis.pilot.local_pilot:LAB_NOTICE": "7be0386fea728a0f",
+        "nemesis.pilot.mediator:DEFAULT_MAX_CONSECUTIVE_MALFORMED": "6d4c3d199ba61d9d",
+        "nemesis.pilot.mediator:DEFAULT_MAX_MOVES": "d020a8bbf6f69bbe",
+        "nemesis.pilot.mediator:DEFAULT_PROPOSE_TIMEOUT": "65af83e835d24a64",
+        "nemesis.pilot.mediator:MAX_BRIEFING_ENTITIES": "342a9020249f7293",
+        "nemesis.pilot.mediator:OBSERVABLE_STOP_CONDITIONS": "4053c9c9e5f46adf",
+        "nemesis.pilot.mediator:PILOT_ACTOR_KIND": "cea845a06b3b2554",
+        "nemesis.pilot.mediator:_BUDGET_REFUSAL_MARKER": "4fe6f770af06fc2b",
+        "nemesis.pilot.mediator:_DISCLOSURE_MARKER": "f34785bfeec43f2c",
+        "nemesis.pilot.mediator:_MARKER_PATTERN": "b110499de2c8d895",
+        "nemesis.pilot.model_seat:MOVE_MODELS": "4587191b724bae72",
+        "nemesis.pilot.model_seat:SYSTEM_INSTRUCTIONS": "3239cd9c2fcae38e",
+        "nemesis.pilot.moves:PILOT_MOVE_ADAPTER": "50afc3bffd57b821",
+        "nemesis.pursuit.engine:ENGINE_ACTOR_KIND": "a59bcfa1f84c9234",
+        "nemesis.pursuit.materialize:QUALIFIER_ATTRIBUTE": "618f0a5451a2ddfd",
+        "nemesis.pursuit.materialize:QUALIFIER_CORPUS": "93d9ab9cd6dce6b8",
+        "nemesis.pursuit.materialize:QUALIFIER_JUSTIFICATION": "85116256c4dcfd97",
+        "nemesis.pursuit.materialize:QUALIFIER_METHOD": "f35a3374fa3accb0",
+        "nemesis.pursuit.materialize:QUALIFIER_POPULATION": "117a7da54c196d19",
+        "nemesis.pursuit.materialize:QUALIFIER_UNIQUE": "6a3cd121a6e9315b",
+        "nemesis.pursuit.policy:MAX_BRANCH_DEPTH": "f616cb3959936306",
+        "nemesis.pursuit.policy:MAX_CONSECUTIVE_UNINFORMATIVE": "f006763443e6d16e",
+        "nemesis.pursuit.policy:PIVOTS_FOR_ENTITY": "87c178fe79c6b843",
+        "nemesis.resolve.engine:ASSUMED_PERSONAS_PER_OPERATOR": "a9c404a1f81770a5",
+        "nemesis.resolve.engine:BASE_RATE_CEILING": "b0e4a575b944cac5",
+        "nemesis.resolve.engine:BASE_RATE_FLOOR": "ca21644a9a61e97b",
+        "nemesis.resolve.engine:EXCLUDED_CONCLUSIONS": "96e5bc462cd13ac5",
+        "nemesis.resolve.engine:HUMAN_IDENTIFICATION_IS_NOT_A_THRESHOLD": "a46050e912818c5c",
+        "nemesis.resolve.engine:NEGLIGIBLE_CONTRIBUTION": "b12a03339b5c19fb",
+        "nemesis.resolve.engine:PROPOSITION_TEMPLATE": "92814cabd12139bd",
+        "nemesis.resolve.engine:STYLOMETRY_ONLY_REFUSAL": "eaedc8f69844d952",
+        "nemesis.resolve.engine:_ALTERNATIVE_BY_GROUP": "c103af967a5d1393",
+        "nemesis.resolve.engine:_COINCIDENCE_ALTERNATIVE": "ed4514b13ab20f45",
+        "nemesis.resolve.signals:BELIEF_CEILING": "795462969b3df843",
+        "nemesis.resolve.signals:CONTRADICTION_BELIEF_CEILING": "63eb4966d01301f6",
+        "nemesis.resolve.signals:CORRELATION_GROUP_OF": "f68d98b9914c82bc",
+        "nemesis.resolve.signals:DEMONSTRATED_KEY_CONTROL_CEILING": "63e84fe1af0a0d22",
+        "nemesis.resolve.signals:IRREDUCIBLE_UNCERTAINTY": "dd98ab396ca48c2a",
+        "nemesis.resolve.signals:MIN_POSTS_FOR_A_ROUTINE": "b3645100094c9f67",
+        "nemesis.resolve.signals:OBFUSCATION_STYLOMETRY_PENALTY": "cc1c0afec6a1efa5",
+        "nemesis.resolve.signals:OPEN_WORLD_STYLOMETRY_PENALTY": "09b24d7731c3dbc9",
+        "nemesis.resolve.signals:PIVOT_METHOD_OF": "cdfc6b8c28799334",
+        "nemesis.resolve.signals:STYLOMETRY_BELIEF_CEILING": "e801b1d7f8660176",
+        "nemesis.resolve.signals:_CONTRADICTION_CAPABLE": "ab4d414dd246c1a6",
+        "nemesis.resolve.signals:_KEY_ENTITY_TYPES": "9ac6822ea925ba60",
+        "nemesis.resolve.signals:_RELIABILITY_ORDER": "884b3fc746b162e2",
+        "nemesis.sandbox.process:MAX_STDERR_BYTES": "b7411b34992dae93",
+        "nemesis.sandbox.process:MAX_STDOUT_BYTES": "56e3a54004d25a3d",
+        "nemesis.sandbox.process:REAP_SECONDS": "93303611d297f3fe",
+        "nemesis.sandbox.process:SANDBOX_EXEC": "17c4a33127ffe04e",
+        "nemesis.slice.pilot_session:APPROVED_DOMAIN": "496bf76b2c4507ad",
+        "nemesis.slice.pilot_session:APPROVED_STATE": "da38c5e43da5f6a6",
+        "nemesis.slice.pilot_session:EFFECT_BUDGET": "167ee1ab79e38d0a",
+        "nemesis.slice.pilot_session:INJECTION": "d41472c15b991c1e",
+        "nemesis.slice.pilot_session:SCENARIO_NOW": "0e1fcbd972f991dd",
+        "nemesis.slice.pilot_session:SEED_DOMAIN": "cf861174e9e12fb9",
+        "nemesis.slice.scenario:CAPABILITY_LIFETIME": "31d7c04849cbac72",
+        "nemesis.slice.scenario:CASE_AUTHORITY_REFERENCE": "b22b27fd13b4f518",
+        "nemesis.slice.scenario:CLUSTER_MIN_CONFIDENCE": "30965839148f7659",
+        "nemesis.slice.scenario:DARK_BAZAAR_PERSONA_POPULATION": "9c3b4477949e80d5",
+        "nemesis.slice.scenario:PERSONA_POPULATION_CORPUS": "7168e5fb72c15b73",
+        "nemesis.slice.scenario:RESURGENCE_RULE": "7421fb4a561c1e02",
+        "nemesis.slice.scenario:RESURGENCE_RULE_VERSION": "1ff612912ca01798",
+        "nemesis.slice.scenario:SCENARIO_SUBJECT": "60b8d046a8319a83",
+        "nemesis.slice.scenario:STAGE_NAMES": "cf5b88f5b5a96a2c",
+        "nemesis.slice.scenario:_CANNOT_DEFEND": "c536ca831c3d2c38",
+        "nemesis.slice.scenario:_CDN_TENANTS": "ba19db6875319cae",
+        "nemesis.slice.scenario:_DETECTION_PROPOSITION": "341f7114ec172e49",
+        "nemesis.slice.scenario:_DIRECTED_BECAUSE": "a102a9c96ed78051",
+        "nemesis.slice.scenario:_NOTHING_IN_COMMON": "2716842ff6aaeadf",
+        "nemesis.slice.scenario:_NOT_RECONNECTED_BY": "7855b524b0c911b9",
+        "nemesis.slice.scenario:_REDOCTOBER_ALTERNATIVE_ARGUMENT": "979af2ba1dbe625c",
+        "nemesis.slice.scenario:_SENSOR_REPLAY_METHOD": "066705957604a4cd",
+        "nemesis.slice.scenario:_SIGNALS_UNAVAILABLE": "1a06b24287ddb9dd",
+        "nemesis.slice.scenario:_WALLET_WITHHELD_FROM": "7d0b9842cb4db62f",
+        "nemesis.ui.investigation:SIMULATED_NOTICE": "e5ad146c4938c00f",
+        "nemesis.ui.investigation:WITHHELD_NOTE": "60386a34750e3f49",
+        "nemesis.ui.investigation:_CSS": "3ab7521dc09bf328",
+    }
 )
-"""Where confidence figures are decided. Scanned for constants the registry forgot.
+"""Every dial in `src/nemesis`, by normalised syntax. Generated by `discovered_constants()`.
 
-Widened after a review: `ROBUSTNESS_MARGIN` and `METHOD_RELIABILITY_CEILING` are among the most
-consequential dials in the platform and lived in modules this list did not name, so the scan
-could not have found them however good it was. An incomplete module list defeats a scanner as
-thoroughly as a bad pattern."""
-
-_NOT_CALIBRATION: Final[tuple[str, ...]] = (
-    "MAX_",
-    "TIMEOUT",
-    "SECONDS",
-    "VERSION",
-    "BYTES",
-    "CHUNK",
-)
-"""Prefixes and words that mark a number as operational rather than epistemic. A timeout is a
-dial; it is not a dial that changes what the platform believes."""
+Long on purpose. The registry above is curated and therefore forgettable; this is not curated,
+which is the entire point — four reviews defeated four enumerations, and the fifth thing to try
+was to stop enumerating. Regenerate deliberately, in its own commit, with the reason."""
 
 
-def unregistered_calibration_constants() -> tuple[str, ...]:
-    """Module-level constants in the scoring modules that nobody registered.
+SELF: Final = "nemesis/calibration/freeze.py"
+"""The one module outside the freeze, because the frozen tables live in it.
 
-    **Parsed with `ast`, not matched with a regex, and compared fully qualified.** The first
-    version did neither, and a reviewer walked through both holes in one demonstration: it saw
-    only ``NAME = <digit>``, so every dial that is a *table* — `BAND_RANGES`,
-    `DEFAULT_BASE_RATE`, `BELIEF_CEILING`, `ROBUSTNESS_MARGIN`,
-    `METHOD_RELIABILITY_CEILING` — was invisible; and it compared bare names, so a homonym in
-    another module counted as registered. Changing `BAND_RANGES` alone moved a published
-    confidence band from *likely* to *almost certain* while both checks stayed green.
+Excluded by **relative** path rather than by absolute path, so pointing the freeze at a copy of
+the tree excludes that copy's `freeze.py` too. Excluding by absolute path silently included the
+copy, which made every test against a copied tree report a hundred spurious constants.
+"""
 
-    A table is not a lesser dial than a scalar. `BAND_RANGES` decides the word a reader
-    actually sees, which is the only number most consumers of this platform will ever read.
 
-    Still deliberately crude in one direction: it flags anything upper-case holding a number
-    that is not registered or excluded. A false positive costs one line; a false negative costs
-    the credibility of every figure the evaluation produces.
+def _package(tree: Path | None) -> Path:
+    """The `nemesis` package directory: the real one, or a copy a caller points us at.
+
+    Every path in this module is resolved through here, so the default cannot drift between
+    functions — it did once, and two of them disagreed by one directory level.
     """
-    import ast
-    from pathlib import Path
+    return tree if tree is not None else Path(__file__).resolve().parent.parent
 
-    root = Path(__file__).resolve().parent.parent
-    registered = set(CALIBRATION_CONSTANTS)
-    stray: list[str] = []
 
-    def holds_a_number(node: ast.AST) -> bool:
-        return any(
-            isinstance(child, ast.Constant)
-            and isinstance(child.value, int | float)
-            and not isinstance(child.value, bool)
-            for child in ast.walk(node)
+def frozen_modules(tree: Path | None = None) -> tuple[str, ...]:
+    """Every module under `src/nemesis` except this one. **One function, read by everything.**
+
+    The scanner and the constant digest previously disagreed about scope — the scanner had been
+    moved to a derived set while the digest still hashed a hand-written list — and a reviewer
+    walked straight through the gap: `LINKAGE_PROPOSITION` in `calibration/harness.py` is
+    discovered by one and hashed by neither. Flipping it from `ACTOR_ATTRIBUTION` to
+    `OBSERVATION` took both reported false-match rates from 0.0 to 1.0 with every check green.
+
+    Two derivations were tried and both were too clever. Modules that *import* the confidence
+    machinery misses `core/provenance.py`, which imports none of it and holds
+    `UNPLANTABLE_SOURCE_CLASSES` — the table deciding which evidence gets inverted. The
+    transitive closure of that import graph reaches 84 of 104 modules, which is close enough to
+    "all of them" that the derivation buys precision nobody needs and one more thing to be
+    wrong about.
+
+    So: the whole tree. Nothing to compute, nothing to forget, and no seam for a sixth instance
+    of the same defect to appear in.
+
+    This module is excluded because the frozen tables live in it and would be self-referential.
+    That exclusion is a real hole — editing the tables is how a change gets waved through — and
+    it is closed socially rather than mechanically: a diff to `FROZEN_*` is the thing a reviewer
+    is meant to look at.
+
+    `tree` points the enumeration at a **copy** of the package, so a test can exercise the freeze
+    without editing the tree it protects. This function accepted that argument and ignored it for
+    one commit: the edit that was supposed to introduce it silently failed to match, and nothing
+    noticed, because the only test injecting anything modified a file that exists at the same
+    relative path in both trees. A **new** module in the copy was never enumerated at all. The
+    ninth instance of this project's recurring defect and the second in this function — a control
+    that looks right because the case exercising it happens to coincide with the case it gets
+    wrong.
+    """
+
+    root = _package(tree)
+    return tuple(
+        sorted(
+            relative
+            for path in root.rglob("*.py")
+            if (relative := f"nemesis/{path.relative_to(root).as_posix()}") != SELF
+        )
+    )
+
+
+def _module_constants(relative: str, tree: Path | None = None) -> dict[str, ast.expr]:
+    """Every module-level constant in one file, by fully qualified name.
+
+    A constant is anything bound at module level to an upper-case name. What it *holds* is not
+    part of the test, which is the lesson of four rounds: the first scan wanted a digit, and a
+    digit is exactly what `LINKAGE_PROPOSITION`, `IDENTITY_ASSERTING_RELATIONS` and
+    `UNPLANTABLE_SOURCE_CLASSES` do not contain.
+    """
+
+    module = relative.removesuffix(".py").replace("/", ".")
+    parsed = ast.parse(_source_of(relative, tree))
+
+    found: dict[str, ast.expr] = {}
+    for node in parsed.body:
+        name: str | None = None
+        value: ast.expr | None = None
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            name, value = node.target.id, node.value
+        elif (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+        ):
+            name, value = node.targets[0].id, node.value
+        if name is None or value is None or not name.lstrip("_").isupper():
+            continue
+        found[f"{module}:{name}"] = value
+    return found
+
+
+def discovered_constants(tree: Path | None = None) -> dict[str, str]:
+    """Every dial in the tree, mapped to its normalised syntax — **derived, never listed**.
+
+    This is the completeness guarantee, and it replaces the registry in that role. Four reviews
+    found four ways to defeat an enumeration of dials; none of them defeats "parse every module
+    and hash every module-level constant", because there is no list to be absent from and no
+    judgement about what qualifies. A constant that *appears* is reported as well as one that
+    moves, which closes "add a dial and do not register it".
+
+    **No classification, and that is the third time this lesson has been paid for.** An earlier
+    version skipped a constant whose value was entirely strings, on the reasoning that such a
+    thing is a message. It let `LOW_PLANTING_COSTS` through. The rule was then narrowed to "a
+    value that constructs or looks up is a table however much of it is text" — and a review found
+    that still excluded `FORBIDDEN_PREFIXES`, `CREDENTIAL_PATHS`, `INTERNAL_MARKERS` and
+    `EXCLUDED_CONCLUSIONS`, four security tables made of plain strings. The module digest covered
+    them, so it was never a bypass; the claim that every dial was *named* was simply false.
+
+    So there is no rule now. Every module-level upper-case assignment is a dial, 356 of them,
+    and the cost of including the genuine prose is nothing: rewording a message already moves
+    that module's syntax digest, so no new failure mode is introduced by naming it too.
+
+    `CALIBRATION_CONSTANTS` keeps a different job: it is the curated epistemic subset whose
+    **imported values** are frozen, and it catches what a syntax tree cannot. `PUBLISHED_BAND_BINS`
+    is the case that proves both are needed — it is derived from `BAND_RANGES`, so its own AST
+    never changes when the band edges move, and only reading the value notices.
+    """
+    return {
+        name: ast.dump(value, annotate_fields=True, include_attributes=False)
+        for relative in frozen_modules(tree)
+        for name, value in _module_constants(relative, tree).items()
+    }
+
+
+def constants_drifted(tree: Path | None = None) -> tuple[str, ...]:
+    """Which dials moved, appeared or vanished anywhere in the tree.
+
+    Named, not counted: the first question after a red freeze is always "which one, and was it
+    deliberate".
+    """
+    observed = {
+        name: hashlib.sha256(f"{name}={dump}".encode()).hexdigest()[:16]
+        for name, dump in discovered_constants(tree).items()
+    }
+    moved = {name for name, digest in observed.items() if CONSTANT_DIGESTS.get(name) != digest}
+    vanished = {name for name in CONSTANT_DIGESTS if name not in observed}
+    return tuple(sorted(moved | vanished))
+
+
+def _source_of(relative: str, tree: Path | None = None) -> str:
+    """Read one module, from the real tree or from a copy a test points us at."""
+    return (_package(tree).parent / relative).read_text(encoding="utf-8")
+
+
+def _normalised_tree(relative: str, tree: Path | None = None) -> str:
+    """One module's syntax tree, docstrings removed, dumped without line numbers.
+
+    Comments never enter an AST and docstrings are stripped explicitly, so rewording an
+    explanation does not break the freeze while changing a comparison does. That is the
+    sensitivity a source hash gets backwards.
+
+    Stripping only *leading* docstrings was not enough: this codebase documents constants with a
+    bare string after the assignment, so rewording the note under `CORRELATION_GROUP_OF` broke
+    the digest — a false positive, which is how a tripwire gets switched off.
+    """
+
+    return normalised_source(_source_of(relative, tree))
+
+
+def normalised_source(text: str) -> str:
+    """The same normalisation, applied to source text rather than a path.
+
+    Exposed so a test can tamper with a **copy** of a module and ask whether the freeze would
+    notice, without editing the tree. Sharing this function rather than re-implementing the
+    stripping in the test matters: a test that reimplements the rule can agree with itself while
+    disagreeing with the code.
+    """
+
+    def is_prose_statement(statement: ast.stmt) -> bool:
+        return (
+            isinstance(statement, ast.Expr)
+            and isinstance(statement.value, ast.Constant)
+            and isinstance(statement.value.value, str)
         )
 
-    for relative in CALIBRATED_MODULES:
-        module = relative.removesuffix(".py").replace("/", ".")
-        tree = ast.parse((root.parent / relative).read_text(encoding="utf-8"))
-        for node in tree.body:
-            name: str | None = None
-            value: ast.expr | None = None
-            if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-                name, value = node.target.id, node.value
-            elif (
-                isinstance(node, ast.Assign)
-                and len(node.targets) == 1
-                and isinstance(node.targets[0], ast.Name)
-            ):
-                name, value = node.targets[0].id, node.value
-            if name is None or value is None or not name.lstrip("_").isupper():
-                continue
-            if not holds_a_number(value):
-                continue
-            reference = f"{module}:{name}"
-            if reference in registered or any(mark in name for mark in _NOT_CALIBRATION):
-                continue
-            stray.append(reference)
-    return tuple(sorted(stray))
+    tree = ast.parse(text)
+    for node in ast.walk(tree):
+        body = getattr(node, "body", None)
+        if isinstance(body, list):
+            # `setattr` rather than `node.body = ...`: `ast.AST` declares no `body`, and the
+            # nodes that have one do not share a base class that does.
+            kept = [item for item in body if not is_prose_statement(item)]
+            setattr(node, "body", kept)  # noqa: B010
+    return ast.dump(tree, annotate_fields=True, include_attributes=False)
+
+
+def module_digests(tree: Path | None = None) -> dict[str, str]:
+    """Every module in `frozen_modules()`, by normalised syntax tree.
+
+    **The scope is the whole tree, because narrowing it is what kept losing.** This digest was
+    restricted to modules defining a registered dial, on the argument that hashing all logic
+    everywhere would fire too often to stay armed. An adversarial sweep found two ways through
+    that argument, both reproduced before being fixed:
+
+    - `pursuit/materialize.py::_confidence_from` holds a bare `6.0` **inside a function body** —
+      the evidence weight for every edge with no measurable selectivity. Changing it to `20.0`
+      moves the GLASS ANVIL attribution's ORGANIZATION dimension from *unlikely* (0.4470) to
+      *likely* (0.5873), reversing the direction, with all four checks clean and all 913 tests
+      passing. No digest of module-level constants can see a literal in a function body.
+    - `attribute/disclosure.py::_to_external` publishes the post-margin opinion. Swapping two
+      lines to publish the pre-margin one moves ORGANIZATION in the **external deliverable** —
+      the artefact handed to a provider or a regulator — from *unlikely* to *roughly even*, and
+      touches **no constant at all**. No value-based digest of any design can see that.
+
+    The argument for narrowing was also just wrong, and measuring it said so. Replayed over this
+    repository's history, eight of the last ten commits move this digest — but each moves
+    **one to three modules**, named. That is a readable question ("did any of these three change
+    a published figure?"), not the wall of noise the narrowing was defending against. The one
+    commit that moves all 102 is the initial import, and one commit — a licence fix — moves
+    none.
+
+    So the churn is a price, not a hazard: one deliberate line per commit that touches scoring
+    code, in exchange for the seventh and eighth bypasses not existing.
+    """
+    return {
+        relative: _digest_of(_normalised_tree(relative, tree)) for relative in frozen_modules(tree)
+    }
+
+
+def engine_digest(tree: Path | None = None) -> str:
+    """The whole tree folded into one value. :func:`module_digests` is the actionable form."""
+    folded = hashlib.sha256()
+    for relative, digest in sorted(module_digests(tree).items()):
+        folded.update(relative.encode("utf-8"))
+        folded.update(b"=")
+        folded.update(digest.encode("utf-8"))
+        folded.update(b"\x00")
+    return folded.hexdigest()
+
+
+MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
+    {
+        "nemesis/__init__.py": "a172ce99f96959a5",
+        "nemesis/api/__init__.py": "ad2e13b69c4fc1fd",
+        "nemesis/api/app.py": "7e09268b35e702af",
+        "nemesis/api/submission.py": "c69dee2a4bfdd134",
+        "nemesis/api/tenancy.py": "89f53381eebffae1",
+        "nemesis/attribute/__init__.py": "ad2e13b69c4fc1fd",
+        "nemesis/attribute/dimensions.py": "824561b007fdcb7d",
+        "nemesis/attribute/disclosure.py": "36bf502de5ab7a28",
+        "nemesis/attribute/engine.py": "491d53c3c16746a4",
+        "nemesis/audit/__init__.py": "ad2e13b69c4fc1fd",
+        "nemesis/audit/trail.py": "e20a0c949f4c1a8e",
+        "nemesis/authz/__init__.py": "ad2e13b69c4fc1fd",
+        "nemesis/authz/anchor.py": "67a0fb6b0bd4ace4",
+        "nemesis/authz/attestation.py": "de77df2a9c728935",
+        "nemesis/authz/envelope.py": "26331a4b05dc728c",
+        "nemesis/authz/gateway.py": "1a541fd083f6358b",
+        "nemesis/authz/keys.py": "b1a89e11f42f944a",
+        "nemesis/authz/providers.py": "a6d145f04bbce983",
+        "nemesis/authz/rbac.py": "8638465529fb2575",
+        "nemesis/authz/store.py": "9f0e1c3d3ef0b3e7",
+        "nemesis/authz/verification.py": "b36a928a39b96e67",
+        "nemesis/calibration/__init__.py": "d29b1b1babb51bc4",
+        "nemesis/calibration/coherence.py": "452dc2ac53a23920",
+        "nemesis/calibration/generator.py": "bdd90080b2cfed7e",
+        "nemesis/calibration/harness.py": "dd64f7372b912d6b",
+        "nemesis/calibration/scoring.py": "b2e7a193a30d65a1",
+        "nemesis/cli/__init__.py": "ad2e13b69c4fc1fd",
+        "nemesis/cli/main.py": "0317e2f65b68f6a8",
+        "nemesis/collect/__init__.py": "ad2e13b69c4fc1fd",
+        "nemesis/collect/base.py": "b1e03b526cdb8019",
+        "nemesis/collect/fixtures/__init__.py": "697cd02f522bbe51",
+        "nemesis/collect/fixtures/glass_anvil.py": "16e8a4f4ec1bc6ef",
+        "nemesis/collect/isolation.py": "08f8d034a5a5a2e7",
+        "nemesis/collect/quarantine.py": "9242f2b02186c416",
+        "nemesis/collect/simulated.py": "75736a17300d4456",
+        "nemesis/collect/worker.py": "614fdabfd39f3392",
+        "nemesis/core/__init__.py": "ad2e13b69c4fc1fd",
+        "nemesis/core/authorization.py": "a6e6f158094da82a",
+        "nemesis/core/canonical.py": "dfda6b475e3b80c8",
+        "nemesis/core/claims.py": "c019f8b283a6a405",
+        "nemesis/core/confidence.py": "db49d12f752f0a03",
+        "nemesis/core/disclosure.py": "4aa7d1986f15b176",
+        "nemesis/core/entities.py": "bff6ed6267e96415",
+        "nemesis/core/evidence.py": "11f4c3c302e3bbd1",
+        "nemesis/core/fusion.py": "b932562ceea3ae2c",
+        "nemesis/core/identity.py": "bf76f9595425eaeb",
+        "nemesis/core/ids.py": "8cc466d54165c2ff",
+        "nemesis/core/proposition.py": "6362df2cbabfdc5e",
+        "nemesis/core/provenance.py": "b241365918a5b072",
+        "nemesis/core/relationships.py": "a43da87bbf3f6ba3",
+        "nemesis/core/retention.py": "90b096276c1852c7",
+        "nemesis/core/temporal.py": "29539d9208d8fde7",
+        "nemesis/disrupt/__init__.py": "ad2e13b69c4fc1fd",
+        "nemesis/disrupt/options.py": "0ed8df8c5f3130a6",
+        "nemesis/disrupt/planner.py": "ca28a37a568d7b68",
+        "nemesis/effects/__init__.py": "ad2e13b69c4fc1fd",
+        "nemesis/effects/drafting.py": "a0e70263193ec6f2",
+        "nemesis/effects/isolation.py": "05b3040ca9723d6f",
+        "nemesis/effects/registry.py": "6e094d6a71f1f35b",
+        "nemesis/effects/simulation.py": "c31e9f1a36b3083e",
+        "nemesis/effects/worker.py": "9bf46689e661b835",
+        "nemesis/evidence/__init__.py": "ad2e13b69c4fc1fd",
+        "nemesis/evidence/anchoring.py": "8b974a38aea73244",
+        "nemesis/evidence/escalation.py": "a577b5bd2f866902",
+        "nemesis/evidence/export.py": "726b9261d59a3875",
+        "nemesis/evidence/standalone_verifier.py": "0cf95fadd64c06fe",
+        "nemesis/evidence/vault.py": "a5ffab61b1e01ef1",
+        "nemesis/graph/__init__.py": "ad2e13b69c4fc1fd",
+        "nemesis/graph/enforcement.py": "bf461c98b7ae1ac3",
+        "nemesis/graph/journal.py": "7239834f84fc2b78",
+        "nemesis/graph/memory.py": "8da90b3a3c8d674a",
+        "nemesis/graph/recall.py": "0f633cf4731a9e2b",
+        "nemesis/pilot/__init__.py": "80970ead670f5cbb",
+        "nemesis/pilot/anthropic_pilot.py": "45a66ca7a23a84a1",
+        "nemesis/pilot/local_pilot.py": "209aa329c247af77",
+        "nemesis/pilot/mediator.py": "a7672ae64e7f0ed6",
+        "nemesis/pilot/model_seat.py": "086e52399da9143e",
+        "nemesis/pilot/moves.py": "a3b9945a1e6200b0",
+        "nemesis/pilot/openai_pilot.py": "b83d98e051ed6abb",
+        "nemesis/pilot/pilot.py": "16f58b14f6431694",
+        "nemesis/ports/__init__.py": "ad2e13b69c4fc1fd",
+        "nemesis/ports/authorization.py": "0fc01b5a4a148543",
+        "nemesis/ports/collection.py": "ab6473567df82a00",
+        "nemesis/ports/effects.py": "52e15df7ab222655",
+        "nemesis/ports/identity.py": "e2cc63ebcc7f117c",
+        "nemesis/ports/isolation.py": "3304b03d616feaea",
+        "nemesis/ports/storage.py": "e63004243bec62a5",
+        "nemesis/pursuit/__init__.py": "ad2e13b69c4fc1fd",
+        "nemesis/pursuit/engine.py": "9436ef99a9a9c8cf",
+        "nemesis/pursuit/investigation.py": "69e3d2c8b22a5960",
+        "nemesis/pursuit/materialize.py": "338409bef36aabc7",
+        "nemesis/pursuit/policy.py": "887190c023d6a10e",
+        "nemesis/resolve/__init__.py": "ad2e13b69c4fc1fd",
+        "nemesis/resolve/engine.py": "4c4f9c2030905dbe",
+        "nemesis/resolve/signals.py": "d061ffc01a1a2ed0",
+        "nemesis/sandbox/__init__.py": "ad2e13b69c4fc1fd",
+        "nemesis/sandbox/process.py": "70c60d3fcda3d564",
+        "nemesis/sandbox/seal.py": "e007ab5044298ce4",
+        "nemesis/slice/__init__.py": "af4908b211f76e8b",
+        "nemesis/slice/pilot_session.py": "c6bc5d8ca8372f3e",
+        "nemesis/slice/scenario.py": "39f31e92de895843",
+        "nemesis/ui/__init__.py": "bb9576acc61aeb78",
+        "nemesis/ui/investigation.py": "8a672135840ea5c0",
+    }
+)
+
+
+FROZEN_VALUE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
+    {
+        "nemesis.attribute.dimensions:DEFAULT_TEMPORAL_GAP_TOLERANCE": "bb43b8b888757528",
+        "nemesis.attribute.engine:CONTRA_INDICATOR_DISCOUNT": "24877858617e9a1b",
+        "nemesis.attribute.engine:DECEPTION_BASE_RATE": "037fc0cd8a861ea1",
+        "nemesis.attribute.engine:DEFAULT_BASE_RATE": "742d17a0dd617906",
+        "nemesis.attribute.engine:DIMENSION_PROPOSITION": "e8ee084f8aba6132",
+        "nemesis.attribute.engine:LOW_PLANTING_COSTS": "c3c88a0995f923a6",
+        "nemesis.attribute.engine:PLANTED_EVIDENCE_DISBELIEF_CEILING": "6a3ddf53a7c4ab21",
+        "nemesis.attribute.engine:PLANTING_BELIEF_BY_COST": "b5b65616ebff645d",
+        "nemesis.calibration.coherence:TOLERANCE": "641b2d75e6d7ac7c",
+        "nemesis.calibration.harness:ACTIONABLE_BANDS": "5df9b3e295d43b04",
+        "nemesis.calibration.harness:LINKAGE_PROPOSITION": "1545a9c95d79052d",
+        "nemesis.calibration.scoring:DEFAULT_BINS": "be010ce660f5827e",
+        "nemesis.calibration.scoring:MIN_BIN_COUNT": "9fe727b8db9bef0b",
+        "nemesis.calibration.scoring:PUBLISHED_BAND_BINS": "f67c421b38efebb7",
+        "nemesis.core.confidence:ADMIRALTY_CREDIBILITY_BELIEF": "782bef4883ab2d5e",
+        "nemesis.core.confidence:ADMIRALTY_RELIABILITY_WEIGHT": "c981b367828df809",
+        "nemesis.core.confidence:BAND_RANGES": "241423d92c0daea2",
+        "nemesis.core.confidence:UNJUDGEABLE_CREDIBILITY_WEIGHT_CEILING": "2904a8a11f85514f",
+        "nemesis.core.confidence:VACUITY_THRESHOLD": "dcffbb42c91136ee",
+        "nemesis.core.confidence:_TOLERANCE": "4ddc17c7305ba626",
+        "nemesis.core.fusion:CONFLICT_ALERT_THRESHOLD": "02c8446321e2d827",
+        "nemesis.core.fusion:_EPS": "20f5dab8253a401a",
+        "nemesis.core.proposition:ROBUSTNESS_MARGIN": "a8372fc435dacd41",
+        "nemesis.core.provenance:UNPLANTABLE_SOURCE_CLASSES": "54e30f4979d76011",
+        "nemesis.core.relationships:IDENTITY_ASSERTING_RELATIONS": "a4f98be04a33fc5e",
+        "nemesis.core.relationships:METHOD_RELIABILITY_CEILING": "dde14467adcc306b",
+        "nemesis.disrupt.options:IMPACT_RANK": "dd0cf6842bf60c0d",
+        "nemesis.disrupt.options:OWNERSHIP_CONFIDENCE_FLOOR": "652ab5b813ac18e3",
+        "nemesis.resolve.engine:ASSUMED_PERSONAS_PER_OPERATOR": "62f4edb6430c3383",
+        "nemesis.resolve.engine:BASE_RATE_CEILING": "ff10dc4fea831406",
+        "nemesis.resolve.engine:BASE_RATE_FLOOR": "2b38cc51754eb6e9",
+        "nemesis.resolve.engine:NEGLIGIBLE_CONTRIBUTION": "7e13c48600404d55",
+        "nemesis.resolve.signals:BELIEF_CEILING": "57867c86d195aa75",
+        "nemesis.resolve.signals:CONTRADICTION_BELIEF_CEILING": "35de711bf91fd60f",
+        "nemesis.resolve.signals:CORRELATION_GROUP_OF": "b9954362cb965b89",
+        "nemesis.resolve.signals:DEMONSTRATED_KEY_CONTROL_CEILING": "94a5183d6f47a735",
+        "nemesis.resolve.signals:IRREDUCIBLE_UNCERTAINTY": "bc86be1af15f6287",
+        "nemesis.resolve.signals:MIN_POSTS_FOR_A_ROUTINE": "28423595fa8e8cc9",
+        "nemesis.resolve.signals:OBFUSCATION_STYLOMETRY_PENALTY": "3ae1a618b8ee9155",
+        "nemesis.resolve.signals:OPEN_WORLD_STYLOMETRY_PENALTY": "003e8086fcc9e5f7",
+        "nemesis.resolve.signals:STYLOMETRY_BELIEF_CEILING": "7b04b73d1e045444",
+        "nemesis.slice.scenario:CLUSTER_MIN_CONFIDENCE": "3dbd1b7586dab613",
+        "nemesis.slice.scenario:DARK_BAZAAR_PERSONA_POPULATION": "af8c65a7aa4782bf",
+    }
+)
+"""Per-constant digests of the **imported values**, so `drifted()` names what moved.
+
+Complementary to the syntactic digests rather than redundant with them: `PUBLISHED_BAND_BINS` is
+derived from `BAND_RANGES`, so its own syntax never changes when the band edges move, and only
+reading the value notices. Regenerate deliberately, in its own commit, with the reason."""
+
+
+def canonical(value: object) -> str:
+    """A stable textual form for a constant's value, independent of the process that reads it.
+
+    `repr()` alone was wrong and would have made the freeze flaky rather than strict: a
+    `frozenset` of enum members reprs in hash order, which varies between interpreter runs, so
+    `UNPLANTABLE_SOURCE_CLASSES` and `ACTIONABLE_BANDS` would have drifted at random in CI.
+    A freeze that fails intermittently is worse than none — it teaches the reader that a red
+    digest means nothing.
+
+    Sets are sorted because their order carries no meaning. Sequences are not, because theirs
+    does. Mappings are sorted by key for the same reason as sets, and a reordering that changes
+    nothing semantically is caught by the syntactic digest anyway.
+
+    Enum members are frozen **by name**, not by value. On its own that would leave the meaning
+    behind the name unfrozen — rewriting `ConfidenceBand.UNLIKELY`'s value to `"likely"` changes
+    the word a reader is shown while the name is unmoved. It is not a hole because every enum
+    *definition* in `src/nemesis` sits inside `module_digests()`; noting it here because the
+    two mechanisms only cover each other while both keep their scope.
+    """
+    if isinstance(value, Enum):
+        return f"{type(value).__name__}.{value.name}"
+    if isinstance(value, Mapping):
+        inner = ", ".join(
+            f"{canonical(k)}: {canonical(v)}"
+            for k, v in sorted(value.items(), key=lambda item: canonical(item[0]))
+        )
+        return "{" + inner + "}"
+    if isinstance(value, frozenset | set):
+        return "{" + ", ".join(sorted(canonical(item) for item in value)) + "}"
+    if isinstance(value, list | tuple):
+        return "(" + ", ".join(canonical(item) for item in value) + ")"
+    # The fallback asks the object to describe itself, so it carries the type as well: an
+    # object substituted for a dial can control its own `__repr__` but not what it is. The
+    # residual — a lying `__repr__` on the *same* type — needs a class definition, and every
+    # class definition in `src/nemesis` is now inside `module_digests()`.
+    return f"{type(value).__name__}({value!r})"
 
 
 def freeze_digest(values: dict[str, object] | None = None) -> str:
@@ -220,20 +992,61 @@ def freeze_digest(values: dict[str, object] | None = None) -> str:
     for name in sorted(observed):
         folded.update(name.encode("utf-8"))
         folded.update(b"=")
-        folded.update(repr(observed[name]).encode("utf-8"))
+        folded.update(canonical(observed[name]).encode("utf-8"))
         folded.update(b"\x00")
     return folded.hexdigest()
 
 
-def drifted() -> tuple[str, ...]:
-    """Which constants no longer match the freeze — empty when the digest holds.
+def _digest_of(payload: str) -> str:
+    """Sixteen hex characters of SHA-256. Short enough that a human reads the table."""
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
-    Returns the names rather than a bare boolean, because "something moved" is not actionable
-    and "``DECEPTION_BASE_RATE`` moved" is. The comparison is against the digest, so this can
-    only report *that* the set changed; naming which one requires the frozen values, which are
-    kept in the test that pins them.
+
+def value_digest(name: str, value: object) -> str:
+    """`freeze_digest`'s fold, applied to a single constant.
+
+    Truncated to sixteen hex characters: this table is read by people deciding whether a change
+    was deliberate, and a wall of sixty-four-character hashes is a table nobody checks. Sixteen
+    is far beyond what an accidental collision needs, and this is not resisting an adversary who
+    controls the constants — one who does can edit the frozen table in the same commit.
     """
-    return () if freeze_digest() == FROZEN_DIGEST else tuple(sorted(observed_values()))
+    folded = hashlib.sha256()
+    folded.update(name.encode("utf-8"))
+    folded.update(b"=")
+    folded.update(canonical(value).encode("utf-8"))
+    folded.update(b"\x00")
+    return folded.hexdigest()[:16]
+
+
+def drifted() -> tuple[str, ...]:
+    """Which constants no longer match the freeze — empty when nothing moved.
+
+    Names the culprits, because "something moved" is not actionable and
+    "``DECEPTION_BASE_RATE`` moved" is. An earlier version compared only the aggregate digest
+    and, when it failed, returned **every registered name** — technically documented, and in
+    practice a report that a reader would take as thirty constants having changed when one had.
+    A diagnostic that cannot distinguish one from thirty is not a diagnostic.
+
+    Constants that vanished are reported too: a registered name that no longer exists is a
+    change to what the platform believes, not an import error to be shrugged at.
+    """
+    observed = {name: value_digest(name, value) for name, value in observed_values().items()}
+    moved = [name for name, digest in observed.items() if FROZEN_VALUE_DIGESTS.get(name) != digest]
+    vanished = [name for name in FROZEN_VALUE_DIGESTS if name not in observed]
+    return tuple(sorted(set(moved) | set(vanished)))
+
+
+def engine_drifted(tree: Path | None = None) -> tuple[str, ...]:
+    """Which modules' syntax changed, appeared or vanished since the freeze.
+
+    Names rather than a boolean, for the same reason `drifted()` gives names: after a red freeze
+    the only useful question is *which*, and a report a reader cannot act on is one they learn
+    to dismiss.
+    """
+    observed = module_digests(tree)
+    moved = {name for name, digest in observed.items() if MODULE_DIGESTS.get(name) != digest}
+    vanished = {name for name in MODULE_DIGESTS if name not in observed}
+    return tuple(sorted(moved | vanished))
 
 
 class CalibrationFreezeError(RuntimeError):
@@ -245,12 +1058,19 @@ class CalibrationFreezeError(RuntimeError):
 
 
 __all__ = [
-    "CALIBRATED_MODULES",
     "CALIBRATION_CONSTANTS",
+    "CONSTANT_DIGESTS",
     "FROZEN_DIGEST",
+    "MODULE_DIGESTS",
     "CalibrationFreezeError",
+    "constants_drifted",
+    "discovered_constants",
     "drifted",
+    "engine_digest",
+    "engine_drifted",
     "freeze_digest",
+    "frozen_modules",
+    "module_digests",
+    "normalised_source",
     "observed_values",
-    "unregistered_calibration_constants",
 ]

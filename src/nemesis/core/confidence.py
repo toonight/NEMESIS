@@ -36,6 +36,47 @@ Unit = Annotated[float, Field(ge=0.0, le=1.0)]
 
 _TOLERANCE = 1e-9
 
+ADMIRALTY_CREDIBILITY_BELIEF: dict[InformationCredibility, float] = {
+    InformationCredibility.CONFIRMED: 0.95,
+    InformationCredibility.PROBABLY_TRUE: 0.75,
+    InformationCredibility.POSSIBLY_TRUE: 0.55,
+    InformationCredibility.DOUBTFUL: 0.30,
+    InformationCredibility.IMPROBABLE: 0.10,
+    InformationCredibility.CANNOT_BE_JUDGED: 0.50,
+}
+"""How far a credibility grade tips the belief/disbelief split.
+
+Hoisted out of :meth:`Opinion.from_admiralty` so the calibration freeze can see it. It was
+inlined in the method body, where a module-level scan is structurally blind — a dial hidden in a
+function is hidden from the mechanism whose whole purpose is to notice dials moving, and this
+one sets the *entry* value of every opinion derived from a graded source.
+
+A **calibration choice, not a derivation**; see ADR-0002.
+"""
+
+ADMIRALTY_RELIABILITY_WEIGHT: dict[SourceReliability, float] = {
+    SourceReliability.COMPLETELY_RELIABLE: 0.95,
+    SourceReliability.USUALLY_RELIABLE: 0.80,
+    SourceReliability.FAIRLY_RELIABLE: 0.60,
+    SourceReliability.NOT_USUALLY_RELIABLE: 0.35,
+    SourceReliability.UNRELIABLE: 0.10,
+    SourceReliability.CANNOT_BE_JUDGED: 0.20,
+}
+"""How much of the opinion is evidence-bearing at all, per source-reliability grade.
+
+The complement is uncertainty, so this table alone decides how much room a single graded source
+leaves for later evidence to change the answer. Same provenance and same caveat as
+`ADMIRALTY_CREDIBILITY_BELIEF`.
+"""
+
+UNJUDGEABLE_CREDIBILITY_WEIGHT_CEILING: float = 0.20
+"""Ceiling applied when credibility is *cannot be judged*, whatever the source's reliability.
+
+A completely reliable source reporting something nobody can assess is still reporting something
+nobody can assess. Without this, an "A6" grading would enter the graph at weight 0.95 and read
+as near-certain evidence for a proposition on which no judgement exists.
+"""
+
 
 class Opinion(BaseModel):
     """A subjective-logic opinion about a binary proposition.
@@ -123,32 +164,18 @@ class Opinion(BaseModel):
         we are fairly sure the thing is doubtful. An "E" source reporting a "1"
         (confirmed) yields high uncertainty — we cannot tell.
 
-        The numeric weights below are a **calibration choice, not a derivation**. They are
+        The numeric weights (`ADMIRALTY_CREDIBILITY_BELIEF`, `ADMIRALTY_RELIABILITY_WEIGHT`)
+        are a **calibration choice, not a derivation**. They are
         a defensible starting point, not a measured mapping; see ADR-0002. They must be
         recalibrated against outcomes once real cases exist.
         """
-        credibility_belief = {
-            InformationCredibility.CONFIRMED: 0.95,
-            InformationCredibility.PROBABLY_TRUE: 0.75,
-            InformationCredibility.POSSIBLY_TRUE: 0.55,
-            InformationCredibility.DOUBTFUL: 0.30,
-            InformationCredibility.IMPROBABLE: 0.10,
-            InformationCredibility.CANNOT_BE_JUDGED: 0.50,
-        }[credibility]
-
+        credibility_belief = ADMIRALTY_CREDIBILITY_BELIEF[credibility]
         # How much of the opinion is evidence-bearing at all.
-        reliability_weight = {
-            SourceReliability.COMPLETELY_RELIABLE: 0.95,
-            SourceReliability.USUALLY_RELIABLE: 0.80,
-            SourceReliability.FAIRLY_RELIABLE: 0.60,
-            SourceReliability.NOT_USUALLY_RELIABLE: 0.35,
-            SourceReliability.UNRELIABLE: 0.10,
-            SourceReliability.CANNOT_BE_JUDGED: 0.20,
-        }[reliability]
+        reliability_weight = ADMIRALTY_RELIABILITY_WEIGHT[reliability]
 
         # "Cannot be judged" on either axis must not masquerade as a real signal.
         if credibility is InformationCredibility.CANNOT_BE_JUDGED:
-            reliability_weight = min(reliability_weight, 0.20)
+            reliability_weight = min(reliability_weight, UNJUDGEABLE_CREDIBILITY_WEIGHT_CEILING)
 
         uncertainty = 1.0 - reliability_weight
         belief = credibility_belief * reliability_weight
