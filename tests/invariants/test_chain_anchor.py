@@ -23,6 +23,7 @@ from nemesis.authz.anchor import (
     AnchorEpochError,
     AnchorIndependence,
     AnchorPlacementError,
+    AnchorRegistryError,
     ChainAnchor,
     FileAnchorStore,
     LocalAnchorSigner,
@@ -30,6 +31,7 @@ from nemesis.authz.anchor import (
     anchor_for,
     chain_digest,
     local_anchor_authority,
+    registered_authorities,
     verify_against_anchor,
 )
 from nemesis.authz.keys import CapabilitySigningKey
@@ -418,13 +420,22 @@ def test_the_local_authority_cannot_be_registered_above_none() -> None:
                 name="nemesis", verifier=signer.verifying_key, independence_ceiling=rung
             )
 
-    # And a genuinely separate authority may hold a higher ceiling — the ladder is not a ban.
+    # A genuinely separate authority may hold a higher ceiling — the ladder is not a ban. Its
+    # key is a DIFFERENT key, and that matters: the first version of this test pointed the
+    # notary's name at the local signer's own key, which demonstrated the contract while
+    # proving nothing about independence. A reviewer caught it.
+    notary_key = CapabilitySigningKey.generate().verifying_key
     notary = RegisteredAnchorAuthority(
         name="an-rfc3161-notary",
-        verifier=signer.verifying_key,
+        verifier=notary_key,
         independence_ceiling=AnchorIndependence.THIRD_PARTY,
     )
     assert notary.independence_ceiling is AnchorIndependence.THIRD_PARTY
+
+    # And even this proves only that the *contract* holds. Whether that key really belongs to
+    # a notary is decided by how it reached the deployment, which no test here can establish.
+    # `THIRD_PARTY` is evidence only when its key is pinned from a boundary the operator does
+    # not control — a deployment limit, stated rather than implied by a passing assertion.
 
 
 def test_an_anchor_from_an_unregistered_authority_attests_nothing() -> None:
@@ -466,3 +477,40 @@ def test_the_store_refuses_an_anchor_that_misstates_its_placement(tmp_path) -> N
         signer.sign(anchor_for(REVOCATION_CHAIN, LINKS, epoch=1, anchored_at=NOW))
     )
     assert published.independence is AnchorIndependence.NONE
+
+
+def test_one_key_cannot_hold_two_authority_names() -> None:
+    """The misconfiguration that looks correct, and that this file itself shipped.
+
+    A registry mapping `an-rfc3161-notary` to a key the operator already holds as `nemesis`
+    grants one signer two ceilings, and the higher one wins by accident. That is precisely how
+    a locally held key comes to attest third-party independence — no tampering, no forgery,
+    just a plausible line of configuration.
+
+    What a registry can check is that two names are not one key. What it cannot check is
+    whether the key behind a name belongs to the party the name claims: that is settled by how
+    the key reached the deployment. The rung is only ever as good as its key's provenance.
+    """
+    ours = LocalAnchorSigner(CapabilitySigningKey.generate())
+    theirs = CapabilitySigningKey.generate().verifying_key
+
+    with pytest.raises(AnchorRegistryError, match="same key"):
+        registered_authorities(
+            local_anchor_authority(ours.verifying_key),
+            RegisteredAnchorAuthority(
+                name="an-rfc3161-notary",
+                verifier=ours.verifying_key,  # our key, their name
+                independence_ceiling=AnchorIndependence.THIRD_PARTY,
+            ),
+        )
+
+    # Distinct keys register cleanly — the check refuses a collision, not a ladder.
+    accepted = registered_authorities(
+        local_anchor_authority(ours.verifying_key),
+        RegisteredAnchorAuthority(
+            name="an-rfc3161-notary",
+            verifier=theirs,
+            independence_ceiling=AnchorIndependence.THIRD_PARTY,
+        ),
+    )
+    assert len(accepted) == 2

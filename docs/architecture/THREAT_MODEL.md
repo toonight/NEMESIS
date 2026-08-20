@@ -271,6 +271,15 @@ sits behind an ACL the running process cannot cross, so the placement is *declar
 deployment and defaults to the weakest rung. The value is that the claim is explicit, signed
 and reportable, rather than a reader inferring the strongest tier from the word "anchor".
 
+**A rung is only as good as its key's provenance, and that is a deployment limit rather than a
+model flaw.** The registry maps a *name* to a *key*, so nothing stops a deployment associating
+`an-rfc3161-notary` with a key the operator already holds — and this module's own first test did
+exactly that, demonstrating the contract while proving nothing about independence. Two names for
+one key is now refused, because it grants one signer two ceilings and the higher one wins by
+accident. What no code can settle is whether the key behind a third-party name belongs to that
+third party: that is decided by how the key reached the deployment. **`THIRD_PARTY` is evidence
+only when its trusted key is pinned from a boundary the operator does not control.**
+
 **The MVP ships at `NONE`.** `FileAnchorStore` beside the database defends against an accident,
 a partial restore, a half-finished copy — and against nothing that wants to get past it. The
 open decision is therefore not technical: it is **what level of independence NEMESIS should be

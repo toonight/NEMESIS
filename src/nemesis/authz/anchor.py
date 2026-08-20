@@ -199,6 +199,12 @@ class AnchorVerifier(Protocol):
     """Checks an anchor's signature. Same shape as the capability verifier, for the same
     reason: the thing that validates a signature must not be the thing that produced it."""
 
+    @property
+    def key_id(self) -> str:
+        """Stable identifier for the key, so a registry can tell two authorities apart — and
+        can notice when two of them are the same key wearing different names."""
+        ...
+
     def verify(self, payload: bytes, signature: str) -> bool: ...
 
 
@@ -240,6 +246,38 @@ class RegisteredAnchorAuthority:
                 "the chain holds this key. Registering it higher would let a deployment grant "
                 "itself independence from itself."
             )
+
+
+def registered_authorities(
+    *authorities: RegisteredAnchorAuthority,
+) -> tuple[RegisteredAnchorAuthority, ...]:
+    """A deployment's anchor registry, with the misconfigurations that look fine refused.
+
+    **One key under two names is the failure this catches**, and it is not hypothetical: this
+    module's own first test registered a local key under the name ``an-rfc3161-notary`` at the
+    `THIRD_PARTY` ceiling. Nothing objected, because nothing looked. That configuration
+    demonstrates the *contract* and proves nothing about independence — the whole ladder rests
+    on the trusted key belonging to the party the name claims.
+
+    What a registry can check is that two names are not one key. What it **cannot** check is
+    key provenance: whether ``an-rfc3161-notary``'s key really belongs to a notary is settled
+    by how that key reached the deployment, not by anything visible here. A `THIRD_PARTY` rung
+    is therefore only evidence when its trusted key is pinned from a boundary the operator does
+    not control. That is an explicit deployment limit, and stating it is the honest thing this
+    function can do about it.
+    """
+    by_key: dict[str, str] = {}
+    for authority in authorities:
+        seen = by_key.get(authority.verifier.key_id)
+        if seen is not None and seen != authority.name:
+            raise AnchorRegistryError(
+                f"{authority.name!r} and {seen!r} are registered against the same key "
+                f"({authority.verifier.key_id}). Two names for one key are two ceilings for "
+                "one signer, and the higher one wins by accident — which is exactly how a "
+                "locally held key comes to attest third-party independence."
+            )
+        by_key[authority.verifier.key_id] = authority.name
+    return authorities
 
 
 def local_anchor_authority(verifier: AnchorVerifier) -> RegisteredAnchorAuthority:
@@ -389,6 +427,7 @@ __all__ = [
     "AnchorEpochError",
     "AnchorIndependence",
     "AnchorPlacementError",
+    "AnchorRegistryError",
     "AnchorStore",
     "AnchorVerifier",
     "ChainAnchor",
@@ -398,6 +437,7 @@ __all__ = [
     "anchor_for",
     "chain_digest",
     "local_anchor_authority",
+    "registered_authorities",
     "verify_against_anchor",
 ]
 
@@ -527,4 +567,13 @@ class AnchorPlacementError(RuntimeError):
     Its own type because the caller's mistake is specific — the store was constructed at one
     rung and handed an anchor built at another — and a caller catching "the anchor store is
     unavailable" must not swallow "you tried to publish a claim this location cannot support".
+    """
+
+
+class AnchorRegistryError(RuntimeError):
+    """A deployment's anchor registry is internally inconsistent.
+
+    Its own type because it is a configuration refusal rather than a verification failure: no
+    anchor is at fault, the set of authorities is. A caller catching "this anchor is bad" must
+    not swallow "your registry grants one key two ceilings".
     """
