@@ -54,6 +54,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
@@ -183,11 +184,71 @@ class AnchorStore(Protocol):
     def publish(self, anchor: ChainAnchor) -> ChainAnchor: ...
 
 
+INDEPENDENCE_RANK: Final[dict[AnchorIndependence, int]] = {
+    AnchorIndependence.NONE: 0,
+    AnchorIndependence.SEPARATE_ACCOUNT: 1,
+    AnchorIndependence.SEPARATE_HOST: 2,
+    AnchorIndependence.THIRD_PARTY: 3,
+}
+"""An explicit order, because a `StrEnum` has none and comparing these by name would rank
+`separate_account` above `third_party`. Spelled out rather than derived from declaration order,
+so inserting a rung later cannot silently reorder the ladder."""
+
+
 class AnchorVerifier(Protocol):
     """Checks an anchor's signature. Same shape as the capability verifier, for the same
     reason: the thing that validates a signature must not be the thing that produced it."""
 
     def verify(self, payload: bytes, signature: str) -> bool: ...
+
+
+@dataclass(frozen=True)
+class RegisteredAnchorAuthority:
+    """An attesting authority this deployment believes, and how far.
+
+    ``independence_ceiling`` is the control, and it is the same one
+    :class:`~nemesis.authz.attestation.RegisteredIssuer` applies to identity: an authority
+    states what it is; the deployment states what that authority's word is worth here. When
+    they disagree the ceiling wins.
+
+    **This exists because the first version of this module did not have it, and an external
+    reviewer walked straight through the gap.** `LocalAnchorSigner.sign()` preserved whatever
+    rung the caller asked for, so a key we hold minted a `THIRD_PARTY` anchor that verified
+    with no defects — while the signer's own docstring claimed it was "structurally unable to
+    pose as one". The guard that existed caught *promotion after signing* and never looked at
+    *lying while signing*, which is the cheaper attack and the one nobody has to tamper for.
+
+    Unlike identity, an over-claim here is **refused rather than capped**. A principal
+    presenting more assurance than its issuer is granted is trimmed and remains a valid
+    principal; an anchor claiming independence it was never entitled to is somebody having
+    written a stronger word next to a weaker key, and quietly downgrading it would hide that.
+    """
+
+    name: str
+    verifier: AnchorVerifier
+    independence_ceiling: AnchorIndependence
+
+    def __post_init__(self) -> None:
+        if (
+            self.name == LOCAL_ANCHOR_AUTHORITY
+            and self.independence_ceiling is not AnchorIndependence.NONE
+        ):
+            raise ValueError(
+                f"{LOCAL_ANCHOR_AUTHORITY!r} is this platform's own key and cannot be "
+                f"registered above {AnchorIndependence.NONE.value!r}. An anchor is worth the "
+                "distance between it and the adversary, and there is none: whoever can rewrite "
+                "the chain holds this key. Registering it higher would let a deployment grant "
+                "itself independence from itself."
+            )
+
+
+def local_anchor_authority(verifier: AnchorVerifier) -> RegisteredAnchorAuthority:
+    """The platform's own key, at the only ceiling it can honestly hold."""
+    return RegisteredAnchorAuthority(
+        name=LOCAL_ANCHOR_AUTHORITY,
+        verifier=verifier,
+        independence_ceiling=AnchorIndependence.NONE,
+    )
 
 
 def chain_digest(links: Sequence[str]) -> str:
@@ -235,7 +296,7 @@ def verify_against_anchor(
     links: Sequence[str],
     anchor: ChainAnchor | None,
     *,
-    verifier: AnchorVerifier,
+    authorities: Sequence[RegisteredAnchorAuthority],
     retained_epoch: int | None = None,
 ) -> tuple[str, ...]:
     """Check a chain against what was attested about it. Returns defects, empty when sound.
@@ -258,10 +319,32 @@ def verify_against_anchor(
             "more of them: truncation is invisible from inside.",
         )
 
-    if anchor.signature is None or not verifier.verify(anchor.signing_payload(), anchor.signature):
+    registered = next((a for a in authorities if a.name == anchor.authority), None)
+    if registered is None:
+        defects.append(
+            f"the anchor names {anchor.authority!r}, which this deployment has not registered "
+            "as an attesting authority. An anchor from a party nobody vouched for attests "
+            "nothing, whoever signed it"
+        )
+    elif anchor.signature is None or not registered.verifier.verify(
+        anchor.signing_payload(), anchor.signature
+    ):
         defects.append(
             f"the anchor for {anchor.chain_id} is not signed by the attesting authority — "
             "somebody who is not the anchoring party wrote it"
+        )
+    elif (
+        INDEPENDENCE_RANK[anchor.independence] > INDEPENDENCE_RANK[registered.independence_ceiling]
+    ):
+        # The gap an external reviewer found: the signature check alone passes here, because
+        # the anchor really was signed by a key we hold. What it was not entitled to is the
+        # *rung*, and only the deployment's registry knows that.
+        defects.append(
+            f"the anchor claims {anchor.independence.value!r} independence and "
+            f"{anchor.authority!r} is registered up to "
+            f"{registered.independence_ceiling.value!r}. An authority cannot attest to a "
+            "distance from itself that it does not have — this anchor is signed, and it is "
+            "claiming a rung it was never granted"
         )
 
     if retained_epoch is not None and anchor.epoch < retained_epoch:
@@ -299,18 +382,22 @@ def verify_against_anchor(
 
 
 __all__ = [
+    "INDEPENDENCE_RANK",
     "LOCAL_ANCHOR_AUTHORITY",
     "REVOCATION_CHAIN",
     "SPEND_CHAIN",
     "AnchorEpochError",
     "AnchorIndependence",
+    "AnchorPlacementError",
     "AnchorStore",
     "AnchorVerifier",
     "ChainAnchor",
     "FileAnchorStore",
     "LocalAnchorSigner",
+    "RegisteredAnchorAuthority",
     "anchor_for",
     "chain_digest",
+    "local_anchor_authority",
     "verify_against_anchor",
 ]
 
@@ -318,10 +405,20 @@ __all__ = [
 class LocalAnchorSigner:
     """Signs an anchor with a key this platform holds.
 
-    Not a substitute for an external attestation and structurally unable to pose as one: every
-    anchor it produces carries :data:`LOCAL_ANCHOR_AUTHORITY`, there is no argument that
-    changes it, and :attr:`ChainAnchor.is_externally_held` reports False for the result. The
-    same shape, and the same refusal to flatter itself, as the vault's local head signer.
+    Every anchor it produces carries :data:`LOCAL_ANCHOR_AUTHORITY`, and there is no argument
+    that changes it.
+
+    **What it does NOT do, corrected after an external review walked through the gap:** it does
+    not police the *rung*. It signs whatever :class:`AnchorIndependence` the caller asked for,
+    so this class alone will mint a `THIRD_PARTY` anchor with a local key — which it did, and
+    which verified with no defects, while this docstring claimed it was "structurally unable to
+    pose as one". It was not; it was merely not asked to.
+
+    The refusal lives where it can be enforced: :class:`RegisteredAnchorAuthority` caps
+    :data:`LOCAL_ANCHOR_AUTHORITY` at :attr:`AnchorIndependence.NONE`, refuses to be registered
+    higher, and :func:`verify_against_anchor` rejects an anchor claiming a rung its authority
+    was never granted. A signer cannot be the thing that limits what it signs — the deployment's
+    registry is, exactly as an issuer's assurance ceiling is not held by the issuer.
     """
 
     __slots__ = ("_key",)
@@ -394,6 +491,15 @@ class FileAnchorStore:
         return self._independence
 
     def publish(self, anchor: ChainAnchor) -> ChainAnchor:
+        if anchor.independence is not self._independence:
+            # Declared placement and published claim must agree. Otherwise the field records
+            # what somebody hoped rather than where the file is, and a store beside the
+            # database would happily hold anchors calling themselves third-party.
+            raise AnchorPlacementError(
+                f"this store is placed at {self._independence.value!r} and the anchor claims "
+                f"{anchor.independence.value!r}. A store cannot publish an attestation about a "
+                "boundary it does not sit behind."
+            )
         current = self.latest(anchor.chain_id)
         if current is not None and anchor.epoch <= current.epoch:
             raise AnchorEpochError(
@@ -412,4 +518,13 @@ class AnchorEpochError(RuntimeError):
     Its own type because the caller's correct response is specific — re-read the latest epoch
     and attest again — and a caller catching "the anchor store is unavailable" must not swallow
     "you tried to move the attestation backwards".
+    """
+
+
+class AnchorPlacementError(RuntimeError):
+    """An anchor was published claiming a placement the store does not have.
+
+    Its own type because the caller's mistake is specific — the store was constructed at one
+    rung and handed an anchor built at another — and a caller catching "the anchor store is
+    unavailable" must not swallow "you tried to publish a claim this location cannot support".
     """

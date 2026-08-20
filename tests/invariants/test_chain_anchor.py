@@ -22,11 +22,14 @@ from nemesis.authz.anchor import (
     REVOCATION_CHAIN,
     AnchorEpochError,
     AnchorIndependence,
+    AnchorPlacementError,
     ChainAnchor,
     FileAnchorStore,
     LocalAnchorSigner,
+    RegisteredAnchorAuthority,
     anchor_for,
     chain_digest,
+    local_anchor_authority,
     verify_against_anchor,
 )
 from nemesis.authz.keys import CapabilitySigningKey
@@ -35,6 +38,11 @@ pytestmark = pytest.mark.invariant
 
 NOW = datetime(2026, 8, 20, tzinfo=UTC)
 LINKS = ("aa" * 32, "bb" * 32, "cc" * 32, "dd" * 32)
+
+
+def _local(signer: LocalAnchorSigner) -> list[RegisteredAnchorAuthority]:
+    """The deployment's registry with only our own key in it, at the only ceiling it can hold."""
+    return [local_anchor_authority(signer.verifying_key)]
 
 
 def _signed(links: tuple[str, ...], *, epoch: int = 1) -> tuple[ChainAnchor, LocalAnchorSigner]:
@@ -55,10 +63,10 @@ def test_tail_truncation_is_seen() -> None:
     """
     anchor, signer = _signed(LINKS)
 
-    assert verify_against_anchor(LINKS, anchor, verifier=signer.verifying_key) == ()
+    assert verify_against_anchor(LINKS, anchor, authorities=_local(signer)) == ()
 
     truncated = LINKS[:-1]
-    defects = verify_against_anchor(truncated, anchor, verifier=signer.verifying_key)
+    defects = verify_against_anchor(truncated, anchor, authorities=_local(signer))
 
     assert defects, "a record was deleted and the anchor reported the chain intact"
     assert any("removed after it was anchored" in d for d in defects)
@@ -72,7 +80,7 @@ def test_total_erasure_is_seen() -> None:
     """
     anchor, signer = _signed(LINKS)
 
-    defects = verify_against_anchor((), anchor, verifier=signer.verifying_key)
+    defects = verify_against_anchor((), anchor, authorities=_local(signer))
 
     assert defects
     assert any("0 records and the anchor attests 4" in d for d in defects)
@@ -93,7 +101,7 @@ def test_truncate_then_reoccupy_is_seen_when_a_prior_tip_was_retained() -> None:
     anchor, signer = _signed(LINKS)
 
     rewritten = (*LINKS[:-1], "ee" * 32)  # same length, different history
-    defects = verify_against_anchor(rewritten, anchor, verifier=signer.verifying_key)
+    defects = verify_against_anchor(rewritten, anchor, authorities=_local(signer))
 
     assert defects, "the history was rewritten to the same length and nothing objected"
     assert any("not the ones that were anchored" in d for d in defects)
@@ -113,7 +121,7 @@ def test_a_missing_anchor_is_reported_rather_than_passed() -> None:
     """
     signer = LocalAnchorSigner(CapabilitySigningKey.generate())
 
-    defects = verify_against_anchor(LINKS, None, verifier=signer.verifying_key)
+    defects = verify_against_anchor(LINKS, None, authorities=_local(signer))
 
     assert defects
     assert any("attested by nothing" in d for d in defects)
@@ -128,13 +136,13 @@ def test_an_unsigned_or_forged_anchor_is_refused() -> None:
     unsigned = anchor.model_copy(update={"signature": None})
     assert any(
         "not signed by the attesting authority" in d
-        for d in verify_against_anchor(LINKS, unsigned, verifier=signer.verifying_key)
+        for d in verify_against_anchor(LINKS, unsigned, authorities=_local(signer))
     )
 
     # Signed by a real key, but not the one this verifier trusts.
     assert any(
         "not signed by the attesting authority" in d
-        for d in verify_against_anchor(LINKS, anchor, verifier=other.verifying_key)
+        for d in verify_against_anchor(LINKS, anchor, authorities=_local(other))
     )
 
 
@@ -150,11 +158,9 @@ def test_replaying_an_older_anchor_is_refused() -> None:
     """
     stale, signer = _signed(LINKS[:2], epoch=1)
 
-    assert verify_against_anchor(LINKS[:2], stale, verifier=signer.verifying_key) == ()
+    assert verify_against_anchor(LINKS[:2], stale, authorities=_local(signer)) == ()
 
-    defects = verify_against_anchor(
-        LINKS[:2], stale, verifier=signer.verifying_key, retained_epoch=7
-    )
+    defects = verify_against_anchor(LINKS[:2], stale, authorities=_local(signer), retained_epoch=7)
     assert any("older than the 7" in d for d in defects)
 
 
@@ -164,7 +170,7 @@ def test_records_added_without_re_anchoring_are_named_as_unattested() -> None:
     publication."""
     anchor, signer = _signed(LINKS[:2])
 
-    defects = verify_against_anchor(LINKS, anchor, verifier=signer.verifying_key)
+    defects = verify_against_anchor(LINKS, anchor, authorities=_local(signer))
 
     assert any("added without re-anchoring" in d for d in defects)
 
@@ -195,7 +201,7 @@ def test_an_anchor_cannot_be_promoted_to_a_tier_it_was_not_signed_at() -> None:
     assert promoted.is_externally_held  # it *says* independent...
     assert any(  # ...and the signature no longer covers what it says
         "not signed by the attesting authority" in d
-        for d in verify_against_anchor(LINKS, promoted, verifier=signer.verifying_key)
+        for d in verify_against_anchor(LINKS, promoted, authorities=_local(signer))
     )
 
 
@@ -246,7 +252,7 @@ def test_a_clean_local_anchor_is_not_reported_as_a_defect() -> None:
     """
     anchor, signer = _signed(LINKS)
 
-    assert verify_against_anchor(LINKS, anchor, verifier=signer.verifying_key) == ()
+    assert verify_against_anchor(LINKS, anchor, authorities=_local(signer)) == ()
     assert not anchor.is_externally_held
 
 
@@ -336,7 +342,7 @@ def test_the_real_revocation_chain_truncation_is_caught_when_anchored(tmp_path) 
     published = anchors.publish(
         signer.sign(anchor_for(REVOCATION_CHAIN, links, epoch=1, anchored_at=NOW))
     )
-    assert verify_against_anchor(links, published, verifier=signer.verifying_key) == ()
+    assert verify_against_anchor(links, published, authorities=_local(signer)) == ()
 
     with closing(sqlite3.connect(store.path)) as connection, connection:
         connection.execute("DELETE FROM revocations WHERE sequence = 2")
@@ -345,7 +351,118 @@ def test_the_real_revocation_chain_truncation_is_caught_when_anchored(tmp_path) 
     assert len(after) == 2, "the attack did not actually remove a record"
 
     defects = verify_against_anchor(
-        after, anchors.latest(REVOCATION_CHAIN), verifier=signer.verifying_key
+        after, anchors.latest(REVOCATION_CHAIN), authorities=_local(signer)
     )
     assert defects, "the anchored check missed a deletion it was built to catch"
     assert any("removed after it was anchored" in d for d in defects)
+
+
+# --- The gap: lying at signing time, not tampering afterwards ----------------
+
+
+def test_a_third_party_anchor_really_signed_by_the_local_signer_is_refused() -> None:
+    """THE TEST THIS FILE WAS MISSING, and the reason the ceiling exists.
+
+    The guard that shipped first caught *promotion after signing*: edit the rung, and the
+    signature no longer covers what the anchor says. It never looked at the cheaper attack —
+    asking for the rung **before** signing, so the signature covers it perfectly.
+
+    An external reviewer ran exactly that and got `authority: nemesis`,
+    `independence: third_party`, `is_externally_held: True`, and no defects. Nothing was
+    tampered with; nobody needed to. The signer simply signed what it was asked to, while its
+    own docstring claimed it was "structurally unable to pose as" an external attestation.
+
+    A signer cannot be the thing that limits what it signs. The refusal belongs in the
+    deployment's registry, which is where an issuer's assurance ceiling lives for the same
+    reason.
+    """
+    signer = LocalAnchorSigner(CapabilitySigningKey.generate())
+
+    lied = signer.sign(
+        anchor_for(
+            REVOCATION_CHAIN,
+            LINKS,
+            epoch=1,
+            anchored_at=NOW,
+            independence=AnchorIndependence.THIRD_PARTY,
+        )
+    )
+
+    # The signature is genuine — this is not a forgery, and checking it alone passes.
+    assert lied.independence is AnchorIndependence.THIRD_PARTY
+    assert lied.is_externally_held
+    assert signer.verifying_key.verify(lied.signing_payload(), lied.signature or "")
+
+    defects = verify_against_anchor(LINKS, lied, authorities=_local(signer))
+
+    assert defects, "a local key minted a third-party attestation and nothing objected"
+    assert any("claiming a rung it was never granted" in d for d in defects)
+
+
+def test_the_local_authority_cannot_be_registered_above_none() -> None:
+    """The other half: closing the ceiling in the verifier is worthless if a deployment can
+    simply register itself higher.
+
+    Refused at construction, because there is no honest configuration in which our own key
+    attests to a distance from ourselves.
+    """
+    signer = LocalAnchorSigner(CapabilitySigningKey.generate())
+
+    for rung in (
+        AnchorIndependence.SEPARATE_ACCOUNT,
+        AnchorIndependence.SEPARATE_HOST,
+        AnchorIndependence.THIRD_PARTY,
+    ):
+        with pytest.raises(ValueError, match="cannot be registered above"):
+            RegisteredAnchorAuthority(
+                name="nemesis", verifier=signer.verifying_key, independence_ceiling=rung
+            )
+
+    # And a genuinely separate authority may hold a higher ceiling — the ladder is not a ban.
+    notary = RegisteredAnchorAuthority(
+        name="an-rfc3161-notary",
+        verifier=signer.verifying_key,
+        independence_ceiling=AnchorIndependence.THIRD_PARTY,
+    )
+    assert notary.independence_ceiling is AnchorIndependence.THIRD_PARTY
+
+
+def test_an_anchor_from_an_unregistered_authority_attests_nothing() -> None:
+    """Naming an authority nobody registered is the way around a ceiling that only checks
+    registered ones. An anchor from a party this deployment never vouched for is refused
+    whoever signed it."""
+    signer = LocalAnchorSigner(CapabilitySigningKey.generate())
+    stranger = signer.sign(anchor_for(REVOCATION_CHAIN, LINKS, epoch=1, anchored_at=NOW))
+    stranger = stranger.model_copy(update={"authority": "a-notary-nobody-registered"})
+
+    defects = verify_against_anchor(LINKS, stranger, authorities=_local(signer))
+
+    assert any("has not registered" in d for d in defects)
+
+
+def test_the_store_refuses_an_anchor_that_misstates_its_placement(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """Declared placement and published claim must agree, or the field records what somebody
+    hoped rather than where the file is."""
+    beside_the_database = FileAnchorStore(
+        tmp_path / "anchors.jsonl", independence=AnchorIndependence.NONE
+    )
+    signer = LocalAnchorSigner(CapabilitySigningKey.generate())
+
+    with pytest.raises(AnchorPlacementError):
+        beside_the_database.publish(
+            signer.sign(
+                anchor_for(
+                    REVOCATION_CHAIN,
+                    LINKS,
+                    epoch=1,
+                    anchored_at=NOW,
+                    independence=AnchorIndependence.SEPARATE_ACCOUNT,
+                )
+            )
+        )
+
+    # The matching rung publishes normally.
+    published = beside_the_database.publish(
+        signer.sign(anchor_for(REVOCATION_CHAIN, LINKS, epoch=1, anchored_at=NOW))
+    )
+    assert published.independence is AnchorIndependence.NONE
