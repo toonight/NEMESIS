@@ -989,6 +989,74 @@ def view(
 
 
 @app.command()
+def corpus(
+    per_kind: Annotated[
+        int, typer.Option(help="Cases per evidence construction.", min=5, max=500)
+    ] = 40,
+    seed: Annotated[
+        int, typer.Option(help="Generator seed. Fixed for reproducibility.")
+    ] = 20260821,
+) -> None:
+    """Run the blind-corpus apparatus: sealed answers, separated roles, four categories.
+
+    A proof of concept for protocol milestones 2, 4 and 5, which are *process* and can be shown
+    wrong long before milestone 3 rents a host. The evaluator here is handed `CaseInput` objects
+    and nothing else — there is no argument through which an answer could arrive — and the
+    answers are unsealed once, by a named actor, with the count reported beside every figure.
+
+    **The figures are not calibration.** The cases are synthetic, so they measure agreement with
+    a generator's assumptions rather than with the world. The report says so first and at length.
+    """
+    from datetime import UTC, datetime
+
+    from nemesis.calibration.corpus import (
+        PopulationClaim,
+        Prediction,
+        build_corpus,
+        score,
+    )
+    from nemesis.core.confidence import band_of
+    from nemesis.core.fusion import fuse
+    from nemesis.core.proposition import PropositionClass
+
+    console = Console()
+    population = PopulationClaim(
+        describes="synthetic persona-linkage cases probing six evidence constructions",
+        excludes=(
+            "real adversary tradecraft, real infrastructure, and any real population; nothing "
+            "here supports a claim about how often this happens in the world"
+        ),
+        ground_truth_rule="the generator recorded what it built; no human adjudicated anything",
+        generated_by=f"nemesis.calibration.generator, seed {seed}",
+    )
+    built = build_corpus(population=population, seed=seed, per_kind=per_kind)
+
+    # The evaluator role. It receives inputs and returns predictions; it is handed no labels,
+    # and the corpus has none to give it without an unsealing that would be counted.
+    predictions = []
+    for item in built.inputs:
+        result = fuse(item.sources, proposition=PropositionClass.SHARED_ORIGIN)
+        band = band_of(result.opinion)
+        refused = band is ConfidenceBand.INSUFFICIENT_BASIS
+        predictions.append(
+            Prediction(
+                case_id=item.case_id,
+                probability=None if refused else result.opinion.projected_probability,
+                band=band,
+            )
+        )
+
+    evaluation = score(
+        built,
+        predictions,
+        actor="nemesis corpus (CLI)",
+        reason="first and only scoring of this generated set",
+        at=datetime.now(UTC),
+    )
+    console.print(evaluation.render(), highlight=False)
+
+
+@app.command()
 def calibrate(
     cases: Annotated[int, typer.Option(help="Scored cases to generate.", min=60, max=20_000)] = 600,
     seed: Annotated[

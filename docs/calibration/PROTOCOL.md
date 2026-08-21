@@ -1,13 +1,22 @@
 # Calibration protocol
 
-**Status: milestone 1 `IMPLEMENTED`, milestones 2 and 6 `PROPOSED` (specified below),
-milestones 3–5 `REQUIRES_EXTERNAL_DATA`.**
+**Status: milestone 1 `IMPLEMENTED`. Milestones 2, 4 and 5 have their apparatus
+`IMPLEMENTED` and their corpus `REQUIRES_EXTERNAL_DATA` — `nemesis corpus` runs the whole of
+it against synthetic cases. Milestone 3 `REQUIRES_EXTERNAL_DATA`, milestone 6 `PROPOSED`.**
+
+> **What the apparatus label means, and what it does not.** Roles are separated *structurally*:
+> an evaluator is handed `CaseInput` objects and there is no argument through which an answer
+> could arrive. Answers are sealed, and unsealing is counted, attributed and reported beside
+> every figure. All four case categories exist, including `ambiguous`, which is graded only on
+> whether the engine declined. **None of this produces calibration.** The cases are synthetic, so
+> the figures measure agreement with a generator's assumptions; that is milestone 3's problem and
+> it is a question of cost, not of code.
 
 > **What `IMPLEMENTED` claims here, and what it does not.** It claims that the freeze is
 > mechanical and enforced by tests seen to fail without it, over three overlapping scopes:
-> a normalised syntax digest covering **105 modules** — every file in `src/nemesis`, so literals
+> a normalised syntax digest covering **106 modules** — every file in `src/nemesis`, so literals
 > in function bodies, class defaults and pure logic are all inside it; a derived digest of
-> **367 dials** with no list to be absent from; and **43 constants frozen by imported value**
+> **369 dials** with no list to be absent from; and **43 constants frozen by imported value**
 > for a named diagnostic. Plus golden vectors that run real inputs through the attribution and
 > resolution engines to their published bands. It claims nothing about whether the frozen values
 > are **right** — freezing a choice does not validate it — and nothing about milestones 2–6.
@@ -102,7 +111,7 @@ each is a dial, and each moves a number somebody is about to grade.
   exists only in the copy and requires its dial and its path by name; another asks the syntax
   tree of `freeze.py` whether any function accepts `tree` and never reads it, because an
   argument that exists and is never read is a promise in a signature.
-- **Every dial in the tree, hashed by normalised syntax** (`discovered_constants`), **248 of
+- **Every dial in the tree, hashed by normalised syntax** (`discovered_constants`), **250 of
   them holding no numeric literal at all** — which is the whole lesson in one number: most of
   what decides a published figure here is not a number, and four scans that looked for digits
   found four different subsets of nothing. **A dial is any module-level upper-case assignment,
@@ -120,7 +129,7 @@ each is a dial, and each moves a number somebody is about to grade.
   the digest depend on CPython's per-process hash randomisation: five seeds gave five different
   digests. CI would have gone red at random, and an intermittently red tripwire teaches a reader
   that a red tripwire means nothing.
-- **A normalised syntax digest covering 105 modules** — every file in the tree — docstrings
+- **A normalised syntax digest covering 106 modules** — every file in the tree — docstrings
   stripped, one digest per module so a failure names which files moved. This covers what no value-based mechanism can: literals
   inside function bodies, dataclass field defaults, and pure logic changes that touch no
   constant at all. It was narrowed to fourteen hand-picked modules on the argument that hashing
@@ -175,7 +184,7 @@ tables live in it and would be self-referential. It is closed socially rather th
 a diff touching `MODULE_DIGESTS`, `CONSTANT_DIGESTS` or `FROZEN_VALUE_DIGESTS` is the thing a
 reviewer is meant to stop at.
 
-## 2. Population, case categories, ground-truth rules — `PROPOSED`
+## 2. Population, case categories, ground-truth rules — apparatus `IMPLEMENTED`
 
 An evaluation is only as meaningful as the population it claims to generalise to. Three things
 must be written down before a single case is generated, because each is unfalsifiable once
@@ -198,6 +207,13 @@ who did not build the engine. "The operator told us" and "two analysts agreed" a
 controlled both endpoints" are different standards producing different corpora, and mixing them
 silently produces a corpus whose accuracy is unmeasurable.
 
+**What exists.** `PopulationClaim` refuses to be constructed without all four, and `excludes` is
+required rather than optional — every corpus author can describe what they built, and almost
+none writes down what it says nothing about. `CaseCategory` carries the four categories and is
+kept deliberately separate from `CaseKind`, which records how the evidence was *constructed*:
+AUC runs over categories, robustness runs per construction, and collapsing them would hide the
+class an adversary would choose behind an average.
+
 ## 3. Controlled operations on infrastructure we own — `REQUIRES_EXTERNAL_DATA`
 
 The MVP rule is *never touch infrastructure we do not own*. Nothing in it forbids **running
@@ -210,7 +226,7 @@ section calls indispensable.
 
 This is the milestone that needs a decision about infrastructure and cost. It is not code.
 
-## 4. Separate generation, labelling and evaluation — `REQUIRES_EXTERNAL_DATA`
+## 4. Separate generation, labelling and evaluation — apparatus `IMPLEMENTED`
 
 Three roles, and they must not be one person in three hats:
 
@@ -222,15 +238,32 @@ The failure this prevents is not dishonesty. It is that somebody who knows the a
 unconsciously generates cases the engine happens to handle, and the corpus quietly becomes a
 mirror.
 
-## 5. A sealed test set — `REQUIRES_EXTERNAL_DATA`
+**What exists.** The separation is a type, not a promise: `BlindEvaluator` takes `CaseInput`
+objects, which carry the evidence and the candidate population and nothing else. Three leaks
+were closed because each would have made the blindness decorative — cases are shuffled *before*
+identifiers are assigned, identifiers are opaque, and `distinct_real_origins` (the one field
+that distinguishes laundering from honest corroboration) lives in the sealed label. A test runs
+evaluators that use only the position and only the identifier, and requires them to land at
+chance; with the shuffle removed, guessing from position alone scores 0.83 and it fails.
+
+## 5. A sealed test set — apparatus `IMPLEMENTED`
 
 A held-out set, never used to adjust anything, opened once. The moment it informs a change it
 stops being a test set and becomes a training set with a misleading name, so:
 
-- it is sealed with the evidence vault's own machinery, so opening it is an event;
+- it is sealed so that opening it is an event;
 - the number of times it has been opened is reported alongside any score from it;
 - a change made after opening it invalidates every figure it produced, and the protocol says so
   in advance rather than negotiating afterwards.
+
+**What exists, and one thing that does not.** `SealedLabels` counts every unsealing, refuses one
+without a named actor and a stated reason, keeps an append-only log, and publishes a digest that
+identifies the answers without revealing them. The count is rendered in the report, and a second
+opening annotates every figure below it as suspect. *(Corrected: this section said "sealed with
+the evidence vault's own machinery". It is not — the vault is asynchronous and sits behind a
+different plane boundary, so the seal is self-contained and tamper-**evident** rather than
+encrypted. It does not stop somebody reading the object in a debugger. Wiring it to the vault is
+a real improvement and is not done; claiming it was would be the defect this repository rejects.)*
 
 ## 6. What is measured — `PROPOSED`
 
