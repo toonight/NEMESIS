@@ -17,23 +17,26 @@ the signing key. So the confined collector may keep its network and is denied ev
 else, which is the mirror image of the Effects profile and the reason the policy is a
 parameter of :mod:`nemesis.sandbox.process` rather than a constant inside either plane.
 
-**What this is honest about.** Every connector in this repository reads a fixture, so no
-hostile bytes are parsed anywhere today and this isolates a risk that has not arrived. That
-is the point of building it now rather than later: ADR-0001 listed the process boundary as an
-unverified assumption "to be added before it is needed", and a boundary added after the first
-real connector is a boundary added after the first real exposure.
+**What this is honest about.** The default registry and every repository test still read
+fixtures, but one opt-in Tor connector can now fetch real hostile bytes. That transition makes
+the old non-macOS fallback unacceptable: a non-simulated hostile connector requires kernel
+confinement and refuses to run where this package cannot supply it. The connector itself parses
+no page content; a deployment adding a parser still needs the confined analyser the quarantine
+contract calls for.
 """
 
 from __future__ import annotations
 
 import json
 import tempfile
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
 from pydantic import ValidationError
 
+from nemesis.collect.wire import decode_result
 from nemesis.ports.collection import (
     ConnectorCapabilities,
     IntelligenceConnector,
@@ -75,6 +78,25 @@ class CollectionConfinement:
         )
 
 
+def _record_confinement(result: PivotResult, confinement: CollectionConfinement) -> PivotResult:
+    """Attach what the parent observed, never what the child claimed about itself."""
+    evidence = tuple(
+        item.model_copy(
+            update={
+                "provenance": item.provenance.model_copy(
+                    update={
+                        "method": item.provenance.method.model_copy(
+                            update={"sandbox_profile": confinement.render()}
+                        )
+                    }
+                )
+            }
+        )
+        for item in result.evidence
+    )
+    return result.model_copy(update={"evidence": evidence})
+
+
 class IsolatedCollector:
     """Runs one connector's pivot in a child process that cannot reach this one.
 
@@ -87,8 +109,10 @@ class IsolatedCollector:
         self,
         connector_factory: str,
         *,
+        connector_config: Mapping[str, str] | None = None,
         deny_reads: tuple[Path, ...] = (),
         allow_network: bool = False,
+        require_kernel_confinement: bool = False,
         deadline_seconds: float = DEFAULT_DEADLINE_SECONDS,
     ) -> None:
         """``connector_factory`` is an importable ``module:function`` the child calls.
@@ -98,8 +122,10 @@ class IsolatedCollector:
         class of bug this boundary exists to contain.
         """
         self._factory = connector_factory
+        self._connector_config = dict(connector_config or {})
         self._deny_reads = deny_reads
         self._allow_network = allow_network
+        self._require_kernel_confinement = require_kernel_confinement
         self._deadline = deadline_seconds
 
     async def pivot(
@@ -138,6 +164,7 @@ class IsolatedCollector:
                 "factory": self._factory,
                 "request": request.model_dump(mode="json"),
                 "as_of": as_of,
+                "config": self._connector_config,
             }
         ).encode()
 
@@ -146,6 +173,7 @@ class IsolatedCollector:
             stdin=envelope,
             policy=policy,
             deadline_seconds=self._deadline,
+            allow_unsandboxed=not self._require_kernel_confinement,
         )
         confinement = CollectionConfinement(
             mechanism=run.mechanism,
@@ -153,7 +181,7 @@ class IsolatedCollector:
             # The whole point. Confined, the collector holds no handle to this process's
             # objects and cannot import its way to one; unconfined, it is ordinary code in
             # the main process and this says so rather than implying otherwise.
-            reaches_platform=not run.started,
+            reaches_platform=not (run.started and run.mechanism == "sandbox-exec"),
             network_allowed=self._allow_network,
             workspace_denied=tuple(str(p) for p in self._deny_reads),
         )
@@ -168,7 +196,11 @@ class IsolatedCollector:
             # Re-validated in this process. Everything crossing that pipe is untrusted data,
             # which is invariant 5 applied to our own worker rather than only to the outside
             # world — a collector that has been owned is exactly the outside world.
-            return PivotResult.model_validate(payload["result"]), confinement, None
+            return (
+                _record_confinement(decode_result(payload["result"]), confinement),
+                confinement,
+                None,
+            )
         except (ValidationError, ValueError, KeyError, TypeError) as exc:
             tail = run.stderr.decode(errors="replace").strip().splitlines()[-1:] or ["no stderr"]
             return (
@@ -234,7 +266,13 @@ async def collect_confined(
 
     isolated = IsolatedCollector(
         connector_factory=capabilities.isolation_factory,
+        connector_config=capabilities.isolation_config,
         allow_network=not capabilities.is_simulated,
+        # A fixture contains bytes we wrote. A real dark-web response contains bytes an
+        # adversary wrote, and process separation alone does not stop filesystem reads or
+        # imports by path. The first real connector turns the old Linux limitation into a
+        # live boundary, so it fails closed where no kernel policy is available.
+        require_kernel_confinement=not capabilities.is_simulated,
     )
     # The connector's own `as_of`, never a caller's guess. The first version took it as an
     # argument and the scenario passed a constant, which flattened the phase-2 / phase-8 split

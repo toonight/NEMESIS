@@ -11,10 +11,10 @@ world; collection is what the world touches. So the tests below check that a com
 collector reaches *nothing* — not that it cannot reach outward, which for a real collector
 would be the wrong control entirely.
 
-Every connector in this repository reads a fixture, so no hostile bytes are parsed anywhere
-today. That is why this is worth building now: ADR-0001 listed the process boundary as an
-assumption to be honoured "before it is needed", and a boundary added after the first real
-connector is a boundary added after the first real exposure.
+Every connector exercised by the test suite reads a fixture; the opt-in Tor connector's
+transport is replaced by an inert fake. No real hostile bytes are parsed here. The first real
+connector now exists, so the boundary is no longer preparation: it is the control that refuses
+non-simulated collection where kernel confinement is unavailable.
 """
 
 from __future__ import annotations
@@ -79,7 +79,11 @@ def test_a_hostile_connector_collects_from_inside_a_child_process() -> None:
         assert failure is None, failure
         assert result is not None and result.succeeded
         assert confinement.separate_process
-        assert not confinement.reaches_platform
+        assert confinement.reaches_platform is (not sandbox_available())
+        assert all(
+            item.provenance.method.sandbox_profile == confinement.render()
+            for item in result.evidence
+        )
 
     asyncio.run(scenario())
 

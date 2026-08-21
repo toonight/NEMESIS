@@ -185,8 +185,10 @@ The counter-argument is that the MVP is deliberately synthetic and this can wait
 research pass disagrees, and it has the better of it: the architecture is currently
 unvalidated against any real data, and that will remain true until someone pays.
 
-**Working default:** synthetic only. Every connector is a fixture, flagged `is_simulated`
-throughout, and that flag cannot be cleared downstream.
+**Working default:** synthetic only. The seven connectors used by every shipped command are
+fixtures, flagged `is_simulated` throughout, and that flag cannot be cleared downstream. An
+opt-in Tor snapshot adapter now exists but has no target configured, is never placed in the
+demo registry and makes no contact unless a deployment supplies an authorized onion allowlist.
 
 ---
 

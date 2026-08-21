@@ -21,6 +21,7 @@ import sys
 from importlib import import_module
 from typing import Any, Final
 
+from nemesis.collect.wire import encode_result
 from nemesis.sandbox.seal import seal_imports
 
 FORBIDDEN_PREFIXES: Final = (
@@ -59,14 +60,19 @@ def main() -> int:
         from nemesis.ports.collection import PivotRequest
 
         request = PivotRequest.model_validate(envelope["request"])
-        connector = factory(envelope["as_of"])
+        raw_config = envelope.get("config", {})
+        if not isinstance(raw_config, dict) or not all(
+            isinstance(key, str) and isinstance(value, str) for key, value in raw_config.items()
+        ):
+            raise ValueError("connector config must be a string-to-string mapping")
+        connector = factory(envelope["as_of"], raw_config)
     except (KeyError, ValueError, TypeError, AttributeError, ImportError) as exc:
         return _fail(f"the collector could not be built: {type(exc).__name__}: {exc}")
 
     import asyncio
 
     result = asyncio.run(connector.pivot(request))
-    sys.stdout.write(json.dumps({"result": result.model_dump(mode="json"), "sealed": sealed}))
+    sys.stdout.write(json.dumps({"result": encode_result(result), "sealed": sealed}))
     sys.stdout.flush()
     return 0
 

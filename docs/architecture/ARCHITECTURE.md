@@ -171,10 +171,10 @@ reviewer's attention. Every row below was re-checked against the code on that da
 |---|---|---|
 | `core/` | — | `IMPLEMENTED` — domain model, no I/O, no internal deps |
 | `ports/` | — | `IMPLEMENTED` — protocols only |
-| `collect/` | 1 | `SIMULATED` — seven fixture-backed connectors |
+| `collect/` | 1 | `IMPLEMENTED` — seven fixture connectors plus one opt-in, allowlisted Tor snapshot connector; the demo remains simulated |
 | `pursuit/` | 2 | `IMPLEMENTED` — deterministic rule policy |
 | `graph/` | 3 | `IMPLEMENTED` — in-memory temporal store |
-| — dark-web ops | 4 | `SIMULATED` — a fixture connector. **Correction:** `IsolatedCollector` now exists and is tested directly; nothing routes a connector through it, and no code reads `handles_hostile_content`, so it is a mechanism rather than a live control |
+| — dark-web ops | 4 | `IMPLEMENTED` snapshot / `SIMULATED` demo — `collect_confined` routes hostile connectors through `IsolatedCollector`; the real Tor connector is bounded to configured v3 onion services and fails closed without kernel confinement |
 | `resolve/` | 5 | `IMPLEMENTED` — refuses human identity structurally |
 | `evidence/` | 6 | `IMPLEMENTED` — hash-chained, head signed; no external anchor. **Measured 2026-08-19:** deleting a chain's *newest* row is undetected — the same blind spot the revocation and spend chains carry, since nothing follows the tail. Interior edits are caught, by the per-record signature rather than by the chaining |
 | `attribute/` | 7 | `IMPLEMENTED` — five dimensions, no collapsed score |
@@ -233,7 +233,7 @@ the development environment becoming an offensive platform:
   `OperationClass`, absent from `MVP_IMPLEMENTED_OPERATIONS`, and the registry returns
   `REFUSED_NO_ADAPTER`. Marked `REQUIRES_LEGAL_AUTHORITY`. Two tests act as tripwires.
 - `AnchorProvider` for RFC 3161 timestamping or a transparency log.
-- Real intelligence connectors behind `IntelligenceConnector`.
+- Provider-specific intelligence connectors beyond the bounded Tor snapshot adapter.
 
 The planner deliberately proposes options NEMESIS may not perform. A planner limited to what
 it can execute silently narrows every investigation to whatever happens to be built.
@@ -251,7 +251,8 @@ Stated here rather than discovered later:
   constrain the import graph and cannot stop a subprocess, a socket through an allowed
   dependency, or a mounted path. CI runs on Ubuntu and therefore **never exercises the
   kernel-enforced form at all**. Landlock or a seccomp-bpf wrapper is the direction; neither
-  is built. Dark-web collector isolation exists as a mechanism with no caller.
+  is built. The real Tor connector therefore refuses to run on platforms without the
+  kernel-enforced collector boundary; fixtures may still use process-only isolation.
 - No external integrity anchor exists, so evidence is not defensible against an insider. The
   vault reports this itself — and the same gap is now measured in the revocation and spend
   chains, where deleting the newest row is undetected and, if a later honest write follows,

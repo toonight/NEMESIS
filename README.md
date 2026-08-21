@@ -6,10 +6,10 @@
 
 [![CI](https://github.com/toonight/NEMESIS/actions/workflows/ci.yml/badge.svg)](https://github.com/toonight/NEMESIS/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.13-1f6feb)
-![Tests](https://img.shields.io/badge/tests-923-2ea043)
+![Tests](https://img.shields.io/badge/tests-946-2ea043)
 ![Typing](https://img.shields.io/badge/mypy-strict-2ea043)
 ![Plane contracts](https://img.shields.io/badge/plane%20contracts-9%20enforced-ff8a3d)
-![Status](https://img.shields.io/badge/status-simulated%20only-e8536b)
+![Status](https://img.shields.io/badge/status-default%20simulated%20%7C%20opt--in%20Tor-e5a50a)
 
 **N**etworked **E**ngine for **M**alicious **E**ntity **S**urveillance, **I**dentification &amp; **S**uppression
 
@@ -88,8 +88,11 @@ attribution. That failure was found by an external adversarial review and is doc
 NEMESIS is built to be handed, one day, to organizations with lawful authority to act. It
 is **not** an offensive platform and this repository will not become one.
 
-- The MVP **never touches infrastructure we do not own**. Every connector reads a fixture;
-  every address in the reference scenario is reserved for documentation and cannot resolve.
+- The demo and every default command **never touch infrastructure we do not own**. Their seven
+  connectors read fixtures, and every address in the reference scenario is reserved for
+  documentation. One opt-in [Tor onion snapshot connector](docs/connectors/dark-web.md) exists;
+  it makes real external contact only when a deployment constructs it with an explicit v3
+  onion allowlist, and it refuses to run without kernel confinement.
 - No autonomous purchasing, transactions, impersonation, or engagement with criminal
   personas.
 - No exploitation, persistence, credential attacks, malware deployment or destructive
@@ -150,10 +153,10 @@ different planes when a compromise of one must not become a compromise of the ot
 
 | Plane | | Status |
 |---|---|---|
-| 1 · Collection | sensors, connectors, quarantine — **hostile by definition** | `SIMULATED` |
+| 1 · Collection | sensors, connectors, quarantine — **hostile by definition** | `IMPLEMENTED` — simulated by default; one opt-in Tor snapshot connector |
 | 2 · Pursuit | investigation state, hypotheses, budget, pivot selection | `IMPLEMENTED` |
 | 3 · Graph | temporal, provenance-aware, confidence-scored | `IMPLEMENTED` |
-| 4 · Dark web | isolated observation | `SIMULATED` |
+| 4 · Dark web | isolated observation | `IMPLEMENTED` snapshot / `SIMULATED` demo |
 | 5 · Resolution | persona linkage — refuses human identity structurally | `IMPLEMENTED` |
 | 6 · Evidence | append-only, tamper-evident vault | `IMPLEMENTED` |
 | 7 · Attribution | five separate dimensions, no collapsed score | `IMPLEMENTED` |

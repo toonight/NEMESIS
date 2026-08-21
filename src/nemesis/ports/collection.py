@@ -54,6 +54,7 @@ class PivotType(StrEnum):
     MALWARE_SIMILARITY = "malware_similarity"
     C2_EXTRACTION = "c2_extraction"
     DARK_WEB_SEARCH = "dark_web_search"
+    DARK_WEB_SNAPSHOT = "dark_web_snapshot"
     PERSONA_ACTIVITY = "persona_activity"
     MARKETPLACE_LISTING = "marketplace_listing"
     KEY_LOOKUP = "key_lookup"
@@ -167,6 +168,14 @@ class ConnectorCapabilities(BaseModel):
         "very class of bug the boundary exists to remove. A hostile connector without one "
         "cannot be isolated, and the engine refuses to run it rather than running it in the "
         "main process.",
+    )
+
+    isolation_config: dict[str, str] = Field(
+        default_factory=dict,
+        description="Non-secret configuration needed to reconstruct this connector in the "
+        "isolated child process. Values cross the worker pipe with the request. Credentials "
+        "must never be put here: the configuration is operational metadata, not a secret "
+        "channel.",
     )
 
     cost_per_call: float = Field(
