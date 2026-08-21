@@ -1,0 +1,39 @@
+# Dependency update policy.
+#
+# INERT UNTIL MERGED TO THE DEFAULT BRANCH, and deliberately conservative once it is.
+#
+# There is a hazard here specific to this repository. The calibration freeze hashes
+# `src/nemesis` and nothing else: no digest in it changes when pydantic does. A coercion or
+# float-handling change in a dependency can move a published confidence band with all three
+# digests green — the eleventh bypass, arriving inside an automatic pull request that nobody
+# reads line by line.
+#
+# Two things follow, and neither is configured here because neither belongs in a YAML file:
+#   - a dependency PR is never auto-merged; and
+#   - `MeasurementProvenance` stamps the resolved runtime versions onto every calibration
+#     report, so a figure produced before a bump and one produced after are visibly
+#     incomparable rather than silently different.
+#
+# Monthly and grouped, because the point is to see the change, not to keep a badge green.
+version: 2
+updates:
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 3
+    groups:
+      python-dependencies:
+        patterns: ["*"]
+    commit-message:
+      prefix: "build(deps)"
+
+  # Actions are pinned by commit SHA in `ci.yml`, which stops a moved tag from changing what
+  # runs and also stops a human from ever noticing an update. This is what notices.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "build(ci)"

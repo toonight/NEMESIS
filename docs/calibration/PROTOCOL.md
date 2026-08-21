@@ -305,6 +305,24 @@ Every figure is reported with its population (§2), its ground-truth standard (�
 digest it was measured under (§1), and the number of times the sealed set has been opened (§5).
 A number without those four is not a result.
 
+**Where that stands today: one of the four is attached, and it was none until it was checked.**
+`CalibrationReport` now carries a `MeasurementProvenance` — the three freeze digests plus the
+resolved Python and runtime-dependency versions — rendered above the headline so a reader cannot
+reach a number without having passed it. When the tree has moved it says so by name and says the
+figures must not be compared with any taken at the frozen digests.
+
+The other three are not attached and cannot be yet: population and ground-truth standard are
+milestone 2, the sealed-set count is milestone 5, and both are `PROPOSED`. So this section
+currently describes a rule the harness satisfies in one quarter. Saying so is the point — the
+sentence above was written as a requirement and honoured in none of its four parts for as long
+as nobody checked, which is what "a claim contradicting the code is a defect" means when the
+claim is the protocol's own.
+
+The environment is in the stamp for a reason the freeze cannot cover: **no digest over
+`src/nemesis` changes when `pydantic` does.** A coercion or float-handling change in a
+dependency moves a published band with all three digests green. It is recorded rather than
+asserted, because a dependency bump should make two numbers *incomparable*, not make CI red.
+
 ---
 
 ## What this protocol cannot do

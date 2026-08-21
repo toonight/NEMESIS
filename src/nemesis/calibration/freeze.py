@@ -62,7 +62,9 @@ from __future__ import annotations
 import ast
 import hashlib
 import importlib
+import re
 from collections.abc import Mapping
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from types import MappingProxyType
@@ -817,7 +819,7 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/calibration/__init__.py": "d29b1b1babb51bc4",
         "nemesis/calibration/coherence.py": "452dc2ac53a23920",
         "nemesis/calibration/generator.py": "bdd90080b2cfed7e",
-        "nemesis/calibration/harness.py": "dd64f7372b912d6b",
+        "nemesis/calibration/harness.py": "1b251a700a9cf876",
         "nemesis/calibration/scoring.py": "b2e7a193a30d65a1",
         "nemesis/cli/__init__.py": "ad2e13b69c4fc1fd",
         "nemesis/cli/main.py": "0317e2f65b68f6a8",
@@ -1062,6 +1064,119 @@ def engine_drifted(tree: Path | None = None) -> tuple[str, ...]:
     return tuple(sorted(moved | vanished))
 
 
+@dataclass(frozen=True)
+class MeasurementProvenance:
+    """What a number was measured under. Attached to every figure this platform reports.
+
+    `docs/calibration/PROTOCOL.md` §6 ends with "every figure is reported with ... the freeze
+    digest it was measured under. **A number without those four is not a result.**" The harness
+    printed a Brier decomposition, an AUC and two false-match rates and carried none of them —
+    the mechanism built so a measurement could be tied to a configuration, and the one thing
+    that produces measurements did not record the configuration. A doc-versus-code gap in the
+    exact place the document is about.
+
+    The environment is here for a reason a freeze over `src/nemesis` cannot cover: nothing in
+    those digests changes when `pydantic` does, and a coercion or float-handling change in a
+    dependency moves a published band with all three digests green. That is not asserted —
+    a dependency bump should make two numbers **incomparable**, not make CI red — so it is
+    recorded and reported, which is what the protocol asks for anyway.
+    """
+
+    values_digest: str
+    tree_digest: str
+    constants_digest: str
+    environment_digest: str
+    python_version: str
+    dependencies: tuple[tuple[str, str], ...]
+    drifted_constants: tuple[str, ...]
+    drifted_modules: tuple[str, ...]
+
+    @property
+    def is_frozen(self) -> bool:
+        """Whether the tree still matches the freeze these figures claim to be measured under."""
+        return not self.drifted_constants and not self.drifted_modules
+
+    def render(self) -> list[str]:
+        lines = [
+            f"  values     {self.values_digest[:16]}   {len(FROZEN_VALUE_DIGESTS)} constants,"
+            f" by imported value",
+            f"  constants  {self.constants_digest[:16]}   {len(CONSTANT_DIGESTS)} dials,"
+            f" by normalised syntax",
+            f"  tree       {self.tree_digest[:16]}   {len(MODULE_DIGESTS)} modules,"
+            f" by normalised syntax",
+            f"  environment {self.environment_digest[:16]}  Python {self.python_version}, "
+            + ", ".join(f"{name} {version}" for name, version in self.dependencies),
+        ]
+        if self.is_frozen:
+            lines.append("  Matches the freeze. Comparable with any run carrying these digests.")
+            return lines
+
+        lines.append("")
+        lines.append("  ! NOT AT THE FREEZE. These figures describe a different system from any")
+        lines.append(
+            "    measurement taken at the digests above, and the two must not be compared."
+        )
+        for name in self.drifted_constants:
+            lines.append(f"      dial moved    {name}")
+        for name in self.drifted_modules:
+            lines.append(f"      module moved  {name}")
+        return lines
+
+
+def runtime_dependencies() -> tuple[tuple[str, str], ...]:
+    """The declared runtime dependencies and their installed versions — derived, not listed.
+
+    Read from this distribution's own metadata, so a dependency added to `pyproject.toml`
+    appears here without anyone remembering to. Development tools are excluded because they
+    live in `[dependency-groups]` and never reach `Requires-Dist` at all — excluded by
+    construction rather than by a rule somebody has to keep correct, which is the distinction
+    this module has paid for repeatedly. Optional extras are excluded for the same reason they
+    are optional: a figure produced without them was produced without them.
+    """
+    from importlib.metadata import PackageNotFoundError, distribution, version
+
+    try:
+        declared = distribution("nemesis").requires or []
+    except PackageNotFoundError:  # pragma: no cover - only when running from an unbuilt tree
+        return ()
+
+    found: list[tuple[str, str]] = []
+    for requirement in declared:
+        if "extra ==" in requirement:
+            continue
+        name = re.split(r"[<>=!~ \[;]", requirement, maxsplit=1)[0].strip()
+        if not name:
+            continue
+        try:
+            found.append((name, version(name)))
+        except PackageNotFoundError:  # pragma: no cover - a declared dep that is not installed
+            found.append((name, "MISSING"))
+    return tuple(sorted(found))
+
+
+def measurement_provenance() -> MeasurementProvenance:
+    """Everything a reader needs to know whether two numbers may be compared."""
+    import sys
+
+    dependencies = runtime_dependencies()
+    environment = "|".join(
+        [f"python={'.'.join(str(part) for part in sys.version_info[:3])}"]
+        + [f"{name}={value}" for name, value in dependencies]
+    )
+    return MeasurementProvenance(
+        values_digest=freeze_digest(),
+        tree_digest=engine_digest(),
+        constants_digest=_digest_of(
+            "|".join(f"{name}={digest}" for name, digest in sorted(CONSTANT_DIGESTS.items()))
+        ),
+        environment_digest=hashlib.sha256(environment.encode("utf-8")).hexdigest(),
+        python_version=".".join(str(part) for part in sys.version_info[:3]),
+        dependencies=dependencies,
+        drifted_constants=constants_drifted(),
+        drifted_modules=engine_drifted(),
+    )
+
+
 class CalibrationFreezeError(RuntimeError):
     """A registered calibration constant is missing or unreadable.
 
@@ -1076,6 +1191,7 @@ __all__ = [
     "FROZEN_DIGEST",
     "MODULE_DIGESTS",
     "CalibrationFreezeError",
+    "MeasurementProvenance",
     "constants_drifted",
     "discovered_constants",
     "drifted",
@@ -1083,7 +1199,9 @@ __all__ = [
     "engine_drifted",
     "freeze_digest",
     "frozen_modules",
+    "measurement_provenance",
     "module_digests",
     "normalised_source",
     "observed_values",
+    "runtime_dependencies",
 ]

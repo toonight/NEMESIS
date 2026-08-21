@@ -13,10 +13,10 @@ jobs:
   quality:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86  # v5
         with:
           enable-cache: true
 
@@ -74,3 +74,59 @@ jobs:
       # an hour of being written, by the author who then added eleven tests.
       - name: Documented counts match the repository
         run: uv run python scripts/check_documented_counts.py
+
+  # Ubuntu can only watch this project *refuse* to confine anything: the one kernel-level
+  # enforcement it has is macOS `sandbox-exec`, so on Linux every confinement test skips and
+  # the suite still goes green. Twelve tests across three modules were never executed by CI.
+  #
+  # This job exists to run them, and its first step is the important one. A macOS job that
+  # silently skips the same tests is worse than no job at all — it reports a control as tested
+  # when nothing exercised it, which is the exact defect this repository keeps finding in
+  # itself. So availability is asserted before anything runs, and a skip for want of a sandbox
+  # is turned into a failure rather than a dot.
+  #
+  # If this job fails, read it as "the control could not be verified on this runner", not as
+  # "the code is broken". `sandbox-exec` is deprecated by Apple and this is a declared gap in
+  # THREAT_MODEL.md; Linux confinement (Landlock, then seccomp) is the real answer.
+  confinement:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86  # v5
+        with:
+          enable-cache: true
+
+      - run: uv python install
+      - run: uv sync --all-extras
+
+      - name: The runner can actually enforce confinement
+        run: |
+          uv run python - <<'PY'
+          import sys
+          from nemesis.effects.isolation import sandbox_available
+          if not sandbox_available():
+              sys.exit(
+                  "sandbox-exec is unavailable on this runner, so every confinement test would "
+                  "skip and this job would pass without exercising the control. Failing instead."
+              )
+          print("kernel confinement is available; the gated tests will run")
+          PY
+
+      - name: Confinement tests, with any skip treated as a failure
+        run: |
+          uv run pytest -rs \
+            tests/invariants/test_read_confinement.py \
+            tests/invariants/test_collector_isolation.py \
+            tests/invariants/test_effects_isolation.py \
+            | tee /tmp/confinement.txt
+          if grep -q "kernel-enforced confinement needs macOS sandbox-exec" /tmp/confinement.txt; then
+            echo "a confinement test skipped for want of a sandbox on a macOS runner"; exit 1
+          fi
+          if grep -qE "[0-9]+ skipped" /tmp/confinement.txt; then
+            echo "unexpected skip in the confinement modules:"; grep -E "SKIPPED" /tmp/confinement.txt; exit 1
+          fi
+
+      - name: Invariant suite on macOS
+        run: uv run pytest -m invariant

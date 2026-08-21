@@ -152,11 +152,23 @@ def test_a_confined_child_cannot_read_this_platforms_own_source() -> None:
 
 @needs_sandbox
 def test_a_confined_child_cannot_read_the_callers_home_directory() -> None:
-    """Credentials were denied by name; everything else in a home directory was not."""
-    probe_target = Path.home() / ".zsh_history"
-    if not probe_target.exists():
-        pytest.skip("no shell history on this machine to probe with")
-    assert _read_under_confinement(probe_target).startswith("DENY")
+    """Credentials were denied by name; everything else in a home directory was not.
+
+    The probe file is **created** rather than looked for. The first version read
+    `~/.zsh_history` and skipped when it was absent, which is every CI runner — so the one
+    assertion proving the allowlist blocks *arbitrary* home-directory files, not merely the
+    credentials it names, was the one assertion CI could never run. The macOS job found that on
+    its first execution, which is what it is for.
+    """
+    probe = Path.home() / ".nemesis-read-confinement-probe"
+    try:
+        probe.write_text("not a credential, and still none of a confined child's business\n")
+    except OSError:  # pragma: no cover - only where HOME is not writable
+        pytest.skip("home directory is not writable, so there is nothing to probe with")
+    try:
+        assert _read_under_confinement(probe).startswith("DENY")
+    finally:
+        probe.unlink(missing_ok=True)
 
 
 @needs_sandbox
