@@ -92,7 +92,12 @@ def measure_tests_collected() -> int:
     the suite twice, so measuring it a third time would buy nothing.
     """
     return _extract(
-        _run(["uv", "run", "pytest", "--collect-only"]), r"(\d+) tests collected", "tests"
+        # The project-wide `-q` suppresses pytest 9's total during collection and leaves only
+        # per-file counts. Override addopts for this measurement so the total remains a number
+        # pytest itself computes rather than one this script has to re-sum.
+        _run(["uv", "run", "pytest", "--collect-only", "-o", "addopts="]),
+        r"(\d+) tests collected",
+        "tests",
     )
 
 
@@ -216,6 +221,21 @@ CLAIMS: Final[tuple[Claim, ...]] = (
         "docs/calibration/PROTOCOL.md",
         r"normalised syntax digest covering \*?\*?(\d+) modules",
         "frozen_modules",
+    ),
+    Claim(
+        "docs/architecture/PROJECT_STATE.md",
+        r"\*\*(\d+) module syntax digests\*\*",
+        "frozen_modules",
+    ),
+    Claim(
+        "src/nemesis/calibration/freeze.py",
+        r"\b(\d+) (?:of them|dials)(?=[, ])",
+        "calibration_dials",
+    ),
+    Claim(
+        "src/nemesis/calibration/freeze.py",
+        r", (\d+) hold no numeric literal",
+        "categorical_dials",
     ),
     Claim("README.md", r"plane%20contracts-(\d+)%20enforced", "contracts"),
     Claim("README.md", r"(\d+) `import-linter` contracts", "contracts"),

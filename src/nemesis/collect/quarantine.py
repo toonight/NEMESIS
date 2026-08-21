@@ -44,11 +44,11 @@ who can crash the analyser then chooses the classification.
 the escalation is a human decision and no automated path releases it. That is a refusal the
 platform makes about its own convenience.
 
-Status: `IMPLEMENTED` for the pipeline. Honest scope: **every connector in this repository
-reads a fixture**, so no hostile bytes are parsed anywhere today and this isolates a risk that
-has not arrived — the same reason the collector isolation was built before it was needed. What
-is *not* here is a real analyser: the one shipped classifies by declared safety and structure,
-and a deployment that opens documents wires its own behind :class:`ArtifactAnalyser`.
+Status: `IMPLEMENTED` for the pipeline. Honest scope: the demo and tests read fixtures; the
+opt-in Tor connector can return real bytes but deliberately does not parse their content. What
+is *not* here is a real confined analyser: the one shipped classifies by declared safety and
+structure in the caller and reports that fact. A deployment that opens or parses documents
+wires its own behind :class:`ArtifactAnalyser`.
 """
 
 from __future__ import annotations

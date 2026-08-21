@@ -24,6 +24,7 @@ provenance of everything the connector collects.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Final
 
@@ -333,7 +334,9 @@ def simulated_connectors(
     )
 
 
-def dark_web_connector(as_of: str) -> IntelligenceConnector:
+def dark_web_connector(
+    as_of: str, config: Mapping[str, str] | None = None
+) -> IntelligenceConnector:
     """Factory for the confined collector, addressed by name across a process boundary.
 
     :class:`~nemesis.collect.isolation.IsolatedCollector` takes a ``module:function`` string
@@ -342,4 +345,6 @@ def dark_web_connector(as_of: str) -> IntelligenceConnector:
     contain. This is the one connector that declares `handles_hostile_content`, so it is the
     one that must not run in the main process.
     """
+    if config:
+        raise ValueError("the simulated dark-web connector accepts no runtime configuration")
     return SimulatedDarkWebConnector(as_of=datetime.fromisoformat(as_of))
