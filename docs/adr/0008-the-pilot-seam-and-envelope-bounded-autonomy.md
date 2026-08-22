@@ -155,6 +155,15 @@ authority is mediated move by move, rather than being wired into the engine's ow
 
 ## The concrete pilots: OpenAI and Anthropic cyber models
 
+> **Amended 2026-08-22 by [ADR-0009](0009-provider-neutral-pilot-seats.md).** Everything below
+> still describes the design correctly and two of its claims have since been shown false in
+> detail. There are now five seats, not two, and they live under `nemesis.pilot.providers`; the
+> module paths named here remain valid as documented compatibility shims. More importantly, "so
+> the two cannot drift into saying different things to two vendors" was **not true when it was
+> written** — an audit found six behavioural disagreements between three seats, and a shared
+> defect that truncated three of the four tool descriptions for every vendor at once. ADR-0009
+> replaces the assertion with a narrower claim and a parametrised test that can fail.
+
 The `AutonomousPilot` protocol is vendor-neutral on purpose — the containment must not depend
 on which model drives, because a containment that only held for one vendor's model would be no
 containment at all. Two concrete seats exist: `nemesis.pilot.openai_pilot` for an autonomous

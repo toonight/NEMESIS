@@ -13,6 +13,7 @@ each is a dial, and each moves a number somebody is about to grade. These tests 
 from __future__ import annotations
 
 import ast
+import hashlib
 import importlib
 import os
 import py_compile
@@ -40,6 +41,7 @@ from nemesis.calibration.freeze import (
     FROZEN_DIGEST,
     MODULE_DIGESTS,
     SELF,
+    MeasurementProvenance,
     _digest_of,
     canonical,
     constants_drifted,
@@ -49,10 +51,12 @@ from nemesis.calibration.freeze import (
     engine_drifted,
     freeze_digest,
     frozen_modules,
+    measurement_provenance,
     module_digests,
     normalised_source,
     observed_values,
 )
+from nemesis.calibration.harness import run_calibration
 from nemesis.calibration.scoring import (
     MIN_BIN_COUNT,
     PUBLISHED_BAND_BINS,
@@ -1160,3 +1164,113 @@ def test_no_function_here_accepts_a_tree_and_ignores_it() -> None:
         f"{ignored} take a `tree` argument and never read it, so they silently fall back to the "
         "real package while their callers believe they are looking at a copy"
     )
+
+
+# --- What a number was measured under ----------------------------------------
+
+
+def test_every_reported_figure_carries_what_it_was_measured_under() -> None:
+    """The protocol's closing sentence, which the code did not honour.
+
+    §6 ends: "every figure is reported with its population, its ground-truth standard, **the
+    freeze digest it was measured under**, and the number of times the sealed set has been
+    opened. A number without those four is not a result." The harness printed a Brier
+    decomposition, an AUC and two false-match rates and carried **none** of them — the whole
+    mechanism exists so a measurement can be tied to a configuration, and the one thing that
+    produces measurements did not record the configuration.
+
+    The environment is in the stamp for a reason no digest over `src/nemesis` can cover:
+    nothing in those three changes when `pydantic` does, and a coercion or float-handling
+    change in a dependency moves a published band with all of them green. It is **recorded,
+    not asserted** — a dependency bump should make two numbers incomparable, not make CI red.
+    """
+    report = run_calibration(cases=60, seed=1)
+    stamp = report.provenance
+
+    assert stamp.values_digest == FROZEN_DIGEST
+    assert stamp.is_frozen, "the tree drifted; refreeze deliberately before reading any figure"
+
+    rendered = report.render()
+    assert "MEASURED UNDER" in rendered
+    # The digests appear before any number the reader might act on.
+    assert rendered.index("MEASURED UNDER") < rendered.index("HEADLINE")
+    for digest in (stamp.values_digest, stamp.tree_digest, stamp.environment_digest):
+        assert digest[:16] in rendered
+
+    # Derived from packaging metadata, so a new dependency appears without anyone remembering.
+    names = {name for name, _ in stamp.dependencies}
+    assert "pydantic" in names
+    assert all(version and version != "MISSING" for _, version in stamp.dependencies)
+    # Development tools cannot reach a published figure and are excluded by construction —
+    # they live in `[dependency-groups]` and never appear in `Requires-Dist` at all.
+    assert not names & {"pytest", "mypy", "ruff", "hypothesis"}
+
+
+def test_a_drifted_tree_says_so_above_the_numbers(tmp_path: Path) -> None:
+    """The payoff: a figure measured off the freeze must not look like one measured on it.
+
+    Demonstrated live while this was being written — editing `harness.py` to add the stamp made
+    the stamp report `harness.py` as moved, which is the correct answer and the reason the
+    warning sits above the headline rather than in a footnote.
+    """
+    package = tmp_path / "nemesis"
+    shutil.copytree(SRC / "nemesis", package)
+    engine = package / "attribute/engine.py"
+    engine.write_text(
+        engine.read_text(encoding="utf-8").replace(
+            "DECEPTION_BASE_RATE = 0.25", "DECEPTION_BASE_RATE = 0.99", 1
+        ),
+        encoding="utf-8",
+    )
+
+    moved = MeasurementProvenance(
+        values_digest="0" * 64,
+        tree_digest="0" * 64,
+        constants_digest="0" * 64,
+        environment_digest="0" * 64,
+        python_version="3.13.2",
+        dependencies=(("pydantic", "2.13.4"),),
+        drifted_constants=constants_drifted(tree=package),
+        drifted_modules=engine_drifted(tree=package),
+    )
+
+    assert not moved.is_frozen
+    assert moved.drifted_constants == ("nemesis.attribute.engine:DECEPTION_BASE_RATE",)
+    assert moved.drifted_modules == ("nemesis/attribute/engine.py",)
+
+    rendered = "\n".join(moved.render())
+    assert "NOT AT THE FREEZE" in rendered
+    assert "must not be compared" in rendered
+    assert "nemesis.attribute.engine:DECEPTION_BASE_RATE" in rendered
+
+
+def test_the_environment_digest_moves_when_a_dependency_does() -> None:
+    """Otherwise the stamp is decoration.
+
+    A freeze over `src/nemesis` is blind to the libraries that execute it. This is the only
+    part of the stamp that notices, so it has to actually depend on the versions rather than
+    merely mention them.
+    """
+    stamp = measurement_provenance()
+    baseline = stamp.environment_digest
+
+    assert stamp.dependencies, "no runtime dependencies resolved; the stamp would be constant"
+
+    with_a_bump = MeasurementProvenance(
+        values_digest=stamp.values_digest,
+        tree_digest=stamp.tree_digest,
+        constants_digest=stamp.constants_digest,
+        environment_digest=hashlib.sha256(
+            "|".join(
+                [f"python={stamp.python_version}"]
+                + [f"{name}={version}" for name, version in stamp.dependencies[:-1]]
+                + [f"{stamp.dependencies[-1][0]}=0.0.0-imaginary"]
+            ).encode()
+        ).hexdigest(),
+        python_version=stamp.python_version,
+        dependencies=stamp.dependencies,
+        drifted_constants=(),
+        drifted_modules=(),
+    )
+
+    assert with_a_bump.environment_digest != baseline

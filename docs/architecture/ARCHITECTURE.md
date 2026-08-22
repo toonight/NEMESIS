@@ -182,12 +182,14 @@ reviewer's attention. Every row below was re-checked against the code on that da
 | `authz/` | 9 | `IMPLEMENTED` — Ed25519, dual control, offline verify, verified identity assertions with per-issuer assurance ceilings |
 | `effects/` | 10 | `SIMULATED` — simulation and drafting only |
 | — resurgence | 11 | `SIMULATED` — fixtures exist; no standing monitor |
-| `pilot/` | — | `IMPLEMENTED` — the seat and the limiter an external autonomous pilot drives; closed move vocabulary, a mediator holding every handle, effects routed through the pre-signed envelope (ADR-0008). No production pilot ships. |
+| `pilot/` | — | `IMPLEMENTED` — the seat and the limiter an external autonomous pilot drives; closed move vocabulary, a mediator holding every handle, effects routed through the pre-signed envelope (ADR-0008). |
+| `pilot/providers/` | — | `IMPLEMENTED` (shape), **unconfirmed on the wire** — five seats (OpenAI, Anthropic, xAI, Gemini, Ollama) plus a generic OpenAI-compatible one, behind one canonical tool suite and a frozen registry. An `import-linter` contract forbids anything here from importing the mediator or any platform plane. No transport ships wired (ADR-0009). |
+| `pilotbench/` | — | `IMPLEMENTED` harness / `SIMULATED` corpus — eight adversarial scenarios and a two-tier report: control-plane properties that stand alone, and agreement with a corpus we wrote that does not. |
 | `sandbox/` | — | `IMPLEMENTED` — one confinement launch path, two opposite policies |
 | `audit/` | — | `IMPLEMENTED` — hash-chained, denials recorded, single-writer enforced |
 | `calibration/` | — | `IMPLEMENTED` (structural) — coherence laws that need no ground truth. **Not** empirical: no confidence figure has been scored against a resolved case, and no corpus exists |
 | `ui/` | — | `IMPLEMENTED` — the analyst view, uncertainty visible by default, filtered to DELIVERABLE-class material |
-| `cli/` | — | `IMPLEMENTED` — `demo`, `pilot`, `calibrate`, `investigate` |
+| `cli/` | — | `IMPLEMENTED` — `demo`, `pilot`, `verify`, `view`, `corpus`, `calibrate`, `providers`, `pilot-preview`, `pilotbench` |
 | `slice/` | — | `IMPLEMENTED` — the end-to-end reference scenario and the pilot session it drives |
 | `api/` | — | `IMPLEMENTED` — **five** routes, not four, and one of them writes: `POST /submissions` admits an outside claim as a HYPOTHESIS from EXTERNAL_REPORT, never an observation, rate-limited per principal. Multi-tenancy is one store per tenant, stamped from the registered issuer, with eight isolation tests. **Honest scope:** the write path is isolated per tenant; the read routes still serve one investigation view to every tenant |
 
@@ -203,6 +205,16 @@ part that enforces the limits cannot be one an adversary steers with the content
 So the topology is deliberately small, and smaller than the brief's list of sixteen agent
 roles suggested. Internal components are deterministic Python, not agents. There is exactly one
 seat for a model, and it is the pilot's — mediated move by move.
+
+**Which model sits in the seat is configuration.** Five providers are registered — OpenAI,
+Anthropic, xAI, Google Gemini and a local model through Ollama — plus a generic seat for any
+other OpenAI-compatible endpoint. There is no vendor branch anywhere in investigation logic: a
+registry resolves a provider key to a seat and fails closed on a name it does not know. The four
+verbs are rendered into each vendor's dialect from **one** canonical suite that no adapter can
+enumerate, and an `import-linter` contract naming the *package* keeps every adapter — including
+ones nobody has written yet — from importing the mediator, the engine, the graph, the vault or
+the audit sink. A shared transport shape is never a shared identity: xAI is recorded as xAI.
+See ADR-0009 and [`docs/pilot/MULTI_PROVIDER.md`](../pilot/MULTI_PROVIDER.md).
 
 **The pilot is untrusted, and the seam contains it (`nemesis.pilot`).** The pilot receives a
 read-only briefing and proposes a move from a closed four-verb vocabulary; the `PilotMediator`

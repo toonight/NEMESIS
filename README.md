@@ -6,9 +6,9 @@
 
 [![CI](https://github.com/toonight/NEMESIS/actions/workflows/ci.yml/badge.svg)](https://github.com/toonight/NEMESIS/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.13-1f6feb)
-![Tests](https://img.shields.io/badge/tests-946-2ea043)
+![Tests](https://img.shields.io/badge/tests-1188-2ea043)
 ![Typing](https://img.shields.io/badge/mypy-strict-2ea043)
-![Plane contracts](https://img.shields.io/badge/plane%20contracts-9%20enforced-ff8a3d)
+![Plane contracts](https://img.shields.io/badge/plane%20contracts-10%20enforced-ff8a3d)
 ![Status](https://img.shields.io/badge/status-default%20simulated%20%7C%20opt--in%20Tor-e5a50a)
 
 **N**etworked **E**ngine for **M**alicious **E**ntity **S**urveillance, **I**dentification &amp; **S**uppression
@@ -40,6 +40,13 @@ four verbs** — run a pivot, record a belief, request an effect, conclude. It i
 discriminated union, so a fifth move is not refused at runtime: it fails to parse. The
 containment is the *absence of a verb*, not a check that could be argued past. There is no
 `escalate`, no `widen_scope`, no `run_shell`, and no amount of persuasion produces one.
+
+**Which model drives is configuration.** OpenAI, Anthropic, xAI, Google Gemini or a model on
+your own machine — same four verbs, same envelope, same audit trail, and an import contract that
+stops any adapter from reaching the engine, the graph, the vault or the signing key. Every one
+of those vendors serves models that can execute code, browse and retrieve; none of those is a
+NEMESIS verb, and a test scans every provider's outgoing request to keep it that way. *Model
+capability is not NEMESIS authorization* is the line the whole layer is arranged around.
 
 Autonomy lives inside a **pre-signed capability envelope**: what the pilot may do is bound
 by a signed capability, how often is bound by a hash-chained spend ledger, and both are
@@ -126,9 +133,21 @@ demonstration:
 NEMESIS_LIVE_PILOT=1 uv run pytest tests/invariants/test_live_pilot_injection.py -v
 ```
 
-Those tests **skip** without a local model rather than passing vacuously. The vendor seats
-(`openai_pilot`, `anthropic_pilot`) take an injected transport whose default refuses, so
-nothing reaches a vendor unless a deployment wires it deliberately.
+Those tests **skip** without a local model rather than passing vacuously.
+
+Five providers can sit in the seat — OpenAI, Anthropic, xAI, Google Gemini and a local model —
+selected by configuration, not by a branch in investigation logic:
+
+```bash
+uv run nemesis providers                                    # who can drive, and what each needs
+uv run nemesis pilot-preview --provider openai --model <id> # exactly what would leave, sent nowhere
+uv run nemesis pilotbench                                   # grade a pilot against the threat model
+```
+
+Every hosted seat takes an injected transport whose default refuses, so nothing reaches a
+vendor unless a deployment wires it deliberately — and `pilot-preview` exists so that decision
+can be made by *reading what would leave the building* rather than imagining it. See
+[`docs/pilot/MULTI_PROVIDER.md`](docs/pilot/MULTI_PROVIDER.md).
 
 ## What the demo actually shows
 
@@ -167,7 +186,7 @@ different planes when a compromise of one must not become a compromise of the ot
 
 The arrows that **do not** exist matter as much as those that do. Collection holds hostile
 content and Effects holds outward reach; if those two could talk, planted content could
-steer a real-world action. 9 `import-linter` contracts enforce that in CI.
+steer a real-world action. 10 `import-linter` contracts enforce that in CI.
 
 ## Scope and current state
 
@@ -206,6 +225,16 @@ establishes that it did not try, and nothing more. What the containment tests es
 limiter: there the pilot obeys the injection, argues, retries, and still gets nothing, because
 the refusal is in code it cannot reach.
 
+**No request has ever been sent to a hosted vendor from this repository.** The five provider
+adapters are written from vendor documentation and confirmed by tests against hand-written
+responses. Their request shapes are `IMPLEMENTED` and *unconfirmed on the wire*; opt-in live
+tests exist to close that gap and no CI run performs one.
+
+**PilotBench grades a model against a corpus we wrote.** Its control-plane half — nothing left,
+no move escaped the vocabulary, no belief became evidence — is a fact about NEMESIS. Its quality
+half measures agreement with our own imagination of an attack, and the report says so above the
+numbers rather than below them.
+
 **The reference adversary does not adapt.** A real one responds to being pursued.
 
 ## Documentation
@@ -221,6 +250,7 @@ the refusal is in code it cannot reach.
 | [`CLAUDE.md`](CLAUDE.md) | project rules and the fifteen invariants |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | what is welcome, and the terms a patch carries |
 | [`docs/calibration/PROTOCOL.md`](docs/calibration/PROTOCOL.md) | how the confidence figures will be validated, written before the corpus exists |
+| [`docs/pilot/MULTI_PROVIDER.md`](docs/pilot/MULTI_PROVIDER.md) | which models may drive, how one is chosen, and why the choice changes no limit |
 
 Every artifact carries its epistemic status, and these labels are never silently upgraded:
 `IMPLEMENTED` · `SIMULATED` · `PROPOSED` · `REQUIRES_EXTERNAL_DATA` ·

@@ -49,7 +49,9 @@ the enforcement as a test, the design is wrong.
     not an afterthought.
 14. **A takedown is followed by resurgence monitoring.** Disruption closes no case.
 15. **The MVP never acts against external infrastructure.** No scanning, no probing,
-    no contact with systems we do not own. Synthetic data only.
+    no unsolicited contact. The sole egress is a fetch of specific URLs from an
+    operator-supplied allowlist, off by default with no endpoint shipped, confined by the
+    kernel and marked `NEMESIS-EGRESS-ALLOWED`. Everything else is synthetic.
 
 ## Boundary discipline
 

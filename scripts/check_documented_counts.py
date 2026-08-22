@@ -151,6 +151,22 @@ def measure_categorical_dials() -> int:
     return total
 
 
+def measure_sandbox_gated_tests() -> int:
+    """Tests that only run where the kernel can actually confine a process.
+
+    On Linux every one of them skips and the suite still goes green, so this is the count of
+    what CI verified about the confinement control before the macOS job existed: none of it.
+    Derived by counting the decorator, because the first prose version of this number said
+    "fifteen" — it had counted the three lines that *define* the marker as well.
+    """
+    import re
+
+    total = 0
+    for path in (ROOT / "tests").rglob("test_*.py"):
+        total += len(re.findall(r"^@needs_sandbox\b", path.read_text(encoding="utf-8"), re.M))
+    return total
+
+
 def measure_frozen_modules() -> int:
     return len(_freeze_module().frozen_modules())  # type: ignore[attr-defined]
 
@@ -172,6 +188,7 @@ MEASUREMENTS: Final[dict[str, Callable[[], int]]] = {
     "calibration_dials": measure_calibration_dials,
     "categorical_dials": measure_categorical_dials,
     "frozen_modules": measure_frozen_modules,
+    "sandbox_gated_tests": measure_sandbox_gated_tests,
     "tests": measure_tests_collected,
     "contracts": measure_contracts,
     "mypy_files": measure_mypy_files,
@@ -206,6 +223,11 @@ CLAIMS: Final[tuple[Claim, ...]] = (
         "calibration_constants",
     ),
     Claim("docs/calibration/PROTOCOL.md", r"\*\*(\d+) dials\*\*", "calibration_dials"),
+    Claim(
+        "docs/architecture/PROJECT_STATE.md",
+        r"on Linux (\d+) tests across three modules skipped",
+        "sandbox_gated_tests",
+    ),
     Claim("docs/architecture/PROJECT_STATE.md", r"\*\*(\d+) dials\*\*", "calibration_dials"),
     Claim(
         "docs/architecture/PROJECT_STATE.md",

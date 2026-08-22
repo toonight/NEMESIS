@@ -65,6 +65,15 @@ from nemesis.effects.registry import (
     STOP_CONDITION_PARAMETER_PREFIX,
     EffectsRegistry,
 )
+from nemesis.pilot.challenger import (
+    ChallengeOutcome,
+    ChallengePolicy,
+    ChallengerRuling,
+    MoveChallenger,
+    failure_ruling,
+    validate_ruling,
+    validation_detail,
+)
 from nemesis.pilot.moves import (
     PILOT_MOVE_ADAPTER,
     Briefing,
@@ -80,6 +89,12 @@ from nemesis.pilot.moves import (
     RunPivot,
 )
 from nemesis.pilot.pilot import AutonomousPilot
+from nemesis.pilot.providers.contract import (
+    PilotDecision,
+    PilotResponseMetadata,
+    ProviderIdentity,
+)
+from nemesis.pilot.providers.errors import PilotError
 from nemesis.ports.effects import EffectRequest
 from nemesis.ports.storage import AuditEvent, AuditSink, ClaimStore, GraphStore
 from nemesis.pursuit.engine import PursuitEngine
@@ -107,6 +122,14 @@ _DISCLOSURE_MARKER = "internal-classified material"
 
 _MARKER_PATTERN = re.compile("|".join(re.escape(m) for m in INTERNAL_MARKERS), re.IGNORECASE)
 
+_SESSION_ATTRIBUTION_KEYS: Final[frozenset[str]] = frozenset({"provider", "model", "seat"})
+"""Audit keys only the session may write.
+
+Read once at session open from a typed identity and never from a turn's metadata, which is
+untrusted code on the audit path. Enumerated here rather than relied on through dict-merge
+ordering, because the merge order was the bug: it overrode these keys only when a session
+identity existed, so a pilot exposing no identity at all could supply them itself."""
+
 
 def _redact_markers(text: str) -> str:
     """Strip internal-vocabulary markers from text before it enters a briefing.
@@ -128,6 +151,17 @@ class TurnRecord:
     move: PilotMove | None
     ruling: Ruling
 
+    metadata: PilotResponseMetadata | None = None
+    """What the provider call cost, when the seat reported it. ``None`` for a scripted pilot,
+    a pilot that raised, or any seat that does not meter itself.
+
+    Descriptive only. No ruling above reads it — a session driven by a seat that lied in every
+    field would produce a misleading audit record and never an action that should not have
+    happened, which is what makes it safe to accept from an untrusted seat at all."""
+
+    challenge: ChallengerRuling | None = None
+    """The challenger's verdict on this move, when one was configured."""
+
 
 @dataclass(frozen=True)
 class PilotSession:
@@ -139,6 +173,16 @@ class PilotSession:
     concluded: bool
     halted_reason: str | None
     pilot_actor: str
+
+    identity: ProviderIdentity | None = None
+    """Which provider and which model drove, read **once at session open** and used for every
+    audit record in the session.
+
+    Read once rather than per turn on purpose. The seat is untrusted code on the audit path, and
+    a seat free to report a different provider each turn would be rewriting attribution move by
+    move — so it is not given the chance, and a per-turn metadata block cannot override what was
+    recorded at open. ``None`` when the pilot does not meter itself, which is the honest answer
+    for a scripted pilot and better than inventing a vendor for it."""
 
     @property
     def rulings(self) -> tuple[Ruling, ...]:
@@ -274,6 +318,8 @@ class PilotMediator:
         max_moves: int = DEFAULT_MAX_MOVES,
         max_consecutive_malformed: int = DEFAULT_MAX_CONSECUTIVE_MALFORMED,
         propose_timeout: float = DEFAULT_PROPOSE_TIMEOUT,
+        challenger: MoveChallenger | None = None,
+        challenge_policy: ChallengePolicy | None = None,
     ) -> None:
         self._engine = engine
         self._graph = graph
@@ -285,6 +331,8 @@ class PilotMediator:
         self._max_moves = max_moves
         self._max_consecutive_malformed = max_consecutive_malformed
         self._propose_timeout = propose_timeout
+        self._challenger = challenger
+        self._challenge_policy = challenge_policy or ChallengePolicy()
 
     async def drive(
         self, pilot: AutonomousPilot, seed: IncidentSeed, *, total_budget: float = 100.0
@@ -292,9 +340,18 @@ class PilotMediator:
         """Run one full session: open an investigation, then loop asking the pilot for moves
         until it concludes, exhausts the move ceiling, or misbehaves past tolerance."""
         pilot_actor = new_id(IdPrefix.ACTOR)
+        # Read once, here, and used for every record below. A seat is untrusted code sitting on
+        # the audit path; one free to report a different provider each turn would be rewriting
+        # attribution move by move.
+        identity = self._identity_of(pilot)
         investigation = await self._engine.start(seed, total_budget=total_budget)
         await self._record_session(
-            pilot, pilot_actor, investigation, outcome="opened", extra={"budget": f"{total_budget}"}
+            pilot,
+            pilot_actor,
+            investigation,
+            identity,
+            outcome="opened",
+            extra={"budget": f"{total_budget}"},
         )
 
         transcript: list[TurnRecord] = []
@@ -303,28 +360,63 @@ class PilotMediator:
         concluded = False
         halted: str | None = None
 
-        async def refuse(move_kind: str, reason: str) -> bool:
+        async def refuse(
+            move_kind: str,
+            reason: str,
+            metadata: PilotResponseMetadata | None = None,
+            *,
+            error: BaseException | None = None,
+        ) -> bool:
             """Record a refused non-move and report whether the streak has ended the session."""
             nonlocal malformed_streak, last_ruling
             malformed_streak += 1
             ruling = Ruling(
                 move_kind=move_kind, status=RulingStatus.REFUSED_MALFORMED, reason=reason[:400]
             )
-            transcript.append(TurnRecord(None, ruling))
+            transcript.append(TurnRecord(None, ruling, metadata))
             last_ruling = ruling
-            await self._record_move(pilot, pilot_actor, investigation, None, ruling)
+            await self._record_move(
+                pilot, pilot_actor, investigation, identity, None, ruling, metadata, error=error
+            )
             return malformed_streak >= self._max_consecutive_malformed
 
         for turn in range(self._max_moves):
-            briefing = await self._brief(
-                investigation, last_ruling, moves_remaining=self._max_moves - turn
-            )
+            try:
+                briefing = await self._brief(
+                    investigation, last_ruling, moves_remaining=self._max_moves - turn
+                )
+            except DisclosureViolationError:
+                # Recorded, then re-raised untouched. This is NOT handling it — the wall's
+                # contract is that nobody catches it to carry on, and nothing here carries on.
+                # But an audit trail holding a `pilot.session` open with no close is a session
+                # that cannot be reconstructed, and invariant 11 does not make an exception for
+                # the case where the platform stopped itself. So the close is written and the
+                # error goes on being loud.
+                await self._record_session(
+                    pilot,
+                    pilot_actor,
+                    investigation,
+                    identity,
+                    outcome="halted",
+                    extra={
+                        "halted_reason": "the briefing would have carried internal-classified "
+                        "material to the pilot",
+                        "moves": str(len(transcript)),
+                    },
+                )
+                raise
 
             raw: object = None
+            metadata: PilotResponseMetadata | None = None
             try:
                 # Bounded by a wall clock the pilot cannot influence: a hosted model that hangs
-                # must not park the whole session on one turn with no halt ever recorded.
-                raw = await asyncio.wait_for(pilot.propose(briefing), timeout=self._propose_timeout)
+                # must not park the whole session on one turn with no halt ever recorded. The
+                # bound covers the seat's own retries too, which is why they cannot buy a
+                # hanging vendor more wall-clock than a single call would have had.
+                decision = await asyncio.wait_for(
+                    self._elicit(pilot, briefing), timeout=self._propose_timeout
+                )
+                raw, metadata = decision.raw, decision.metadata
                 move = self._validate(raw)
             except ValidationError as exc:
                 if await refuse(
@@ -332,6 +424,7 @@ class PilotMediator:
                     "not a move in the pilot vocabulary: "
                     f"{self._first_error(exc)}. The vocabulary is closed; a pilot cannot "
                     "act through a verb that does not exist.",
+                    metadata,
                 ):
                     halted = f"{malformed_streak} malformed moves in a row; session ended"
                     break
@@ -343,30 +436,59 @@ class PilotMediator:
                     "unknown",
                     f"the pilot did not return a move within {self._propose_timeout:g}s; "
                     "the stalled call was cancelled",
+                    metadata,
                 ):
                     halted = "the pilot stalled repeatedly; session ended"
                     break
                 continue
             except Exception as exc:
                 # An untrusted pilot must not be able to end a session by raising. A model that
-                # hangs, a transport that is not wired, an OpenAI call that fails — each is a
+                # hangs, a transport that is not wired, a vendor call that fails — each is a
                 # refused move and eventually a halt, never a crash of the harness and never a
                 # silent retry against whatever the pilot was about to contact.
+                #
+                # The *reason* is composed from the exception TYPE and, for a classified
+                # provider failure, its kind — never from the vendor's own error text. That text
+                # is written by a third party, and a ruling reason is echoed back to the pilot in
+                # the next briefing: passing it through would make a vendor's response body an
+                # input to the model's next turn. The detail is kept, bounded, in the audit
+                # record, where it is read by people rather than by a model.
                 if await refuse(
                     "unknown",
-                    f"the pilot raised {type(exc).__name__} instead of returning a move: {exc}",
+                    self._failure_reason(exc),
+                    metadata,
+                    error=exc,
                 ):
                     halted = f"the pilot raised {type(exc).__name__} repeatedly; session ended"
                     break
                 continue
 
             malformed_streak = 0
-            investigation, ruling = await self._apply(pilot, pilot_actor, investigation, move)
-            transcript.append(TurnRecord(move, ruling))
+            outcome = await self._challenge(briefing, move)
+            challenge = outcome.ruling if outcome is not None else None
+            if outcome is not None and self._challenge_policy.blocks(move.kind, outcome):
+                # Refused BEFORE `_apply`, so the envelope is never debited and no pivot runs.
+                # A challenger can only subtract; it never reaches a control that would have
+                # permitted something on its own.
+                what = (
+                    f"returned {outcome.ruling.verdict.value}"
+                    if outcome.answered
+                    else "did not answer, and this deployment refuses an unchallenged move"
+                )
+                ruling = Ruling(
+                    move_kind=move.kind,
+                    status=RulingStatus.REFUSED_CHALLENGED,
+                    reason=f"an independent challenger {what}: {outcome.ruling.reason}"[:400],
+                )
+            else:
+                investigation, ruling = await self._apply(pilot, pilot_actor, investigation, move)
+            transcript.append(TurnRecord(move, ruling, metadata, challenge))
             last_ruling = ruling
-            await self._record_move(pilot, pilot_actor, investigation, move, ruling)
+            await self._record_move(
+                pilot, pilot_actor, investigation, identity, move, ruling, metadata, challenge
+            )
 
-            if isinstance(move, Conclude):
+            if isinstance(move, Conclude) and ruling.accepted:
                 concluded = True
                 break
         else:
@@ -376,6 +498,7 @@ class PilotMediator:
             pilot,
             pilot_actor,
             investigation,
+            identity,
             outcome="concluded" if concluded else "halted",
             extra={"halted_reason": halted or "", "moves": str(len(transcript))},
         )
@@ -385,7 +508,90 @@ class PilotMediator:
             concluded=concluded,
             halted_reason=halted,
             pilot_actor=pilot_actor,
+            identity=identity,
         )
+
+    # -- eliciting a move ------------------------------------------------------
+
+    @staticmethod
+    def _identity_of(pilot: AutonomousPilot) -> ProviderIdentity | None:
+        """Which provider and model the seat says it is, read once at session open.
+
+        Defensive about the value, not merely about the attribute: a seat is untrusted code and
+        the strings it hands over land in the hash-chained audit trail. Anything that is not a
+        genuine :class:`ProviderIdentity` is treated as no identity at all rather than coerced
+        into a plausible-looking one, because an audit record naming a vendor nobody ran is
+        worse than one that admits it does not know.
+        """
+        identity = getattr(pilot, "identity", None)
+        return identity if isinstance(identity, ProviderIdentity) else None
+
+    @staticmethod
+    async def _elicit(pilot: AutonomousPilot, briefing: Briefing) -> PilotDecision:
+        """Ask the pilot for a move, keeping the call metadata when the seat reports it.
+
+        Two protocols, one loop. :class:`~nemesis.pilot.pilot.AutonomousPilot` is unchanged and
+        remains the whole contract; :class:`~nemesis.pilot.providers.contract.MeteredPilot` adds
+        ``decide``, and a seat that offers it gets its latency, token counts and attempt count
+        into the audit trail. A scripted pilot, an adversarial double and a five-line fake are
+        all still valid pilots that nobody has to update — which matters because every hostile
+        double in the containment suite is cast to the protocol, and a required member added
+        there would leave each of them compiling while silently no longer conforming.
+        """
+        decide = getattr(pilot, "decide", None)
+        if callable(decide):
+            decision = await decide(briefing)
+            if isinstance(decision, PilotDecision):
+                return decision
+            # A seat that answered `decide` with something else is not trusted to have meant it.
+            # The value is passed on as a raw move, which the seam refuses if it is not one.
+            return PilotDecision(raw=decision if isinstance(decision, Mapping) else {})
+        return PilotDecision(raw=await pilot.propose(briefing))
+
+    # -- the challenger --------------------------------------------------------
+
+    async def _challenge(self, briefing: Briefing, move: PilotMove) -> ChallengeOutcome | None:
+        """Ask the challenger about a move. Returns ``None`` when none is configured.
+
+        The challenger receives what the pilot received and the move the pilot proposed, and
+        nothing else. Its answer is re-validated through the closed verdict vocabulary for the
+        same reason a move is: a model instance with an overridden method is the value-confusion
+        shape this codebase has been bitten by, and the seam is where it is stopped.
+
+        A challenger that raises, stalls or answers outside the vocabulary does not take the
+        session with it. Under the default failure mode the move proceeds and the transcript
+        records that nothing challenged it — returning the session to the baseline posture every
+        containment test is written against, rather than making an advisory control a single
+        point of failure that anyone who can degrade a second vendor could pull.
+        """
+        if self._challenger is None:
+            return None
+        try:
+            raw = await asyncio.wait_for(
+                self._challenger.review(briefing, move),
+                timeout=self._challenge_policy.timeout_seconds,
+            )
+            return ChallengeOutcome(validate_ruling(raw))
+        except ValidationError as exc:
+            return self._unanswered(
+                f"the challenger returned no valid verdict ({validation_detail(exc)})"
+            )
+        except TimeoutError:
+            return self._unanswered(
+                f"the challenger did not answer within {self._challenge_policy.timeout_seconds:g}s"
+            )
+        except Exception as exc:
+            return self._unanswered(f"the challenger raised {type(exc).__name__}")
+
+    def _unanswered(self, detail: str) -> ChallengeOutcome:
+        """What is recorded when the challenger did not produce a verdict.
+
+        The same ruling either way — ``CONSISTENT``, saying the move was NOT challenged — because
+        that is what happened, and a record that reported a *verdict* nobody gave would be a
+        record of a review that did not occur. Whether the move is then refused is the policy's
+        decision, carried by ``answered=False`` rather than smuggled into a verdict value.
+        """
+        return ChallengeOutcome(failure_ruling(f"{detail}; the move was NOT challenged"), False)
 
     # -- move validation ------------------------------------------------------
 
@@ -400,11 +606,40 @@ class PilotMediator:
         return PILOT_MOVE_ADAPTER.validate_python(data)
 
     @staticmethod
+    def _failure_reason(exc: BaseException) -> str:
+        """Why a pilot did not produce a move, in words the platform wrote.
+
+        A classified provider failure contributes its *kind* — ``rate_limited``, ``timeout``,
+        ``authentication`` — which is a value from an enumeration in this repository and not text
+        a vendor chose. Everything else contributes its exception type. The vendor's own message
+        is deliberately absent: this string is echoed back to the pilot in the next briefing, so
+        passing a third party's response body through would make it an input to the model's next
+        turn. It is kept in the audit record instead, where people read it.
+        """
+        if isinstance(exc, PilotError):
+            return (
+                f"the provider call failed ({exc.kind.value}) and returned no move; "
+                "the detail is in the audit record"
+            )
+        return (
+            f"the pilot raised {type(exc).__name__} instead of returning a move; "
+            "the detail is in the audit record"
+        )
+
+    @staticmethod
     def _raw_kind(raw: object) -> str:
+        """What the pilot called its move, for the refusal record. Never trusted, always bounded.
+
+        ``Mapping`` and not ``dict``: a parser that returned an immutable mapping — the natural
+        shape for untrusted data — would otherwise fall through to ``"unknown"`` and quietly
+        degrade every refusal record in the transcript, which is a direct hit on invariant 11.
+        The value is stringified and capped because it is pilot-authored text on its way to the
+        hash-chained audit trail.
+        """
         if isinstance(raw, BaseModel):
-            return str(getattr(raw, "kind", "unknown"))
-        if isinstance(raw, dict):
-            return str(raw.get("kind", "unknown"))
+            return str(getattr(raw, "kind", "unknown"))[:64]
+        if isinstance(raw, Mapping):
+            return str(raw.get("kind", "unknown"))[:64]
         return "unknown"
 
     @staticmethod
@@ -652,7 +887,15 @@ class PilotMediator:
                     entity_ids.append(eid)
 
         entities: list[EntityView] = []
-        for eid in entity_ids[:MAX_BRIEFING_ENTITIES]:
+        # The cap counts entities the pilot is actually shown, not entities considered. It used
+        # to slice `entity_ids` before the disclosure filter below, so internal-class nodes
+        # consumed cap slots and were then dropped — an investigation that surfaced fifty
+        # personas would have briefed the pilot on nothing at all while reporting a full
+        # briefing. Filtering first is also the safe direction: the filter still runs on every
+        # candidate, and only the *count* changed.
+        for eid in entity_ids:
+            if len(entities) >= MAX_BRIEFING_ENTITIES:
+                break
             entity = await self._graph.get_entity(eid)
             if entity is None:
                 continue
@@ -679,7 +922,20 @@ class PilotMediator:
                 EntityView(
                     entity_id=entity.entity_id,
                     entity_type=entity.entity_type.value,
-                    natural_key=entity.natural_key,
+                    # Redacted, not scanned-and-refused. A natural key is chosen by whoever
+                    # registered the thing, so an adversary can put NEMESIS's own internal
+                    # vocabulary into one: an organization named "same_operator_as Holdings BV"
+                    # reaches the graph through an ordinary registration pivot, the backstop
+                    # below sees the marker, and the whole investigation ends with a raised
+                    # DisclosureViolationError. That is a control an adversary can fire — a
+                    # denial of service handed to them, and the same shape as the capability
+                    # scan reading message bodies.
+                    #
+                    # There is no leak to prevent here: the entity is DELIVERABLE by type and
+                    # the marker is a coincidence of naming. So the token is neutralised in the
+                    # field the adversary controls, and the backstop keeps its meaning for the
+                    # fields the platform authors.
+                    natural_key=_redact_markers(entity.natural_key),
                 )
             )
 
@@ -690,7 +946,9 @@ class PilotMediator:
             disclosure_of_entity(investigation.seed.entity_type) is DisclosureClass.DELIVERABLE
         )
         seed_line = (
-            f"{investigation.seed.entity_type.value} {investigation.seed.entity_key}"
+            _redact_markers(
+                f"{investigation.seed.entity_type.value} {investigation.seed.entity_key}"
+            )
             if seed_deliverable
             # No entity type either: it can itself be an internal marker ('human_identity_lead'),
             # and it tells the vendor an investigation is about a person.
@@ -700,7 +958,9 @@ class PilotMediator:
             HypothesisView(
                 hypothesis_id=h.hypothesis_id,
                 statement=(
-                    h.statement
+                    # The opening hypotheses interpolate the seed key, so they inherit whatever
+                    # an adversary put in it. Same treatment, same reason.
+                    _redact_markers(h.statement)
                     if seed_deliverable
                     else "<redacted: a hypothesis about an internal-class seed>"
                 ),
@@ -741,6 +1001,12 @@ class PilotMediator:
         # internal marker may reach the pilot (and thus the vendor). Unreachable after the
         # measures above — a raise here means a new leak path was opened and must be closed at
         # its source, not caught. Loud on purpose, per DisclosureViolationError's contract.
+        #
+        # It now covers only fields the PLATFORM authored, because the three an adversary can
+        # influence are redacted above. That is deliberately a narrowing of the backstop and it
+        # makes it *stronger* rather than weaker: before, a marker here could mean either a real
+        # leak or a domain somebody registered to cause one, and a control whose alarm has two
+        # meanings — one of them attacker-triggered — is a control that gets switched off.
         leaked = scan_for_internal_material({"briefing": briefing.model_dump_json()})
         if leaked:
             raise DisclosureViolationError(
@@ -756,8 +1022,13 @@ class PilotMediator:
         pilot: AutonomousPilot,
         pilot_actor: str,
         investigation: Investigation,
+        identity: ProviderIdentity | None,
         move: PilotMove | None,
         ruling: Ruling,
+        metadata: PilotResponseMetadata | None = None,
+        challenge: ChallengerRuling | None = None,
+        *,
+        error: BaseException | None = None,
     ) -> None:
         inputs = {
             "pilot": pilot.name,
@@ -765,6 +1036,7 @@ class PilotMediator:
             "status": ruling.status.value,
             "reason": ruling.reason[:400],
         }
+        inputs |= self._attribution(identity, metadata)
         if ruling.effect_outcome:
             inputs["effect_outcome"] = ruling.effect_outcome
         if ruling.recorded_claim_id:
@@ -772,6 +1044,18 @@ class PilotMediator:
         if isinstance(move, RequestEffect):
             inputs["operation"] = move.operation.value
             inputs["target_entity"] = move.entity_id
+        if isinstance(error, PilotError):
+            # The vendor's own words, bounded, and only here. `PilotError` has no field for a
+            # header, a request body or a response body, so there is nothing for a credential to
+            # be attached to — the same reasoning as the effects plane holding no standing
+            # credentials.
+            inputs |= {key: str(value)[:400] for key, value in error.audit().items()}
+        elif error is not None:
+            inputs["error_kind"] = type(error).__name__[:64]
+        if challenge is not None:
+            inputs["challenger"] = self._challenger.name[:128] if self._challenger else ""
+            inputs["challenger_verdict"] = challenge.verdict.value
+            inputs["challenger_reason"] = challenge.reason[:400]
         await self._audit.record(
             AuditEvent(
                 audit_id=new_id(IdPrefix.AUDIT),
@@ -785,15 +1069,63 @@ class PilotMediator:
             )
         )
 
+    def _attribution(self, identity: ProviderIdentity | None, metadata: object) -> dict[str, str]:
+        """Who drove and what the call cost, in the shape an audit record can carry.
+
+        Three rules, and every one of them was learned from a reproduction rather than reasoned
+        into place.
+
+        **The identity comes from the session, never from the turn.** ``provider``, ``model`` and
+        ``seat`` are written from what was read at session open, and any same-named key the
+        metadata offered is dropped first. The earlier version merged the metadata's fields and
+        then overrode them *only when a session identity existed* — so a pilot that exposed no
+        ``identity`` property but returned metadata claiming ``provider=openai`` had that written
+        into every audit event. A comparison between providers is worth exactly what the field
+        distinguishing them is worth, and that field must not be assertable by the party being
+        compared.
+
+        **Only a real :class:`PilotResponseMetadata` is read.** A ``PilotDecision`` is a plain
+        dataclass and nothing validates its ``metadata`` field, so an untrusted seat could return
+        an object whose ``audit_fields()`` returned anything at all. It did: an object value there
+        raised a ``ValidationError`` out of ``drive()`` **after the move had been applied and the
+        envelope debited** — a crash positioned exactly where the record of what just happened
+        should have been written.
+
+        **Every value is coerced and bounded anyway.** Belt and braces, for the same reason the
+        seam re-validates a move it just built.
+
+        Nothing here decides anything. Latency, token counts and the attempt count are recorded
+        because a session has to be explainable and a benchmark has to be able to say what a run
+        cost; no ruling reads them. ``attempts`` in particular closes a gap this file's own prose
+        had opened: a seat that retries a failing vendor three times inside one ``propose`` used
+        to collapse into one audit event that said nothing about it, while the comment above
+        claimed there was "never a silent retry".
+        """
+        fields: dict[str, str] = {}
+        if isinstance(metadata, PilotResponseMetadata):
+            for key, value in metadata.audit_fields().items():
+                if key in _SESSION_ATTRIBUTION_KEYS:
+                    continue
+                fields[str(key)[:64]] = str(value)[:400]
+        if identity is not None:
+            fields["provider"] = identity.provider[:64]
+            fields["model"] = identity.model[:128]
+            fields["seat"] = identity.seat[:64]
+        return fields
+
     async def _record_session(
         self,
         pilot: AutonomousPilot,
         pilot_actor: str,
         investigation: Investigation,
+        identity: ProviderIdentity | None,
         *,
         outcome: str,
         extra: dict[str, str],
     ) -> None:
+        inputs = {"pilot": pilot.name, **extra} | self._attribution(identity, None)
+        if self._challenger is not None:
+            inputs["challenger"] = self._challenger.name[:128]
         await self._audit.record(
             AuditEvent(
                 audit_id=new_id(IdPrefix.AUDIT),
@@ -803,7 +1135,7 @@ class PilotMediator:
                 action="pilot.session",
                 subject=investigation.investigation_id,
                 outcome=outcome,
-                inputs={"pilot": pilot.name, **extra},
+                inputs=inputs,
             )
         )
 

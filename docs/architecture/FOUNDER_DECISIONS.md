@@ -212,6 +212,26 @@ Our answer determines which upstream licences are tolerable, which interacts wit
 **Working default:** proprietary, all rights reserved. Chosen dependencies are permissive
 (Pydantic MIT, cryptography Apache-2.0/BSD), so nothing is foreclosed.
 
+
+## D-multi: how many model vendors may hold a briefing, and which
+
+**Raised 2026-08-22 by ADR-0009. Not answered here.**
+
+A hosted pilot transmits every briefing to its vendor. That was one open question while one
+hosted seat existed in shape. There are now four, plus a generic seat for any OpenAI-compatible
+endpoint, and the question multiplies rather than generalises: four vendors are four retention
+regimes, four jurisdictions, four sets of enterprise terms, and four parties who learn what this
+deployment is investigating and for whom. Model diversity is genuinely valuable — a challenger
+from a different family is the only kind worth having, because two instances of the same weights
+are one opinion asked twice — and it is bought by widening exactly this exposure.
+
+Nothing in the code decides it. Every hosted seat ships unwired and its default transport
+refuses. What the code now provides is a way to decide it by looking: `nemesis pilot-preview
+--provider <p> --model <id>` renders the exact request that seat would compose from a real
+briefing, scans it for internal-classified material, and sends nothing.
+
+The local seat remains the configuration under which this question does not arise.
+
 ---
 
 ## What is *not* on this list

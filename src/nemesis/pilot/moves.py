@@ -16,6 +16,16 @@ material leave. The absence of a verb is a stronger control than a check on a ve
 exists, because there is nothing to get wrong. A move whose ``kind`` is not one of these
 four does not parse, and an unparseable move is a refusal, not a crash.
 
+Closed about *arguments* too, and that half was missing until an adversarial audit of the
+provider seam found it. Every move model here carries ``extra="forbid"``; they used Pydantic's
+default, which silently drops an unknown field. Each adapter's "the model's arguments did not
+parse" marker is a mapping carrying exactly such a field — and since ``conclude`` requires
+nothing, the marker validated into a clean, ACCEPTED conclusion. A tool call that arrived as
+broken JSON ended the session successfully and the transcript recorded a completion. An
+argument the vocabulary does not define is an argument nobody validated, so it is refused
+rather than ignored, and the refusal is structural rather than a check on any one marker's
+name.
+
 **The briefing is a controlled projection.** The pilot never receives a handle to the graph,
 the vault, the signing key or the capability — it receives a :class:`Briefing`, which the
 mediator builds. Minimum necessary (invariant 6): what this investigation has surfaced, the
@@ -67,6 +77,15 @@ class RulingStatus(StrEnum):
     REFUSED_BUDGET = "refused_budget"
     """The investigation budget is spent. A pilot that never concludes is bounded by this
     and by the move ceiling, so runaway autonomy costs time, not correctness."""
+
+    REFUSED_CHALLENGED = "refused_challenged"
+    """An independent challenger objected to the move, and the objection was one the policy
+    blocks on. Never an approval in the other direction: a challenger that finds nothing wrong
+    changes nothing, and every control that would have refused the move still refuses it.
+
+    Distinct from every other refusal because it is the only one a *model* caused, which an
+    auditor reading a transcript needs to be able to tell apart from a refusal the envelope,
+    the target binding or the budget produced."""
 
     HALTED = "halted"
     """The session itself ended — the move ceiling was reached, or the pilot emitted too
@@ -195,7 +214,7 @@ class RunPivot(BaseModel):
     """Ask an investigative question of an entity. Routed to the pursuit engine, which does
     the collection; the pilot chooses the question, never runs a connector itself."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     kind: Literal["run_pivot"] = "run_pivot"
     entity_id: str
@@ -211,7 +230,7 @@ class RecordBelief(BaseModel):
     never outrank the evidence it cites or masquerade as evidence itself (invariant 1).
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     kind: Literal["record_belief"] = "record_belief"
     subject: str
@@ -227,7 +246,7 @@ class RequestEffect(BaseModel):
     which permits or refuses it. The pilot cannot forge the target's state to slip past
     target binding, and cannot authorize anything the envelope does not."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     kind: Literal["request_effect"] = "request_effect"
     entity_id: str
@@ -239,7 +258,7 @@ class RequestEffect(BaseModel):
 class Conclude(BaseModel):
     """End the session with a summary. The one clean way for a pilot to stop."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     kind: Literal["conclude"] = "conclude"
     summary: str = ""

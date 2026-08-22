@@ -111,6 +111,36 @@ source_modules =
 forbidden_modules =
     nemesis.resolve
 
+; --- A provider adapter holds nothing --------------------------------------------
+; The seats under nemesis.pilot.providers translate between NEMESIS's canonical turn
+; and a vendor's API. That is their whole job, and this is what makes it structural:
+; no adapter may import the mediator or any platform plane, so none can acquire the
+; engine, the graph, the vault, the capability or the audit sink -- not by accident,
+; and not by a future author reaching for something convenient.
+;
+; The contract names the PACKAGE rather than the modules in it, which is the point.
+; A list of module names covers the adapters somebody remembered to add to it; a
+; package covers the sixth vendor nobody has written yet. An audit of this work found
+; the package existing WITHOUT an __init__.py, which made it a PEP 420 namespace
+; package invisible to grimp -- every contract here reported "kept" over code none of
+; them could see.
+[importlinter:contract:provider-adapters-hold-no-handles]
+name = Provider adapters cannot reach the mediator or any platform handle
+type = forbidden
+source_modules =
+    nemesis.pilot.providers
+forbidden_modules =
+    nemesis.pilot.mediator
+    nemesis.pursuit
+    nemesis.effects
+    nemesis.authz
+    nemesis.graph
+    nemesis.evidence
+    nemesis.collect
+    nemesis.audit
+    nemesis.api
+    nemesis.slice
+
 ; --- The untrusted pilot cannot reach the withheld band ------------------------
 ; The pilot plane is the seat an external, untrusted model drives. It orchestrates
 ; pursuit and effects, but it must not be able to reach persona linkage — the
@@ -118,10 +148,11 @@ forbidden_modules =
 ; pilot receives cannot be widened, one careless commit at a time, into a channel that
 ; hands an untrusted model the one thing the platform refuses to serve anyone.
 [importlinter:contract:pilot-cannot-reach-persona-linkage]
-name = The pilot seam cannot reach persona linkage
+name = The pilot seam and its benchmark cannot reach persona linkage
 type = forbidden
 source_modules =
     nemesis.pilot
+    nemesis.pilotbench
 forbidden_modules =
     nemesis.resolve
 
@@ -131,6 +162,7 @@ name = Plane layering
 type = layers
 layers =
     nemesis.cli : nemesis.ui
+    nemesis.pilotbench
     nemesis.slice : nemesis.calibration
     nemesis.api
     nemesis.pilot

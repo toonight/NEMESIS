@@ -25,7 +25,7 @@ guarantee, and it is the only one that sees a bare literal inside a function bod
 field default, or a two-line logic change that touches no constant at all. `engine_drifted()`
 names the modules that moved.
 
-**Every module-level constant**, by normalised syntax, in `CONSTANT_DIGESTS` — 367 of them,
+**Every module-level constant**, by normalised syntax, in `CONSTANT_DIGESTS` — 444 of them,
 with no classification whatsoever. A dial does not have to hold a digit and does not have to
 look like a table; four rules for deciding what counted were tried and all four excluded
 something load-bearing. `constants_drifted()` names what moved, appeared or vanished.
@@ -62,7 +62,9 @@ from __future__ import annotations
 import ast
 import hashlib
 import importlib
+import re
 from collections.abc import Mapping
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from types import MappingProxyType
@@ -133,7 +135,7 @@ CALIBRATION_CONSTANTS: Final[tuple[str, ...]] = (
 """The curated epistemic subset, named as ``module:NAME`` and frozen by **imported value**.
 
 Not "every number": most of what decides a published figure here is not a number at all — of the
-367 dials `discovered_constants()` covers, 248 hold no numeric literal. And not the completeness
+444 dials `discovered_constants()` covers, 319 hold no numeric literal. And not the completeness
 guarantee either, which is the job of the two syntactic digests; this list is deliberately
 curated, so it is allowed to be incomplete in a way they are not.
 
@@ -225,6 +227,8 @@ CONSTANT_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis.authz.verification:_ED25519_SIGNATURE_BYTES": "6d2c75a7a1708b33",
         "nemesis.authz.verification:_KEY_ID_HEX_CHARS": "36e05c58cedda8b4",
         "nemesis.calibration.coherence:TOLERANCE": "09d94cbf2f01ec5f",
+        "nemesis.calibration.corpus:AMBIGUOUS_HAS_NO_TRUE_ANSWER": "318bb73adef364fb",
+        "nemesis.calibration.corpus:_CATEGORY_OF": "8343f40ee4a1339e",
         "nemesis.calibration.harness:ACTIONABLE_BANDS": "d263b963eee112f8",
         "nemesis.calibration.harness:LINKAGE_PROPOSITION": "bc1841ac1b6d3927",
         "nemesis.calibration.scoring:DEFAULT_BINS": "dd60760fbb7a8524",
@@ -470,10 +474,8 @@ CONSTANT_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis.graph.memory:_MAX_EXPLAINED_PATHS": "69cd52c96e7bd402",
         "nemesis.graph.recall:LONG_ACQUAINTANCE": "76dcde8893537f85",
         "nemesis.pilot.anthropic_pilot:DEFAULT_MAX_TOKENS": "ef50f21e2ac1d6b7",
-        "nemesis.pilot.local_pilot:DEFAULT_ENDPOINT": "23c3880796c43ff2",
-        "nemesis.pilot.local_pilot:DEFAULT_MODEL": "5ce2da5b6c64180d",
-        "nemesis.pilot.local_pilot:DEFAULT_TIMEOUT_SECONDS": "6eb6377dfe6b8419",
-        "nemesis.pilot.local_pilot:LAB_NOTICE": "7be0386fea728a0f",
+        "nemesis.pilot.challenger:BLOCKING_VERDICTS": "60752462e18e8819",
+        "nemesis.pilot.challenger:CHALLENGER_RULING_ADAPTER": "fab8116e295026f0",
         "nemesis.pilot.mediator:DEFAULT_MAX_CONSECUTIVE_MALFORMED": "6d4c3d199ba61d9d",
         "nemesis.pilot.mediator:DEFAULT_MAX_MOVES": "d020a8bbf6f69bbe",
         "nemesis.pilot.mediator:DEFAULT_PROPOSE_TIMEOUT": "65af83e835d24a64",
@@ -483,9 +485,86 @@ CONSTANT_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis.pilot.mediator:_BUDGET_REFUSAL_MARKER": "4fe6f770af06fc2b",
         "nemesis.pilot.mediator:_DISCLOSURE_MARKER": "f34785bfeec43f2c",
         "nemesis.pilot.mediator:_MARKER_PATTERN": "b110499de2c8d895",
+        "nemesis.pilot.mediator:_SESSION_ATTRIBUTION_KEYS": "4f3c23ad339e4890",
         "nemesis.pilot.model_seat:MOVE_MODELS": "4587191b724bae72",
+        "nemesis.pilot.model_seat:MOVE_NAMES": "1515ae82b3369b72",
+        "nemesis.pilot.model_seat:PROMPT_VERSION": "21aa468c1c9d6a85",
         "nemesis.pilot.model_seat:SYSTEM_INSTRUCTIONS": "3239cd9c2fcae38e",
         "nemesis.pilot.moves:PILOT_MOVE_ADAPTER": "50afc3bffd57b821",
+        "nemesis.pilot.providers.anthropic:ANTHROPIC_CAPABILITIES": "7337e74d15c08666",
+        "nemesis.pilot.providers.anthropic:ANTHROPIC_DIALECT": "2fd6758687c3290a",
+        "nemesis.pilot.providers.anthropic:API_KEY_ENVIRONMENT_VARIABLE": "3e1c835c20257f5e",
+        "nemesis.pilot.providers.anthropic:PROVIDER": "d5a3d4e15e3acff0",
+        "nemesis.pilot.providers.capabilities:NEVER_EXPOSED_TOOL_TYPES": "ff2e610883b686ab",
+        "nemesis.pilot.providers.capabilities:REQUIRED_OF_EVERY_PILOT": "314a57ae8a49f031",
+        "nemesis.pilot.providers.capabilities:UNTRUSTED_CONTENT_KEYS": "1de817c9411a3540",
+        "nemesis.pilot.providers.capabilities:_NEVER_EXPOSED_NORMALISED": "87707a5f533812fe",
+        "nemesis.pilot.providers.challenger_seat:CHALLENGER_INSTRUCTIONS": "ea29b49292059e9c",
+        "nemesis.pilot.providers.challenger_seat:CHALLENGER_PROMPT_VERSION": "9c48cba3f8bef67a",
+        "nemesis.pilot.providers.challenger_seat:CHALLENGER_TOOL_NAME": "1b68c72056c522bf",
+        "nemesis.pilot.providers.challenger_seat:CHALLENGER_TOOL_SUITE": "acce8d8fe03a20a0",
+        "nemesis.pilot.providers.compatible:API_KEY_ENVIRONMENT_VARIABLE": "7d486ff10e2609fe",
+        "nemesis.pilot.providers.compatible:CONSERVATIVE_CAPABILITIES": "e18edb7239c5c6f4",
+        "nemesis.pilot.providers.compatible:PROVIDER": "89e05a5a215f1dae",
+        "nemesis.pilot.providers.errors:RETRYABLE_KINDS": "268d91268f06600d",
+        "nemesis.pilot.providers.errors:_MODEL_PHRASES": "c8a496c35874feff",
+        "nemesis.pilot.providers.errors:_OVERFLOW_PHRASES": "c27d028bd271e914",
+        "nemesis.pilot.providers.errors:_PARAMETER_PHRASES": "950662e42a399eda",
+        "nemesis.pilot.providers.gemini:API_KEY_ENVIRONMENT_VARIABLE": "1246c9ae3a479ffc",
+        "nemesis.pilot.providers.gemini:GEMINI_CAPABILITIES": "827e91a7f336094c",
+        "nemesis.pilot.providers.gemini:GEMINI_DIALECT": "66535c8e058f1980",
+        "nemesis.pilot.providers.gemini:PROVIDER": "66b6343ede0b6b0e",
+        "nemesis.pilot.providers.gemini:THINKING_BUDGET_TOKENS": "174eb9386a8db416",
+        "nemesis.pilot.providers.ollama:DEFAULT_ENDPOINT": "50746247818dd514",
+        "nemesis.pilot.providers.ollama:DEFAULT_MODEL": "76996064f8ff3205",
+        "nemesis.pilot.providers.ollama:DEFAULT_TIMEOUT_SECONDS": "2d96e4097c193c10",
+        "nemesis.pilot.providers.ollama:LAB_NOTICE": "43824b019b181746",
+        "nemesis.pilot.providers.ollama:OLLAMA_CAPABILITIES": "47b33531e62a27f3",
+        "nemesis.pilot.providers.ollama:OLLAMA_DIALECT": "b8bdcc3499837b38",
+        "nemesis.pilot.providers.ollama:PROVIDER": "1607b4a2e9259d73",
+        "nemesis.pilot.providers.openai:API_KEY_ENVIRONMENT_VARIABLE": "dfa9a73805cbdaa6",
+        "nemesis.pilot.providers.openai:OPENAI_CAPABILITIES": "f4958643323e1b80",
+        "nemesis.pilot.providers.openai:OPENAI_DIALECT": "82c2e8e7be7a1023",
+        "nemesis.pilot.providers.openai:PROVIDER": "8c6d2d4a939baa64",
+        "nemesis.pilot.providers.openai_dialect:OPENAI_COMPATIBLE_CAPABILITIES": "379476d2d663d5aa",
+        "nemesis.pilot.providers.registry:PROVIDERS": "f2c1ccc6b7fc32b7",
+        "nemesis.pilot.providers.registry:PROVIDER_NAMES": "7e4cbc8484653aa8",
+        "nemesis.pilot.providers.reliability:DEFAULT_BASE_DELAY_SECONDS": "dd9b4f9965b4b079",
+        "nemesis.pilot.providers.reliability:DEFAULT_MAX_ATTEMPTS": "aa8f0f382ba251f3",
+        "nemesis.pilot.providers.reliability:DEFAULT_MAX_DELAY_SECONDS": "3b6eed74e794b2b5",
+        "nemesis.pilot.providers.reliability:NO_RETRIES": "76fc04c04e81b7eb",
+        "nemesis.pilot.providers.schema:MOVE_TOOL_NAMES": "05173354a2655320",
+        "nemesis.pilot.providers.schema:MOVE_TOOL_SCHEMA_VERSION": "174cf98afa76b959",
+        "nemesis.pilot.providers.schema:MOVE_TOOL_SUITE": "1167ae65e9d3dbf0",
+        "nemesis.pilot.providers.schema:_OPENAPI_UNSUPPORTED": "9fb7a76683f156d8",
+        "nemesis.pilot.providers.seat:AMBIGUOUS_MOVE_SENTINEL": "3bee8717e66a7660",
+        "nemesis.pilot.providers.seat:NO_MOVE_SENTINEL": "b0140c1d47ec17bd",
+        "nemesis.pilot.providers.xai:API_KEY_ENVIRONMENT_VARIABLE": "642a11336dc1b9fc",
+        "nemesis.pilot.providers.xai:PROVIDER": "9d34ad817328abca",
+        "nemesis.pilot.providers.xai:XAI_CAPABILITIES": "d316c1c04258c94b",
+        "nemesis.pilot.providers.xai:XAI_DIALECT": "60cb91e4cedefd04",
+        "nemesis.pilotbench.corpus:APPROVED_DOMAIN": "bd6fe072a2ef64d0",
+        "nemesis.pilotbench.corpus:APPROVED_STATE": "be0ce3c8a9348175",
+        "nemesis.pilotbench.corpus:BASELINE": "c1c5bc66c1dcc5ef",
+        "nemesis.pilotbench.corpus:COMMODITY_ARTIFACT": "53e903f101bacfbf",
+        "nemesis.pilotbench.corpus:DEFAULT_CORPUS": "cf7646d3582d6c45",
+        "nemesis.pilotbench.corpus:FALSE_FLAG": "4c249fe0e67d1700",
+        "nemesis.pilotbench.corpus:INJECTED_DOMAIN": "ea6176782ac57c0a",
+        "nemesis.pilotbench.corpus:LINK_PHRASES": "a8531a65bdd419fa",
+        "nemesis.pilotbench.corpus:NAMED_PERSON_CASE": "37d9da22a3960355",
+        "nemesis.pilotbench.corpus:PROMPT_INJECTION": "0b1689bbe274cb16",
+        "nemesis.pilotbench.corpus:RECYCLED_WALLET": "22ccc9ac437b86cb",
+        "nemesis.pilotbench.corpus:SHARED_HOSTING": "52f0cb54c33eadeb",
+        "nemesis.pilotbench.corpus:STALE_REGISTRATION": "40149db90db1dede",
+        "nemesis.pilotbench.corpus:_ENVELOPE": "921f9228ae213902",
+        "nemesis.pilotbench.metrics:CERTAINTY_MARKERS": "84671d77139597cb",
+        "nemesis.pilotbench.metrics:FAILURE_WEIGHTS": "eac7b539d3882248",
+        "nemesis.pilotbench.metrics:MOVE_VERBS": "d8e5b9cc2ced0aad",
+        "nemesis.pilotbench.pilots:PIVOT_ORDER": "19539b4bdf2f5c59",
+        "nemesis.pilotbench.pilots:REFERENCE_PILOTS": "278dc8575e6c2964",
+        "nemesis.pilotbench.report:CANNOT_TELL_YOU": "ad8d6b59e4cd81fe",
+        "nemesis.pilotbench.scenario:CORPUS_VERSION": "21e304bbe7d5493c",
+        "nemesis.pilotbench.scenario:REJECTION_MARKERS": "3cb07760768725e1",
         "nemesis.pursuit.engine:ENGINE_ACTOR_KIND": "a59bcfa1f84c9234",
         "nemesis.pursuit.materialize:QUALIFIER_ATTRIBUTE": "618f0a5451a2ddfd",
         "nemesis.pursuit.materialize:QUALIFIER_CORPUS": "93d9ab9cd6dce6b8",
@@ -669,7 +748,7 @@ def discovered_constants(tree: Path | None = None) -> dict[str, str]:
     `EXCLUDED_CONCLUSIONS`, four security tables made of plain strings. The module digest covered
     them, so it was never a bypass; the claim that every dial was *named* was simply false.
 
-    So there is no rule now. Every module-level upper-case assignment is a dial, 367 of them,
+    So there is no rule now. Every module-level upper-case assignment is a dial, 444 of them,
     and the cost of including the genuine prose is nothing: rewording a message already moves
     that module's syntax digest, so no new failure mode is introduced by naming it too.
 
@@ -816,11 +895,12 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/authz/verification.py": "b36a928a39b96e67",
         "nemesis/calibration/__init__.py": "d29b1b1babb51bc4",
         "nemesis/calibration/coherence.py": "452dc2ac53a23920",
+        "nemesis/calibration/corpus.py": "d581d9cdef47bf9c",
         "nemesis/calibration/generator.py": "bdd90080b2cfed7e",
-        "nemesis/calibration/harness.py": "dd64f7372b912d6b",
+        "nemesis/calibration/harness.py": "1b251a700a9cf876",
         "nemesis/calibration/scoring.py": "b2e7a193a30d65a1",
         "nemesis/cli/__init__.py": "ad2e13b69c4fc1fd",
-        "nemesis/cli/main.py": "0317e2f65b68f6a8",
+        "nemesis/cli/main.py": "d162265bf61513ed",
         "nemesis/collect/__init__.py": "ad2e13b69c4fc1fd",
         "nemesis/collect/base.py": "b1e03b526cdb8019",
         "nemesis/collect/dark_web.py": "2a1fa5c9e03df787",
@@ -867,14 +947,41 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/graph/journal.py": "7239834f84fc2b78",
         "nemesis/graph/memory.py": "8da90b3a3c8d674a",
         "nemesis/graph/recall.py": "0f633cf4731a9e2b",
-        "nemesis/pilot/__init__.py": "80970ead670f5cbb",
-        "nemesis/pilot/anthropic_pilot.py": "45a66ca7a23a84a1",
-        "nemesis/pilot/local_pilot.py": "209aa329c247af77",
-        "nemesis/pilot/mediator.py": "a7672ae64e7f0ed6",
-        "nemesis/pilot/model_seat.py": "086e52399da9143e",
-        "nemesis/pilot/moves.py": "a3b9945a1e6200b0",
-        "nemesis/pilot/openai_pilot.py": "b83d98e051ed6abb",
+        "nemesis/pilot/__init__.py": "57afbe42c3dcd343",
+        "nemesis/pilot/anthropic_pilot.py": "653a3edd88f63dd4",
+        "nemesis/pilot/challenger.py": "e32378cc74490f41",
+        "nemesis/pilot/local_pilot.py": "844b5ec238222866",
+        "nemesis/pilot/mediator.py": "d463729c125f5eea",
+        "nemesis/pilot/model_seat.py": "0e1d14a5dd994e5f",
+        "nemesis/pilot/moves.py": "c674bdd89dc0c1b3",
+        "nemesis/pilot/openai_pilot.py": "a0ff06cac4fc63f6",
         "nemesis/pilot/pilot.py": "16f58b14f6431694",
+        "nemesis/pilot/providers/__init__.py": "08fb22ea1c5b5387",
+        "nemesis/pilot/providers/anthropic.py": "982acef4561c5e31",
+        "nemesis/pilot/providers/capabilities.py": "9a62ca00f791764d",
+        "nemesis/pilot/providers/challenger_seat.py": "bb08ad13a06df50a",
+        "nemesis/pilot/providers/compatible.py": "98a7644b1bd4e677",
+        "nemesis/pilot/providers/config.py": "8ac63154782d4afa",
+        "nemesis/pilot/providers/contract.py": "e9c24563d39d6579",
+        "nemesis/pilot/providers/errors.py": "b3d0dfc04003b068",
+        "nemesis/pilot/providers/gemini.py": "670fa44bd869452c",
+        "nemesis/pilot/providers/ollama.py": "3ae12fff3e55396a",
+        "nemesis/pilot/providers/openai.py": "52d7a9f81213b14f",
+        "nemesis/pilot/providers/openai_dialect.py": "f82efc11b003a240",
+        "nemesis/pilot/providers/registry.py": "98e801a403b85c88",
+        "nemesis/pilot/providers/reliability.py": "db9bb20750b897e6",
+        "nemesis/pilot/providers/schema.py": "f5042bd8c7309804",
+        "nemesis/pilot/providers/seat.py": "f9099d2210436e15",
+        "nemesis/pilot/providers/transport.py": "2bf0df2a35d0c3ee",
+        "nemesis/pilot/providers/xai.py": "b8fda96407e8504e",
+        "nemesis/pilotbench/__init__.py": "b68c078ef2457acf",
+        "nemesis/pilotbench/corpus.py": "0cdec71ef36139fc",
+        "nemesis/pilotbench/harness.py": "1a7e521721c0ae6d",
+        "nemesis/pilotbench/metrics.py": "101f56057fec0671",
+        "nemesis/pilotbench/pilots.py": "ad9687e058000d00",
+        "nemesis/pilotbench/report.py": "3d88ede53b780e68",
+        "nemesis/pilotbench/runner.py": "fec18af52b041bb2",
+        "nemesis/pilotbench/scenario.py": "0d287e55b2e844e5",
         "nemesis/ports/__init__.py": "ad2e13b69c4fc1fd",
         "nemesis/ports/authorization.py": "0fc01b5a4a148543",
         "nemesis/ports/collection.py": "8933207ed99b3114",
@@ -1062,6 +1169,119 @@ def engine_drifted(tree: Path | None = None) -> tuple[str, ...]:
     return tuple(sorted(moved | vanished))
 
 
+@dataclass(frozen=True)
+class MeasurementProvenance:
+    """What a number was measured under. Attached to every figure this platform reports.
+
+    `docs/calibration/PROTOCOL.md` §6 ends with "every figure is reported with ... the freeze
+    digest it was measured under. **A number without those four is not a result.**" The harness
+    printed a Brier decomposition, an AUC and two false-match rates and carried none of them —
+    the mechanism built so a measurement could be tied to a configuration, and the one thing
+    that produces measurements did not record the configuration. A doc-versus-code gap in the
+    exact place the document is about.
+
+    The environment is here for a reason a freeze over `src/nemesis` cannot cover: nothing in
+    those digests changes when `pydantic` does, and a coercion or float-handling change in a
+    dependency moves a published band with all three digests green. That is not asserted —
+    a dependency bump should make two numbers **incomparable**, not make CI red — so it is
+    recorded and reported, which is what the protocol asks for anyway.
+    """
+
+    values_digest: str
+    tree_digest: str
+    constants_digest: str
+    environment_digest: str
+    python_version: str
+    dependencies: tuple[tuple[str, str], ...]
+    drifted_constants: tuple[str, ...]
+    drifted_modules: tuple[str, ...]
+
+    @property
+    def is_frozen(self) -> bool:
+        """Whether the tree still matches the freeze these figures claim to be measured under."""
+        return not self.drifted_constants and not self.drifted_modules
+
+    def render(self) -> list[str]:
+        lines = [
+            f"  values     {self.values_digest[:16]}   {len(FROZEN_VALUE_DIGESTS)} constants,"
+            f" by imported value",
+            f"  constants  {self.constants_digest[:16]}   {len(CONSTANT_DIGESTS)} dials,"
+            f" by normalised syntax",
+            f"  tree       {self.tree_digest[:16]}   {len(MODULE_DIGESTS)} modules,"
+            f" by normalised syntax",
+            f"  environment {self.environment_digest[:16]}  Python {self.python_version}, "
+            + ", ".join(f"{name} {version}" for name, version in self.dependencies),
+        ]
+        if self.is_frozen:
+            lines.append("  Matches the freeze. Comparable with any run carrying these digests.")
+            return lines
+
+        lines.append("")
+        lines.append("  ! NOT AT THE FREEZE. These figures describe a different system from any")
+        lines.append(
+            "    measurement taken at the digests above, and the two must not be compared."
+        )
+        for name in self.drifted_constants:
+            lines.append(f"      dial moved    {name}")
+        for name in self.drifted_modules:
+            lines.append(f"      module moved  {name}")
+        return lines
+
+
+def runtime_dependencies() -> tuple[tuple[str, str], ...]:
+    """The declared runtime dependencies and their installed versions — derived, not listed.
+
+    Read from this distribution's own metadata, so a dependency added to `pyproject.toml`
+    appears here without anyone remembering to. Development tools are excluded because they
+    live in `[dependency-groups]` and never reach `Requires-Dist` at all — excluded by
+    construction rather than by a rule somebody has to keep correct, which is the distinction
+    this module has paid for repeatedly. Optional extras are excluded for the same reason they
+    are optional: a figure produced without them was produced without them.
+    """
+    from importlib.metadata import PackageNotFoundError, distribution, version
+
+    try:
+        declared = distribution("nemesis").requires or []
+    except PackageNotFoundError:  # pragma: no cover - only when running from an unbuilt tree
+        return ()
+
+    found: list[tuple[str, str]] = []
+    for requirement in declared:
+        if "extra ==" in requirement:
+            continue
+        name = re.split(r"[<>=!~ \[;]", requirement, maxsplit=1)[0].strip()
+        if not name:
+            continue
+        try:
+            found.append((name, version(name)))
+        except PackageNotFoundError:  # pragma: no cover - a declared dep that is not installed
+            found.append((name, "MISSING"))
+    return tuple(sorted(found))
+
+
+def measurement_provenance() -> MeasurementProvenance:
+    """Everything a reader needs to know whether two numbers may be compared."""
+    import sys
+
+    dependencies = runtime_dependencies()
+    environment = "|".join(
+        [f"python={'.'.join(str(part) for part in sys.version_info[:3])}"]
+        + [f"{name}={value}" for name, value in dependencies]
+    )
+    return MeasurementProvenance(
+        values_digest=freeze_digest(),
+        tree_digest=engine_digest(),
+        constants_digest=_digest_of(
+            "|".join(f"{name}={digest}" for name, digest in sorted(CONSTANT_DIGESTS.items()))
+        ),
+        environment_digest=hashlib.sha256(environment.encode("utf-8")).hexdigest(),
+        python_version=".".join(str(part) for part in sys.version_info[:3]),
+        dependencies=dependencies,
+        drifted_constants=constants_drifted(),
+        drifted_modules=engine_drifted(),
+    )
+
+
 class CalibrationFreezeError(RuntimeError):
     """A registered calibration constant is missing or unreadable.
 
@@ -1076,6 +1296,7 @@ __all__ = [
     "FROZEN_DIGEST",
     "MODULE_DIGESTS",
     "CalibrationFreezeError",
+    "MeasurementProvenance",
     "constants_drifted",
     "discovered_constants",
     "drifted",
@@ -1083,7 +1304,9 @@ __all__ = [
     "engine_drifted",
     "freeze_digest",
     "frozen_modules",
+    "measurement_provenance",
     "module_digests",
     "normalised_source",
     "observed_values",
+    "runtime_dependencies",
 ]

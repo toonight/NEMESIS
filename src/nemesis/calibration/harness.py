@@ -24,6 +24,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from nemesis.calibration.coherence import check_coherence
+from nemesis.calibration.freeze import MeasurementProvenance, measurement_provenance
 from nemesis.calibration.generator import (
     CaseGenerator,
     CaseKind,
@@ -91,6 +92,15 @@ class CalibrationReport:
     assumptions: GeneratorAssumptions
     seed: int
     case_count: int
+    provenance: MeasurementProvenance
+    """What this run was measured under: the three freeze digests and the environment.
+
+    `docs/calibration/PROTOCOL.md` §6 ends "every figure is reported with ... the freeze digest
+    it was measured under. A number without those four is not a result." This report printed a
+    Brier decomposition, an AUC and two false-match rates and carried none of them. The freeze
+    exists so a measurement can be tied to a configuration, and the one thing that produces
+    measurements did not record the configuration.
+    """
 
     properties: tuple[PropertyResult, ...]
     measurements: tuple[ConditionalMeasurement, ...]
@@ -123,6 +133,9 @@ class CalibrationReport:
         lines.append("  is the right one: it will reward whichever assumptions were coded into the")
         lines.append("  generator. Settling that needs blind cases with injected false flags and")
         lines.append("  independently adjudicated subclaims. See ADR-0003.")
+        lines.append("")
+        lines.append("MEASURED UNDER")
+        lines.extend(self.provenance.render())
         lines.append("")
         lines.append("GENERATOR ASSUMPTIONS (every conditional number below rests on these)")
         lines.extend(f"  {line}" for line in self.assumptions.as_lines())
@@ -250,6 +263,7 @@ def run_calibration(
 
     return CalibrationReport(
         assumptions=settings,
+        provenance=measurement_provenance(),
         seed=seed,
         case_count=len(scored),
         properties=tuple(properties),

@@ -24,9 +24,25 @@ company. Everything below is ordered against that.
 | **C. State-aligned actor** | The above, plus supply-chain reach and patience. | False-flag attribution; discredit the platform's findings; identify our sources and methods. |
 | **D. Malicious insider** | Legitimate credentials, possibly database write access. | Fabricate or destroy evidence; leak an investigation; authorize an unlawful action. |
 | **E. Compromised dependency** | Code execution inside our own process. | Anything the process can do. |
+| **F. Compromised or hostile model vendor** | Sees every briefing this deployment sends. Chooses every token the pilot emits, and can do so selectively — behaving normally except on the investigations that matter to them. | Steer conclusions; learn what NEMESIS is investigating and for whom; reach an effect through the seat. |
 
 Classes A and B are the routine case. C and D are the ones the architecture must survive
 without depending on anyone behaving well.
+
+**Class F is new with the provider layer, and is not merely class C wearing a badge.** A vendor
+is not an adversary who broke in; it is a party a deployment *chooses*, and the choice can be
+made badly or become bad later. It is listed separately because its capability is unusual: it
+does not need to reach the platform at all. It already receives every briefing that deployment
+sends, and it authors every token the pilot emits — which is the same position a fully
+prompt-injected model occupies, held permanently and selectively.
+
+The architecture's answer is the one it gives to every other untrusted party and no more: the
+model may say anything, and what it says is validated by code it cannot reach. What that answer
+does **not** cover is the reading half. A vendor learns what this deployment is investigating,
+and no control in this repository changes that — the mitigation is contractual (zero-retention,
+enterprise terms), or it is not sending briefings to a vendor at all, which is what the local
+seat is for. Adding four providers multiplies the question by four rather than answering it, and
+it remains a founder decision (see FOUNDER_DECISIONS.md).
 
 ---
 
@@ -84,6 +100,14 @@ the effects registry.
 | The pilot's transport hangs (a stall or slowloris on the vendor connection) | `pilot.propose` is bounded by a wall-clock timeout the pilot cannot influence; a stall is a refused move and, repeated, a recorded halt. |
 | A nondeterministic pilot makes an investigation unreplayable | Every move and ruling is written to the hash-chained audit trail; the transcript reconstructs what the pilot was allowed to do, though the pilot cannot be re-run to it (invariant 11). |
 | A runaway pilot never stops | Bounded by the move ceiling and the investigation budget; a halt is recorded as a halt, never as a completion. |
+| **A vendor answers with a model other than the one configured** | Recorded, not assumed away. `PilotResponseMetadata.model_substituted` compares what the provider said it ran against what was asked for, and the difference reaches the audit trail. Not treated as an attack — vendors legitimately alias model ids — but a benchmark comparing two models, or an auditor asking which model reached a conclusion, is asking about the model that *ran*. |
+| **A provider adapter grows a handle to the platform** | `import-linter` contract `provider-adapters-hold-no-handles`: nothing under `nemesis.pilot.providers` may import the mediator, pursuit, effects, authz, graph, evidence, collection or audit. It names the package, so an adapter added later is covered without anyone remembering to add it to a list. |
+| **A provider adapter offers the model a vendor built-in** (shell, code execution, retrieval, browsing, MCP) | Every rendered request is scanned for the never-exposed tool types, for every provider, in a test. A model *supporting* computer use is not NEMESIS *granting* it. The tool list itself comes from a module-level constant the adapter never sees, so it cannot add one either. |
+| **An adversary fires the capability scan to halt an investigation** | The scan skips the request keys that carry untrusted text. An adversary chooses part of what reaches a briefing — that is exactly how the injection demonstration works — so a scan reading message bodies would let anyone who can register `web_search.example` produce a violation on every turn. A control an adversary can trigger is a denial of service handed to them. |
+| **A vendor SDK is imported into the pilot plane, ending invariant 15 quietly** | `scripts/check_prohibited.py` now lists the vendor SDKs (`openai`, `anthropic`, `google`, `ollama`, `litellm`, `boto3`, …) alongside the transports. The scan refused `urllib` in this exact plane once and would have waved `import openai` straight past it; a full HTTP stack behind a name that does not look like one is the shape this control exists to catch. |
+| **A second model is added as a challenger and becomes a second attack surface** | The challenger's whole vocabulary is five verdicts and none of them permits anything, so it can cause a refusal and never an action. Asserted as a property: the set of ACCEPTED moves under any verdict is a subset of the set accepted with no challenger at all. A hijacked challenger achieves an availability failure. |
+| **A vendor outage weakens enforcement** | It cannot. An unreachable provider produces a session whose every move is a refusal and whose end is a recorded halt — with the control-plane properties intact over a session that did nothing. Retries are bounded and never change the request; there is no provider fallback, deliberately, because a session that changed vendor mid-run would produce an audit record naming a configuration that did not run. |
+| **A vendor returns a private reasoning trace this platform then stores** | Not requested from anyone. Where a vendor offers deliberation without returning it, that form is used; where the feature returns the trace, the seat declines it and refuses a configured reasoning effort at construction. A `thinking` block that arrives anyway is dropped where it lands — the parsers read tool blocks only, and no field on the way out can hold one. |
 
 ### 3. Evidence integrity
 
