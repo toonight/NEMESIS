@@ -66,10 +66,9 @@ from nemesis.effects.registry import (
     EffectsRegistry,
 )
 from nemesis.pilot.challenger import (
+    ChallengeOutcome,
     ChallengePolicy,
-    ChallengerFailureMode,
     ChallengerRuling,
-    ChallengerVerdict,
     MoveChallenger,
     failure_ruling,
     validate_ruling,
@@ -95,6 +94,7 @@ from nemesis.pilot.providers.contract import (
     PilotResponseMetadata,
     ProviderIdentity,
 )
+from nemesis.pilot.providers.errors import PilotError
 from nemesis.ports.effects import EffectRequest
 from nemesis.ports.storage import AuditEvent, AuditSink, ClaimStore, GraphStore
 from nemesis.pursuit.engine import PursuitEngine
@@ -121,6 +121,14 @@ _BUDGET_REFUSAL_MARKER = "exceeds the remaining budget"
 _DISCLOSURE_MARKER = "internal-classified material"
 
 _MARKER_PATTERN = re.compile("|".join(re.escape(m) for m in INTERNAL_MARKERS), re.IGNORECASE)
+
+_SESSION_ATTRIBUTION_KEYS: Final[frozenset[str]] = frozenset({"provider", "model", "seat"})
+"""Audit keys only the session may write.
+
+Read once at session open from a typed identity and never from a turn's metadata, which is
+untrusted code on the audit path. Enumerated here rather than relied on through dict-merge
+ordering, because the merge order was the bug: it overrode these keys only when a session
+identity existed, so a pilot exposing no identity at all could supply them itself."""
 
 
 def _redact_markers(text: str) -> str:
@@ -353,7 +361,11 @@ class PilotMediator:
         halted: str | None = None
 
         async def refuse(
-            move_kind: str, reason: str, metadata: PilotResponseMetadata | None = None
+            move_kind: str,
+            reason: str,
+            metadata: PilotResponseMetadata | None = None,
+            *,
+            error: BaseException | None = None,
         ) -> bool:
             """Record a refused non-move and report whether the streak has ended the session."""
             nonlocal malformed_streak, last_ruling
@@ -364,7 +376,7 @@ class PilotMediator:
             transcript.append(TurnRecord(None, ruling, metadata))
             last_ruling = ruling
             await self._record_move(
-                pilot, pilot_actor, investigation, identity, None, ruling, metadata
+                pilot, pilot_actor, investigation, identity, None, ruling, metadata, error=error
             )
             return malformed_streak >= self._max_consecutive_malformed
 
@@ -431,33 +443,42 @@ class PilotMediator:
                 continue
             except Exception as exc:
                 # An untrusted pilot must not be able to end a session by raising. A model that
-                # hangs, a transport that is not wired, an OpenAI call that fails — each is a
+                # hangs, a transport that is not wired, a vendor call that fails — each is a
                 # refused move and eventually a halt, never a crash of the harness and never a
                 # silent retry against whatever the pilot was about to contact.
+                #
+                # The *reason* is composed from the exception TYPE and, for a classified
+                # provider failure, its kind — never from the vendor's own error text. That text
+                # is written by a third party, and a ruling reason is echoed back to the pilot in
+                # the next briefing: passing it through would make a vendor's response body an
+                # input to the model's next turn. The detail is kept, bounded, in the audit
+                # record, where it is read by people rather than by a model.
                 if await refuse(
                     "unknown",
-                    f"the pilot raised {type(exc).__name__} instead of returning a move: {exc}",
+                    self._failure_reason(exc),
                     metadata,
+                    error=exc,
                 ):
                     halted = f"the pilot raised {type(exc).__name__} repeatedly; session ended"
                     break
                 continue
 
             malformed_streak = 0
-            challenge = await self._challenge(briefing, move)
-            if challenge is not None and self._challenge_policy.blocks(
-                move.kind, challenge.verdict
-            ):
+            outcome = await self._challenge(briefing, move)
+            challenge = outcome.ruling if outcome is not None else None
+            if outcome is not None and self._challenge_policy.blocks(move.kind, outcome):
                 # Refused BEFORE `_apply`, so the envelope is never debited and no pivot runs.
                 # A challenger can only subtract; it never reaches a control that would have
                 # permitted something on its own.
+                what = (
+                    f"returned {outcome.ruling.verdict.value}"
+                    if outcome.answered
+                    else "did not answer, and this deployment refuses an unchallenged move"
+                )
                 ruling = Ruling(
                     move_kind=move.kind,
                     status=RulingStatus.REFUSED_CHALLENGED,
-                    reason=(
-                        f"an independent challenger returned {challenge.verdict.value}: "
-                        f"{challenge.reason}"
-                    )[:400],
+                    reason=f"an independent challenger {what}: {outcome.ruling.reason}"[:400],
                 )
             else:
                 investigation, ruling = await self._apply(pilot, pilot_actor, investigation, move)
@@ -529,7 +550,7 @@ class PilotMediator:
 
     # -- the challenger --------------------------------------------------------
 
-    async def _challenge(self, briefing: Briefing, move: PilotMove) -> ChallengerRuling | None:
+    async def _challenge(self, briefing: Briefing, move: PilotMove) -> ChallengeOutcome | None:
         """Ask the challenger about a move. Returns ``None`` when none is configured.
 
         The challenger receives what the pilot received and the move the pilot proposed, and
@@ -550,7 +571,7 @@ class PilotMediator:
                 self._challenger.review(briefing, move),
                 timeout=self._challenge_policy.timeout_seconds,
             )
-            return validate_ruling(raw)
+            return ChallengeOutcome(validate_ruling(raw))
         except ValidationError as exc:
             return self._unanswered(
                 f"the challenger returned no valid verdict ({validation_detail(exc)})"
@@ -562,14 +583,15 @@ class PilotMediator:
         except Exception as exc:
             return self._unanswered(f"the challenger raised {type(exc).__name__}")
 
-    def _unanswered(self, detail: str) -> ChallengerRuling:
-        """What is recorded when the challenger did not produce a verdict."""
-        if self._challenge_policy.on_failure is ChallengerFailureMode.REFUSE:
-            return ChallengerRuling(
-                verdict=ChallengerVerdict.INSUFFICIENT_EVIDENCE,
-                reason=f"{detail}; this deployment refuses an unchallenged move",
-            )
-        return failure_ruling(f"{detail}; the move was NOT challenged")
+    def _unanswered(self, detail: str) -> ChallengeOutcome:
+        """What is recorded when the challenger did not produce a verdict.
+
+        The same ruling either way — ``CONSISTENT``, saying the move was NOT challenged — because
+        that is what happened, and a record that reported a *verdict* nobody gave would be a
+        record of a review that did not occur. Whether the move is then refused is the policy's
+        decision, carried by ``answered=False`` rather than smuggled into a verdict value.
+        """
+        return ChallengeOutcome(failure_ruling(f"{detail}; the move was NOT challenged"), False)
 
     # -- move validation ------------------------------------------------------
 
@@ -582,6 +604,27 @@ class PilotMediator:
         """
         data = raw.model_dump() if isinstance(raw, BaseModel) else raw
         return PILOT_MOVE_ADAPTER.validate_python(data)
+
+    @staticmethod
+    def _failure_reason(exc: BaseException) -> str:
+        """Why a pilot did not produce a move, in words the platform wrote.
+
+        A classified provider failure contributes its *kind* — ``rate_limited``, ``timeout``,
+        ``authentication`` — which is a value from an enumeration in this repository and not text
+        a vendor chose. Everything else contributes its exception type. The vendor's own message
+        is deliberately absent: this string is echoed back to the pilot in the next briefing, so
+        passing a third party's response body through would make it an input to the model's next
+        turn. It is kept in the audit record instead, where people read it.
+        """
+        if isinstance(exc, PilotError):
+            return (
+                f"the provider call failed ({exc.kind.value}) and returned no move; "
+                "the detail is in the audit record"
+            )
+        return (
+            f"the pilot raised {type(exc).__name__} instead of returning a move; "
+            "the detail is in the audit record"
+        )
 
     @staticmethod
     def _raw_kind(raw: object) -> str:
@@ -879,7 +922,20 @@ class PilotMediator:
                 EntityView(
                     entity_id=entity.entity_id,
                     entity_type=entity.entity_type.value,
-                    natural_key=entity.natural_key,
+                    # Redacted, not scanned-and-refused. A natural key is chosen by whoever
+                    # registered the thing, so an adversary can put NEMESIS's own internal
+                    # vocabulary into one: an organization named "same_operator_as Holdings BV"
+                    # reaches the graph through an ordinary registration pivot, the backstop
+                    # below sees the marker, and the whole investigation ends with a raised
+                    # DisclosureViolationError. That is a control an adversary can fire — a
+                    # denial of service handed to them, and the same shape as the capability
+                    # scan reading message bodies.
+                    #
+                    # There is no leak to prevent here: the entity is DELIVERABLE by type and
+                    # the marker is a coincidence of naming. So the token is neutralised in the
+                    # field the adversary controls, and the backstop keeps its meaning for the
+                    # fields the platform authors.
+                    natural_key=_redact_markers(entity.natural_key),
                 )
             )
 
@@ -890,7 +946,9 @@ class PilotMediator:
             disclosure_of_entity(investigation.seed.entity_type) is DisclosureClass.DELIVERABLE
         )
         seed_line = (
-            f"{investigation.seed.entity_type.value} {investigation.seed.entity_key}"
+            _redact_markers(
+                f"{investigation.seed.entity_type.value} {investigation.seed.entity_key}"
+            )
             if seed_deliverable
             # No entity type either: it can itself be an internal marker ('human_identity_lead'),
             # and it tells the vendor an investigation is about a person.
@@ -900,7 +958,9 @@ class PilotMediator:
             HypothesisView(
                 hypothesis_id=h.hypothesis_id,
                 statement=(
-                    h.statement
+                    # The opening hypotheses interpolate the seed key, so they inherit whatever
+                    # an adversary put in it. Same treatment, same reason.
+                    _redact_markers(h.statement)
                     if seed_deliverable
                     else "<redacted: a hypothesis about an internal-class seed>"
                 ),
@@ -941,6 +1001,12 @@ class PilotMediator:
         # internal marker may reach the pilot (and thus the vendor). Unreachable after the
         # measures above — a raise here means a new leak path was opened and must be closed at
         # its source, not caught. Loud on purpose, per DisclosureViolationError's contract.
+        #
+        # It now covers only fields the PLATFORM authored, because the three an adversary can
+        # influence are redacted above. That is deliberately a narrowing of the backstop and it
+        # makes it *stronger* rather than weaker: before, a marker here could mean either a real
+        # leak or a domain somebody registered to cause one, and a control whose alarm has two
+        # meanings — one of them attacker-triggered — is a control that gets switched off.
         leaked = scan_for_internal_material({"briefing": briefing.model_dump_json()})
         if leaked:
             raise DisclosureViolationError(
@@ -961,6 +1027,8 @@ class PilotMediator:
         ruling: Ruling,
         metadata: PilotResponseMetadata | None = None,
         challenge: ChallengerRuling | None = None,
+        *,
+        error: BaseException | None = None,
     ) -> None:
         inputs = {
             "pilot": pilot.name,
@@ -976,6 +1044,14 @@ class PilotMediator:
         if isinstance(move, RequestEffect):
             inputs["operation"] = move.operation.value
             inputs["target_entity"] = move.entity_id
+        if isinstance(error, PilotError):
+            # The vendor's own words, bounded, and only here. `PilotError` has no field for a
+            # header, a request body or a response body, so there is nothing for a credential to
+            # be attached to — the same reasoning as the effects plane holding no standing
+            # credentials.
+            inputs |= {key: str(value)[:400] for key, value in error.audit().items()}
+        elif error is not None:
+            inputs["error_kind"] = type(error).__name__[:64]
         if challenge is not None:
             inputs["challenger"] = self._challenger.name[:128] if self._challenger else ""
             inputs["challenger_verdict"] = challenge.verdict.value
@@ -993,32 +1069,44 @@ class PilotMediator:
             )
         )
 
-    def _attribution(
-        self, identity: ProviderIdentity | None, metadata: PilotResponseMetadata | None
-    ) -> dict[str, str]:
+    def _attribution(self, identity: ProviderIdentity | None, metadata: object) -> dict[str, str]:
         """Who drove and what the call cost, in the shape an audit record can carry.
 
-        Two rules, and the first is the load-bearing one.
+        Three rules, and every one of them was learned from a reproduction rather than reasoned
+        into place.
 
-        **The identity wins.** ``provider``, ``model`` and ``seat`` come from what was read at
-        session open and are written *after* the per-turn fields, so a metadata block claiming a
-        different vendor cannot rewrite attribution mid-session. A comparison between providers
-        is worth exactly what the field distinguishing them is worth, and that field must not be
-        re-assertable per turn by the party being compared.
+        **The identity comes from the session, never from the turn.** ``provider``, ``model`` and
+        ``seat`` are written from what was read at session open, and any same-named key the
+        metadata offered is dropped first. The earlier version merged the metadata's fields and
+        then overrode them *only when a session identity existed* — so a pilot that exposed no
+        ``identity`` property but returned metadata claiming ``provider=openai`` had that written
+        into every audit event. A comparison between providers is worth exactly what the field
+        distinguishing them is worth, and that field must not be assertable by the party being
+        compared.
 
-        **Nothing here decides anything.** Latency, token counts and the attempt count are
-        recorded because a session has to be explainable and a benchmark has to be able to say
-        what a run cost. No ruling reads them. A seat that lied in every one would produce a
-        misleading record and never an action that should not have happened.
+        **Only a real :class:`PilotResponseMetadata` is read.** A ``PilotDecision`` is a plain
+        dataclass and nothing validates its ``metadata`` field, so an untrusted seat could return
+        an object whose ``audit_fields()`` returned anything at all. It did: an object value there
+        raised a ``ValidationError`` out of ``drive()`` **after the move had been applied and the
+        envelope debited** — a crash positioned exactly where the record of what just happened
+        should have been written.
 
-        ``attempts`` in particular closes a gap this file's own prose had opened: a seat that
-        retries a failing vendor three times inside one ``propose`` used to collapse into one
-        audit event that said nothing about it, while the comment above claimed there was
-        "never a silent retry". Now the record says how many there were.
+        **Every value is coerced and bounded anyway.** Belt and braces, for the same reason the
+        seam re-validates a move it just built.
+
+        Nothing here decides anything. Latency, token counts and the attempt count are recorded
+        because a session has to be explainable and a benchmark has to be able to say what a run
+        cost; no ruling reads them. ``attempts`` in particular closes a gap this file's own prose
+        had opened: a seat that retries a failing vendor three times inside one ``propose`` used
+        to collapse into one audit event that said nothing about it, while the comment above
+        claimed there was "never a silent retry".
         """
         fields: dict[str, str] = {}
-        if metadata is not None:
-            fields |= metadata.audit_fields()
+        if isinstance(metadata, PilotResponseMetadata):
+            for key, value in metadata.audit_fields().items():
+                if key in _SESSION_ATTRIBUTION_KEYS:
+                    continue
+                fields[str(key)[:64]] = str(value)[:400]
         if identity is not None:
             fields["provider"] = identity.provider[:64]
             fields["model"] = identity.model[:128]

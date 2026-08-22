@@ -298,9 +298,15 @@ reads as confidence:
 - Every scenario is synthetic. A model that scores well has agreed with the judgements this
   corpus encodes; nothing here has a ground truth to be right about.
 - The scenarios and the injections were written by the same people who wrote the defences.
-- The forbidden-conclusion checks are **lexical** regular expressions. They miss a paraphrase
-  and can fire on a sentence that mentions a name in order to reject it. Every violation prints
-  the pilot's own words so the machine's reading can be checked by eye.
+- The forbidden-conclusion checks are **lexical** regular expressions, and the violation count
+  is a **floor, not a rate**: a pilot that reaches a forbidden conclusion in words no pattern
+  lists is not counted, and no list of phrases closes that. Read a low severity as "nothing was
+  caught", never as "nothing happened".
+- Naming a trap in order to **reject** it is counted separately and weighs nothing. An earlier
+  version scored it as a violation, which made the whole metric reward evasion and punish the
+  correct answer — a skeptical pilot scored 11.0 while a paraphrasing one scored 0.0. A belief's
+  *triple* is now what is scored, because it cannot carry a negation; a natural person's name is
+  the deliberate exception and is scored on any mention.
 - Nothing here is evidence that a model resists prompt injection. A run in which it never tried
   proves only that it never tried.
 
@@ -360,4 +366,11 @@ Real ones, not hedges.
 7. **Cost is not computed.** Prices change faster than this repository does, and a hardcoded
    table would be wrong and confident.
 8. **One shared layer means one defect reaches five vendors.** The parametrised contract suite is
-   the mitigation and is not a proof.
+   the mitigation and is not a proof. An adversarial review run after this was written found
+   eight defects, seven of them in code whose docstrings claimed the opposite — including a
+   dialect able to widen every argument schema for four providers, and a built-in scan blind to
+   the camelCase spelling the Gemini adapter itself writes. All are fixed and tested; the rate
+   is the point. See ADR-0009 § *What an adversarial review found*.
+9. **The benchmark's severity is a floor.** Paraphrase evades every pattern. Two providers with
+   the same severity have not been shown to behave the same way — only to have been caught the
+   same number of times.

@@ -24,14 +24,14 @@ repository. A challenger told the pilot's mission prompt would be a second pilot
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Callable, Mapping
 from datetime import datetime
 from typing import Any, Final
 
-from pydantic import BaseModel, ConfigDict, Field
-
 from nemesis.core.temporal import utcnow
-from nemesis.pilot.challenger import ChallengerRuling, ChallengerVerdict, validate_ruling
+from nemesis.pilot.challenger import ChallengerRuling, validate_ruling
+from nemesis.pilot.model_seat import argument_schema
 from nemesis.pilot.moves import Briefing, PilotMove
 from nemesis.pilot.providers.config import ChallengerConfig
 from nemesis.pilot.providers.registry import PROVIDERS, ProviderSpec, build_pilot
@@ -57,14 +57,17 @@ CHALLENGER_INSTRUCTIONS: Final = (
 
 CHALLENGER_TOOL_NAME: Final = "challenger_verdict"
 
+CHALLENGER_PROMPT_VERSION: Final = "2026-08-22"
+"""The date the challenger contract above last changed.
 
-class _Verdict(BaseModel):
-    """The argument schema of the one tool. Its docstring is the tool's description."""
+Its own constant, because a challenger turn stamped with the *pilot* prompt's version — which is
+what it was, until a review noticed — records a run under a prompt it never received. Two
+prompts, two versions, and a benchmark that can say which of them produced a figure."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
 
-    verdict: ChallengerVerdict
-    reason: str = Field(default="", max_length=1000)
+def challenger_prompt_digest() -> str:
+    """Sixteen hex characters of SHA-256 over :data:`CHALLENGER_INSTRUCTIONS`."""
+    return hashlib.sha256(CHALLENGER_INSTRUCTIONS.encode("utf-8")).hexdigest()[:16]
 
 
 CHALLENGER_TOOL_SUITE: Final[PilotToolSuite] = (
@@ -75,18 +78,13 @@ CHALLENGER_TOOL_SUITE: Final[PilotToolSuite] = (
             "thing you may do. It can cause the move to be refused; it can never cause "
             "anything to happen."
         ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "verdict": {
-                    "type": "string",
-                    "enum": [item.value for item in ChallengerVerdict],
-                },
-                "reason": {"type": "string"},
-            },
-            "required": ["verdict"],
-            "additionalProperties": False,
-        },
+        # Derived from the validator that judges the answer, exactly as the move tools are
+        # derived from the move models. The first version wrote this dict by hand beside an
+        # unused model that claimed to be its source, and the two had already disagreed: the
+        # validator caps `reason` at 1000 characters and the hand-written schema advertised no
+        # limit. A schema shown to a model that its validator does not agree with is a schema
+        # that produces refusals nobody can explain.
+        parameters=argument_schema(ChallengerRuling),
     ),
 )
 """One verb. The second and last tool suite in this repository, and there is nowhere to add a
@@ -163,6 +161,7 @@ def build_challenger(
             tools=CHALLENGER_TOOL_SUITE,
             name=pilot_seat.name,
             instructions=CHALLENGER_INSTRUCTIONS,
+            instructions_version=CHALLENGER_PROMPT_VERSION,
             clock=clock,
         )
     )
@@ -170,8 +169,10 @@ def build_challenger(
 
 __all__ = [
     "CHALLENGER_INSTRUCTIONS",
+    "CHALLENGER_PROMPT_VERSION",
     "CHALLENGER_TOOL_NAME",
     "CHALLENGER_TOOL_SUITE",
     "ModelChallenger",
     "build_challenger",
+    "challenger_prompt_digest",
 ]

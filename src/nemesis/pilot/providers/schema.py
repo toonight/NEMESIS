@@ -21,6 +21,12 @@ Two suites exist in this tree and there is deliberately nowhere to add a third b
 - :data:`CHALLENGER_TOOL_SUITE` — one verb, ``challenger_verdict``, which returns an opinion
   and can cause a refusal but never an action. See :mod:`nemesis.pilot.challenger`.
 
+**A dialect carries a schema; it does not write one.** :func:`render_tools` checks the names,
+the argument *set* and every closed enumeration after calling it — because until an adversarial
+review pointed at it, only the names were checked while this docstring claimed a dialect could
+not "widen an argument schema". It could, for four of six providers, with the whole test suite
+green.
+
 **The Gemini dialect is where the interesting work is.** Pydantic emits enum arguments as
 ``$ref`` into ``$defs``; Gemini's ``FunctionDeclaration.parameters`` takes an OpenAPI 3.0
 subset that has neither, and no ``additionalProperties``. Translating means inlining the
@@ -113,12 +119,32 @@ class ToolSuiteViolationError(RuntimeError):
 
 
 def render_tools(suite: PilotToolSuite, dialect: ToolDialect) -> list[dict[str, Any]]:
-    """Write a suite in one vendor's dialect, and check that nothing was added or lost.
+    """Write a suite in one vendor's dialect, and check that nothing was added, lost or widened.
 
     The check is not defensive programming against a hostile dialect — every dialect in this
-    tree is first-party code three lines long. It is a tripwire against the failure that
+    tree is first-party code a few lines long. It is a tripwire against the failure that
     actually happens: a vendor requiring one more transformation, the transformation being
-    written inside the dialect, and a tool quietly acquiring a different name for one provider.
+    written inside the dialect, and a schema quietly changing for one provider.
+
+    **Names were the only thing checked until an adversarial review pointed at the gap**, and the
+    module docstring claimed otherwise: a dialect receives ``spec.parameters`` and returns
+    arbitrary JSON, so it could keep every name while stripping every ``enum`` and adding a
+    ``shell_command`` argument to all four verbs — which the reviewer did, to four of the six
+    providers, with the whole suite green. A control asserted in prose and enforced nowhere is
+    the defect this repository keeps finding in itself.
+
+    So three things are checked, and the third is the one that has to tolerate a real dialect:
+
+    1. The tool names are the suite's, in order.
+    2. The argument *properties* are the suite's, exactly — no addition, no removal. This is what
+       stops a verb growing an argument nobody validated.
+    3. Every closed enumeration in the canonical schema still appears in what was emitted. This
+       is what stops a translation quietly widening ``pivot_type`` or ``operation`` to free text.
+
+    Deliberately NOT checked: that the emitted schema is byte-identical to the canonical one.
+    Gemini's subset genuinely cannot express everything JSON Schema can, and a check that
+    demanded identity would either forbid that provider or be switched off. What survives the
+    translation and what does not is pinned per provider by a test instead.
     """
     rendered = [dialect(spec) for spec in suite]
     expected = [spec.name for spec in suite]
@@ -128,7 +154,67 @@ def render_tools(suite: PilotToolSuite, dialect: ToolDialect) -> list[dict[str, 
             f"the dialect emitted {emitted!r} for a suite of {expected!r}; a provider adapter "
             "does not get to decide which verbs exist"
         )
+    for spec, item in zip(suite, rendered, strict=True):
+        _check_arguments(spec, item)
     return rendered
+
+
+def _check_arguments(spec: PilotToolSpec, rendered: Mapping[str, Any]) -> None:
+    """The argument set and every closed enumeration survived the dialect."""
+    schema = _declared_parameters(rendered)
+    if schema is None:
+        raise ToolSuiteViolationError(
+            f"the dialect emitted no argument schema for {spec.name!r}; a verb whose arguments "
+            "nobody described is a verb whose arguments nobody validated"
+        )
+    expected = set(_properties(spec.parameters))
+    emitted = set(_properties(schema))
+    if emitted != expected:
+        added = sorted(emitted - expected)
+        lost = sorted(expected - emitted)
+        raise ToolSuiteViolationError(
+            f"the dialect changed the arguments of {spec.name!r}: added {added}, lost {lost}. "
+            "A provider adapter carries a schema; it does not write one"
+        )
+    for values in _enumerations(spec.parameters):
+        if values not in _enumerations(schema):
+            raise ToolSuiteViolationError(
+                f"a closed enumeration was lost translating {spec.name!r} — the model would be "
+                f"free to name a value the others cannot. Missing: {sorted(values)[:6]}"
+            )
+
+
+def _declared_parameters(rendered: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    for key in ("parameters", "input_schema"):
+        value = rendered.get(key)
+        if isinstance(value, Mapping):
+            return value
+    function = rendered.get("function")
+    if isinstance(function, Mapping):
+        inner = function.get("parameters")
+        if isinstance(inner, Mapping):
+            return inner
+    return None
+
+
+def _properties(schema: Mapping[str, Any]) -> tuple[str, ...]:
+    properties = schema.get("properties")
+    return tuple(sorted(properties)) if isinstance(properties, Mapping) else ()
+
+
+def _enumerations(node: object) -> set[frozenset[str]]:
+    """Every closed enumeration anywhere in a schema, as comparable sets of values."""
+    found: set[frozenset[str]] = set()
+    if isinstance(node, Mapping):
+        values = node.get("enum")
+        if isinstance(values, list) and values:
+            found.add(frozenset(str(item) for item in values))
+        for value in node.values():
+            found |= _enumerations(value)
+    elif isinstance(node, list):
+        for item in node:
+            found |= _enumerations(item)
+    return found
 
 
 def _declared_name(rendered: Mapping[str, Any]) -> str | None:

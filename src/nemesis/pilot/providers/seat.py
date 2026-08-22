@@ -155,6 +155,7 @@ class ProviderSeat:
         tools: PilotToolSuite = MOVE_TOOL_SUITE,
         name: str | None = None,
         instructions: str = SYSTEM_INSTRUCTIONS,
+        instructions_version: str = PROMPT_VERSION,
         clock: Callable[[], datetime] = utcnow,
         sleep: Sleeper | None = None,
     ) -> None:
@@ -190,6 +191,7 @@ class ProviderSeat:
         self._retries = retries or RetryPolicy()
         self._tools = tools
         self._instructions = instructions
+        self._instructions_version = instructions_version
         self._tool_schema_version = (
             MOVE_TOOL_SCHEMA_VERSION if tools is MOVE_TOOL_SUITE else suite_version(tools)
         )
@@ -257,7 +259,7 @@ class ProviderSeat:
             identity=self._identity,
             context=PilotContext(briefing=briefing, attempt=attempt, proposed_move=proposed_move),
             instructions=self._instructions,
-            instructions_version=PROMPT_VERSION,
+            instructions_version=self._instructions_version,
             tools=self._tools,
             tool_schema_version=self._tool_schema_version,
             decoding=self._decoding,
@@ -300,7 +302,7 @@ class ProviderSeat:
             tool_selected=str(parsed.move.get("kind", "")) or None,
             usage=parsed.usage,
             reasoning_requested=self._decoding.reasoning,
-            instructions_version=PROMPT_VERSION,
+            instructions_version=self._instructions_version,
             tool_schema_version=self._tool_schema_version,
         )
         return PilotDecision(raw=parsed.move, metadata=metadata)

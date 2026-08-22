@@ -292,20 +292,56 @@ def test_a_stalling_challenger_is_bounded_by_its_own_timeout() -> None:
 
 
 def test_a_deployment_may_choose_to_refuse_an_unchallenged_move_instead() -> None:
-    """The other side of the default, available and explicit rather than assumed."""
+    """The other side of the default, with the DEFAULT verdict set — which is the point.
+
+    The first version of this test passed `blocking={INSUFFICIENT_EVIDENCE, CONTRADICTED}`, and
+    that is what hid the defect it was written to prove absent. `REFUSE` reported the failure as
+    an `INSUFFICIENT_EVIDENCE` *verdict* and left the blocking decision to the configured verdict
+    set, which does not contain it by default — so the fail-closed option did nothing, and the
+    recorded reason said "this deployment refuses an unchallenged move" beside an ACCEPTED
+    effect. An audit record that says the opposite of what happened is worse than the missing
+    control it describes. Found by an adversarial review; the test now uses the default policy,
+    so it fails if the failure mode is ever routed through a verdict again.
+    """
     run = drive(
         overreaching_pilot(),
         RaisingChallenger(),
-        ChallengePolicy(
-            on_failure=ChallengerFailureMode.REFUSE,
-            blocking=frozenset(
-                {ChallengerVerdict.INSUFFICIENT_EVIDENCE, ChallengerVerdict.CONTRADICTED}
-            ),
-        ),
+        ChallengePolicy(on_failure=ChallengerFailureMode.REFUSE),
     )
-    blocked = [r for r in run.session.rulings if r.status is RulingStatus.REFUSED_CHALLENGED]
-    assert blocked
+    effects = [r for r in run.session.rulings if r.move_kind == "request_effect"]
+    assert effects, "the pilot never requested an effect; this test proved nothing"
+    assert all(r.status is RulingStatus.REFUSED_CHALLENGED for r in effects), [
+        (r.status, r.reason) for r in effects
+    ]
+    assert run.envelope.remaining == BASELINE.envelope.effect_budget
     assert run.session.any_effect_left_the_platform() is False
+    assert "did not answer" in effects[0].reason
+
+
+def test_refusing_an_unchallenged_move_still_never_blocks_a_pivot() -> None:
+    """Fail-closed narrows what may be *done*, never what may be *looked at*. A deployment that
+    could stop an investigation from pivoting by degrading a second vendor has bought a
+    denial-of-service surface, not a control."""
+    run = drive(
+        careful_pilot(),
+        RaisingChallenger(),
+        ChallengePolicy(on_failure=ChallengerFailureMode.REFUSE),
+    )
+    blocked = [
+        r.move_kind for r in run.session.rulings if r.status is RulingStatus.REFUSED_CHALLENGED
+    ]
+    assert "run_pivot" not in blocked
+    assert run.session.concluded
+
+
+def test_an_unanswered_review_is_never_recorded_as_a_verdict() -> None:
+    """ "Nothing objected" and "nothing was asked" must not be the same record, in either mode."""
+    for mode in ChallengerFailureMode:
+        run = drive(overreaching_pilot(), RaisingChallenger(), ChallengePolicy(on_failure=mode))
+        challenged = [t.challenge for t in run.session.transcript if t.challenge is not None]
+        assert challenged, mode
+        assert all(c.verdict is ChallengerVerdict.CONSISTENT for c in challenged), mode
+        assert all("NOT challenged" in c.reason for c in challenged), mode
 
 
 # --- the challenger reaches the audit trail ----------------------------------
@@ -389,9 +425,24 @@ def test_a_model_backed_challenger_is_offered_exactly_one_verb() -> None:
     tools = transport.payloads[0]["tools"]
     assert [tool["function"]["name"] for tool in tools] == ["challenger_verdict"]
     assert len(CHALLENGER_TOOL_SUITE) == 1
-    enum = tools[0]["function"]["parameters"]["properties"]["verdict"]["enum"]
-    assert set(enum) == {item.value for item in ChallengerVerdict}
-    assert "approve" not in json.dumps(tools).lower()
+    # The enum arrives under `$defs` because the schema is derived from the validator, the same
+    # way the four move schemas are. What matters is that every value survives and no sixth one
+    # appears — not where pydantic chose to put it.
+    schema = tools[0]["function"]["parameters"]
+    enums = [
+        node["enum"]
+        for node in schema.get("$defs", {}).values()
+        if isinstance(node, dict) and "enum" in node
+    ]
+    assert enums, schema
+    assert set(enums[0]) == {item.value for item in ChallengerVerdict}
+    # No sixth value, and specifically none that permits anything. Asserted over the enum
+    # rather than over the whole payload: the schema carries the enum's own docstring, which
+    # *mentions* the absent verbs in order to explain why they are absent — and telling the
+    # model that is the point, not a leak.
+    values = {value.lower() for value in enums[0]}
+    assert not {value for value in values if "approv" in value or "escalat" in value}
+    assert not {value for value in values if "proceed" in value or "authoriz" in value}
 
 
 def test_a_model_backed_challenger_sees_the_briefing_and_the_move_and_nothing_else() -> None:
@@ -467,3 +518,47 @@ def test_an_unwired_challenger_does_not_stop_the_session() -> None:
     assert run.session.concluded
     challenged = [t.challenge for t in run.session.transcript if t.challenge is not None]
     assert challenged and all("NOT challenged" in c.reason for c in challenged)
+
+
+def test_the_challenger_configuration_is_not_inert() -> None:
+    """Its settings must reach a policy, or they are documentation of a control that is absent.
+
+    `gate_effects` and `gate_beliefs` were read by nothing in the first version — a documented
+    configuration surface with no effect, which is the same defect class as a docstring
+    describing a test that does not exist. Found by an adversarial review.
+    """
+    from nemesis.pilot.providers.config import ChallengerConfig, PilotConfig
+
+    pilot = PilotConfig(provider="anthropic", model="m")
+
+    default = ChallengerConfig(pilot=pilot).policy()
+    assert default.gated_kinds == frozenset({"request_effect", "record_belief"})
+    assert default.on_failure is ChallengerFailureMode.PROCEED_AND_RECORD
+
+    effects_only = ChallengerConfig(pilot=pilot, gate_beliefs=False).policy()
+    assert effects_only.gated_kinds == frozenset({"request_effect"})
+
+    strict = ChallengerConfig(pilot=pilot, refuse_unchallenged_moves=True).policy()
+    assert strict.on_failure is ChallengerFailureMode.REFUSE
+
+    # And the settings actually change behaviour end to end, not merely the policy object.
+    run = drive(overreaching_pilot(), RaisingChallenger(), strict)
+    assert any(r.status is RulingStatus.REFUSED_CHALLENGED for r in run.session.rulings)
+    lenient = drive(
+        overreaching_pilot(), RaisingChallenger(), ChallengerConfig(pilot=pilot).policy()
+    )
+    assert not any(r.status is RulingStatus.REFUSED_CHALLENGED for r in lenient.session.rulings)
+
+
+def test_a_challenger_gated_on_nothing_blocks_nothing() -> None:
+    """The degenerate configuration, checked rather than assumed: a policy that gates no move
+    kind cannot refuse, whatever the verdict."""
+    from nemesis.pilot.providers.config import ChallengerConfig, PilotConfig
+
+    policy = ChallengerConfig(
+        pilot=PilotConfig(provider="anthropic", model="m"),
+        gate_effects=False,
+        gate_beliefs=False,
+    ).policy()
+    run = drive(overreaching_pilot(), FixedChallenger(ChallengerVerdict.CONTRADICTED), policy)
+    assert not any(r.status is RulingStatus.REFUSED_CHALLENGED for r in run.session.rulings)

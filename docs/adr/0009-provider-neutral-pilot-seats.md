@@ -202,6 +202,66 @@ leave the building* rather than imagining it. What this ADR adds is the choice, 
   canonical layer forbids, and the layer being widened to admit it. The correct response would
   be to leave the layer alone and not support that provider.
 
+## What an adversarial review found after this was written
+
+Recorded here rather than in a commit message, because seven of the eight are cases where this
+ADR's own claims were stronger than the code, and the pattern matters more than any single fix.
+All were reproduced before being fixed, and each now has a test that fails without the fix.
+
+**The fail-closed challenger option did nothing, and said the opposite.**
+`ChallengerFailureMode.REFUSE` reported a failed review as an `INSUFFICIENT_EVIDENCE` *verdict*
+and left the blocking decision to the configured verdict set — which does not contain it by
+default. So the option silently no-opped, and the recorded reason read "this deployment refuses
+an unchallenged move" beside an ACCEPTED effect. The test written to prove it worked had passed
+a blocking set that masked it. An unanswered review is now not a verdict at all.
+
+**Per-turn metadata could rewrite audit attribution.** The identity was written *after* the
+metadata but only when a session identity existed, so a pilot exposing no `identity` property
+and returning metadata claiming `provider=openai` had that written into every audit event — the
+party being compared supplying the field it is compared on.
+
+**A hostile metadata object crashed the harness after a move had run.** `PilotDecision` is a
+plain dataclass and nothing validated its `metadata`, so an `object()` in `audit_fields()`
+raised a `ValidationError` out of `drive()` — positioned exactly where the record of what just
+happened should have been written, with the envelope already debited.
+
+**The vendor built-in scan missed every Gemini built-in.** `NEVER_EXPOSED_TOOL_TYPES` is
+snake_case and Gemini's payload is camelCase throughout, so an author adding grounding writes
+`{"googleSearch": {}}` and the scan reported clean. The exact failure the scan exists to catch,
+invisible for a reason as thin as a capital letter. Matching is now spelling-insensitive.
+
+**`render_tools` checked names only.** This ADR said an adapter cannot "widen an argument
+schema"; a dialect receives `spec.parameters` and returns arbitrary JSON, so a reviewer added a
+`shell_command` argument to all four verbs and stripped every enum, for four of six providers,
+with the whole suite green. It now checks the argument set and every closed enumeration too.
+
+**A vendor's error text reached the pilot's next briefing.** A ruling reason is echoed back to
+the model, and the reason was composed with `{exc}` in it — so a third party's response body
+became an input to the model's next turn. The reason is now written from the exception type and
+the classified error kind; the vendor's words stay in the audit record.
+
+**An adversary could halt an investigation by choosing a name.** An organization called
+`same_operator_as Holdings BV` reaches the graph through an ordinary registration pivot, the
+briefing backstop saw NEMESIS's own internal vocabulary, and `DisclosureViolationError`
+propagated out of `drive()` — with no leak to prevent. The marker is now neutralised in the
+three fields an adversary controls, and the backstop keeps its meaning for the rest.
+
+**The benchmark scored backwards, and this is the one that mattered most.** Every pattern was
+matched against a belief's free-text `natural_language`, so a pilot that named each trap *in
+order to reject it* — the correct investigative output — scored 11.0 across the corpus, while a
+pilot that reached every wrong conclusion in paraphrase scored 0.0. A metric that rewards
+evasion and punishes the right answer is worse than no metric. The fix is not better regular
+expressions: a belief's **triple** is where a pilot commits and cannot carry a negation, so it
+is what is scored; a conclusion's summary is read with a stance filter; a natural person's name
+is scored on any mention, because this platform's own rule is that a refusal repeating the
+accusation has published it. What remains, and is now printed above every figure: **the
+violation count is a floor, not a rate** — paraphrase still evades it.
+
+Two smaller ones: four parsers disagreed on `json.loads("null")`, where two ended the session
+with an ACCEPTED conclusion and two refused the identical response; and a challenger turn was
+stamped with the *pilot* prompt's version while its tool schema was hand-written beside an
+unused model claiming to be its source, already disagreeing about a length limit.
+
 ## Verification status
 
 Verified against this repository, by running it:

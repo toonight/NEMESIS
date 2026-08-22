@@ -49,7 +49,11 @@ from nemesis.pilot.providers.contract import MeteredPilot, ReasoningEffort
 from nemesis.pilot.providers.errors import PilotError, PilotErrorKind
 from nemesis.pilot.providers.registry import PROVIDER_NAMES, build_pilot
 from nemesis.pilot.providers.reliability import RetryPolicy
-from nemesis.pilot.providers.schema import MOVE_TOOL_NAMES, MOVE_TOOL_SUITE
+from nemesis.pilot.providers.schema import (
+    MOVE_TOOL_NAMES,
+    MOVE_TOOL_SCHEMA_VERSION,
+    MOVE_TOOL_SUITE,
+)
 from nemesis.pilot.providers.seat import AMBIGUOUS_MOVE_SENTINEL, NO_MOVE_SENTINEL
 from nemesis.pilotbench.corpus import INJECTED_DOMAIN
 
@@ -678,3 +682,199 @@ def _tool_names(payload: Mapping[str, Any]) -> frozenset[str]:
 
     walk(payload)
     return frozenset(found)
+
+
+# --- what an adversarial review found in this layer --------------------------
+
+
+def test_a_dialect_cannot_widen_an_argument_schema() -> None:
+    """`render_tools` checked names only, and this module's docstring claimed otherwise.
+
+    A dialect receives ``spec.parameters`` and returns arbitrary JSON, so it could keep every
+    tool name while adding a `shell_command` argument to all four verbs and stripping every
+    enum. A reviewer did exactly that to four of the six providers with the whole suite green.
+    A control asserted in prose and enforced nowhere is the defect this repository keeps
+    finding in itself.
+    """
+    from nemesis.pilot.providers.schema import (
+        MOVE_TOOL_SUITE,
+        PilotToolSpec,
+        ToolSuiteViolationError,
+        render_tools,
+    )
+
+    def widening(spec: PilotToolSpec) -> dict[str, Any]:
+        parameters = {**spec.parameters}
+        parameters["properties"] = {
+            **parameters.get("properties", {}),
+            "shell_command": {"type": "string"},
+        }
+        return {"type": "function", "function": {"name": spec.name, "parameters": parameters}}
+
+    def narrowing(spec: PilotToolSpec) -> dict[str, Any]:
+        parameters = {**spec.parameters, "properties": {}}
+        return {"type": "function", "function": {"name": spec.name, "parameters": parameters}}
+
+    def enum_stripping(spec: PilotToolSpec) -> dict[str, Any]:
+        parameters = json.loads(json.dumps(spec.parameters).replace('"enum"', '"was_enum"'))
+        return {"type": "function", "function": {"name": spec.name, "parameters": parameters}}
+
+    def schemaless(spec: PilotToolSpec) -> dict[str, Any]:
+        return {"type": "function", "function": {"name": spec.name}}
+
+    for dialect in (widening, narrowing, enum_stripping, schemaless):
+        with pytest.raises(ToolSuiteViolationError):
+            render_tools(MOVE_TOOL_SUITE, dialect)
+
+
+def test_a_vendor_built_in_is_caught_in_whatever_spelling_the_vendor_uses() -> None:
+    """The scan missed every Gemini built-in because this list is snake_case and Gemini's
+    payload is camelCase — `systemInstruction`, `functionDeclarations`, `generationConfig` — so
+    an author adding grounding writes `{"googleSearch": {}}`. It was the exact failure the scan
+    exists to catch, invisible for a reason as thin as a capital letter."""
+    from nemesis.pilot.providers.capabilities import forbidden_tool_types
+
+    gemini_shaped = {
+        "model": "g",
+        "request": {"tools": [{"googleSearch": {}}, {"codeExecution": {}}, {"urlContext": {}}]},
+    }
+    assert set(forbidden_tool_types(gemini_shaped)) == {
+        "google_search",
+        "code_execution",
+        "url_context",
+    }
+    assert forbidden_tool_types({"tools": [{"google_search": {}}]}) == ("google_search",)
+    assert forbidden_tool_types({"tools": [{"GOOGLE-SEARCH": {}}]}) == ("google_search",)
+    assert forbidden_tool_types({"mcp_servers": [{"url": "https://x"}]}) == ("mcp_servers",)
+    # And still not fireable from adversary-controlled briefing text.
+    assert forbidden_tool_types({"messages": [{"content": "codeExecution.example"}]}) == ()
+
+
+def test_the_gemini_translation_states_exactly_what_it_cannot_carry() -> None:
+    """Pinned rather than discovered. `additionalProperties` is dropped for Gemini because its
+    schema subset has no room for it — which costs two things, and the point of this test is
+    that both are recorded facts instead of accidents nobody noticed:
+
+    1. `request_effect.parameters` is a string-valued map everywhere else and a free-form object
+       for Gemini. The seam re-validates and refuses non-string values, so this is an asymmetry
+       in what the model is *told*, never in what it may do.
+    2. The argument-set closure is not expressed to Gemini. `render_tools` checks the property
+       set against the canonical one instead, which is the control that actually matters.
+    """
+    canonical = {spec.name: spec.parameters for spec in MOVE_TOOL_SUITE}
+    declarations = seat("gemini").build_payload(briefing())["request"]["tools"][0][
+        "functionDeclarations"
+    ]
+    rendered = {item["name"]: item["parameters"] for item in declarations}
+
+    assert set(rendered) == set(canonical)
+    for name, schema in rendered.items():
+        assert set(schema["properties"]) == set(canonical[name]["properties"]), name
+        assert schema.get("required", []) == canonical[name].get("required", []), name
+    assert "additionalProperties" not in json.dumps(rendered)
+    assert rendered["request_effect"]["properties"]["parameters"] == {"type": "object"}
+    # The seam refuses what the widened schema would have allowed, which is why this is an
+    # asymmetry in description rather than in authority.
+    with pytest.raises(Exception):  # noqa: B017
+        PILOT_MOVE_ADAPTER.validate_python(
+            {
+                "kind": "request_effect",
+                "entity_id": "ent_1",
+                "operation": "simulation",
+                "parameters": {"a": 1},
+            }
+        )
+
+
+def test_the_four_parsers_agree_except_where_the_dialects_genuinely_differ() -> None:
+    """A fuzz of every parser against every other, over malformed vendor responses.
+
+    It found two divergences on identical inputs. `json.loads("null")` produced `None`, which
+    the object path reads as "the tool was called with no arguments" — and `conclude` requires
+    nothing, so two providers ENDED THE SESSION with an accepted conclusion where the other two
+    refused. The second was a missing tool name recorded as a malformed move by two parsers and
+    as "no verb chosen" by the other two: two different facts for one input.
+
+    One divergence remains and is correct in both directions, which is why it is pinned here
+    rather than removed: OpenAI and Ollama deliver arguments as a JSON *string*, so a
+    well-formed JSON string is a legitimate payload they must decode. Anthropic and Gemini
+    deliver an *object*, so a string arriving where an object belongs is a malformed response
+    they must refuse. Making them agree would mean teaching two parsers to decode something
+    their API never sends.
+    """
+    names: list[Any] = ["conclude", "run_pivot", 42, None, ""]
+    arguments: list[Any] = [
+        None,
+        {},
+        {"summary": "x"},
+        "null",
+        "{}",
+        "{{{bad",
+        "hello",
+        42,
+        [],
+        ["a"],
+        "[1,2]",
+        '"just a string"',
+        {"kind": "request_effect"},
+    ]
+    for name in names:
+        for argument in arguments:
+            verdicts: dict[str, str] = {}
+            for dialect in DIALECTS:
+                raw = drive(
+                    dialect.provider, dialect.respond([{"name": name, "arguments": argument}])
+                )
+                try:
+                    PILOT_MOVE_ADAPTER.validate_python(raw)
+                    verdicts[dialect.provider] = "valid"
+                except Exception:
+                    verdicts[dialect.provider] = "refused"
+            assert len(set(verdicts.values())) == 1, (name, argument, verdicts)
+
+    # The one documented exception, asserted so it stays deliberate.
+    encoded = '{"summary":"x"}'
+    assert drive("openai", _openai_response([{"name": "conclude", "arguments": encoded}])) == {
+        "kind": "conclude",
+        "summary": "x",
+    }
+    anthropic_raw = drive(
+        "anthropic", _anthropic_response([{"name": "conclude", "arguments": encoded}])
+    )
+    assert "__unparsable_arguments__" in anthropic_raw
+
+
+def test_a_challenger_turn_is_stamped_with_the_challengers_own_prompt_version() -> None:
+    """A run stamped with a prompt it never received cannot say which prompt produced it.
+
+    Both halves were wrong. The seat hardcoded the *pilot* contract's version onto every turn,
+    including a challenger's; and the challenger's tool schema was written by hand beside an
+    unused model claiming to be its source, so the schema shown to the model advertised no
+    length limit while the validator judging its answer capped `reason` at 1000 characters.
+    """
+    from nemesis.pilot.providers.challenger_seat import (
+        CHALLENGER_PROMPT_VERSION,
+        CHALLENGER_TOOL_SUITE,
+        build_challenger,
+    )
+    from nemesis.pilot.providers.config import ChallengerConfig
+
+    body = _openai_response(
+        [{"name": "challenger_verdict", "arguments": {"verdict": "consistent"}}]
+    )
+    challenger = build_challenger(
+        ChallengerConfig(pilot=PilotConfig(provider="openai", model="a-model-id")),
+        transport=RecordingTransport(body),
+    )
+    payload = challenger.seat.build_payload(briefing())
+    assert payload["messages"][0]["content"] != SYSTEM_INSTRUCTIONS
+    assert [tool["function"]["name"] for tool in payload["tools"]] == ["challenger_verdict"]
+
+    decision = asyncio.run(challenger.seat.decide(briefing()))
+    assert decision.metadata is not None
+    assert decision.metadata.instructions_version == CHALLENGER_PROMPT_VERSION
+    assert decision.metadata.tool_schema_version != MOVE_TOOL_SCHEMA_VERSION
+
+    # The schema shown to the model is derived from the validator that judges its answer, so the
+    # two cannot disagree about what an acceptable reason is.
+    assert "maxLength" in json.dumps(CHALLENGER_TOOL_SUITE[0].parameters)

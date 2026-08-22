@@ -153,8 +153,21 @@ class ChallengePolicy:
     on_failure: ChallengerFailureMode = ChallengerFailureMode.PROCEED_AND_RECORD
     timeout_seconds: float = 60.0
 
-    def blocks(self, move_kind: str, verdict: ChallengerVerdict) -> bool:
-        return move_kind in self.gated_kinds and verdict in self.blocking
+    def blocks(self, move_kind: str, outcome: ChallengeOutcome) -> bool:
+        """Whether this outcome refuses this move.
+
+        Both branches are gated on ``gated_kinds``, so neither a verdict nor a silent challenger
+        can stop an investigation from looking. Beyond that they are separate questions: a
+        verdict blocks when the deployment lists it, and an *unanswered* review blocks when the
+        deployment asked to refuse unchallenged moves — which is not a verdict and must not
+        depend on the verdict set, because the default verdict set does not contain the value
+        the failure used to be reported as.
+        """
+        if move_kind not in self.gated_kinds:
+            return False
+        if not outcome.answered:
+            return self.on_failure is ChallengerFailureMode.REFUSE
+        return outcome.ruling.verdict in self.blocking
 
 
 def validate_ruling(raw: object) -> ChallengerRuling:
@@ -165,6 +178,27 @@ def validate_ruling(raw: object) -> ChallengerRuling:
     """
     data = raw.model_dump() if isinstance(raw, BaseModel) else raw
     return CHALLENGER_RULING_ADAPTER.validate_python(data)
+
+
+@dataclass(frozen=True)
+class ChallengeOutcome:
+    """The challenger's ruling, and whether it produced one at all.
+
+    Two fields because they answer different questions and were conflated once. The first
+    version routed a *failure* back through the verdict vocabulary as
+    ``INSUFFICIENT_EVIDENCE`` and left the blocking decision to the configured verdict set —
+    which does not contain it by default. So :data:`ChallengerFailureMode.REFUSE` silently did
+    nothing, and the recorded reason said "this deployment refuses an unchallenged move" beside
+    an ACCEPTED effect. An audit record that says the opposite of what happened is worse than
+    the missing control it was describing, and the test that should have caught it had been
+    written with a blocking set that masked it.
+
+    A failure is therefore not a verdict. It is ``answered=False``, and what happens next is the
+    policy's decision rather than a verdict's.
+    """
+
+    ruling: ChallengerRuling
+    answered: bool = True
 
 
 def failure_ruling(detail: str) -> ChallengerRuling:
@@ -194,6 +228,7 @@ def validation_detail(exc: ValidationError) -> str:
 __all__ = [
     "BLOCKING_VERDICTS",
     "CHALLENGER_RULING_ADAPTER",
+    "ChallengeOutcome",
     "ChallengePolicy",
     "ChallengerError",
     "ChallengerFailureMode",

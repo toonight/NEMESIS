@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from nemesis.pilot.challenger import ChallengePolicy, ChallengerFailureMode
 from nemesis.pilot.providers.contract import DecodingParameters, ReasoningEffort
 from nemesis.pilot.providers.reliability import (
     DEFAULT_BASE_DELAY_SECONDS,
@@ -104,6 +105,36 @@ class ChallengerConfig(BaseModel):
     false attribution enters the graph. Pivots and conclusions are recorded but never blocked,
     because a challenger that can stop an investigation from *looking* is a denial-of-service
     surface with no corresponding safety gain."""
+
+    refuse_unchallenged_moves: bool = False
+    """Whether a challenger that does not answer refuses the move.
+
+    ``False`` — the default — returns the session to the posture every containment test is
+    written against. ``True`` is available for a deployment that would rather stop than proceed
+    unchallenged, and is a choice it makes knowingly: it hands anyone who can degrade a second
+    vendor a way to stop an investigation's effects."""
+
+    def policy(self) -> ChallengePolicy:
+        """The mediator-side policy these settings describe.
+
+        A method rather than three fields the caller assembles by hand, because the first version
+        of this class had ``gate_effects`` and ``gate_beliefs`` read by nothing at all — a
+        documented configuration surface that was inert, which is the same defect class as a
+        docstring describing a test that does not exist. Found by an adversarial review.
+        """
+        gated: set[str] = set()
+        if self.gate_effects:
+            gated.add("request_effect")
+        if self.gate_beliefs:
+            gated.add("record_belief")
+        return ChallengePolicy(
+            gated_kinds=frozenset(gated),
+            on_failure=(
+                ChallengerFailureMode.REFUSE
+                if self.refuse_unchallenged_moves
+                else ChallengerFailureMode.PROCEED_AND_RECORD
+            ),
+        )
 
 
 __all__ = ["ChallengerConfig", "PilotConfig"]

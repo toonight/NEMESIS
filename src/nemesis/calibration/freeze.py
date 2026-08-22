@@ -25,7 +25,7 @@ guarantee, and it is the only one that sees a bare literal inside a function bod
 field default, or a two-line logic change that touches no constant at all. `engine_drifted()`
 names the modules that moved.
 
-**Every module-level constant**, by normalised syntax, in `CONSTANT_DIGESTS` — 439 of them,
+**Every module-level constant**, by normalised syntax, in `CONSTANT_DIGESTS` — 444 of them,
 with no classification whatsoever. A dial does not have to hold a digit and does not have to
 look like a table; four rules for deciding what counted were tried and all four excluded
 something load-bearing. `constants_drifted()` names what moved, appeared or vanished.
@@ -135,7 +135,7 @@ CALIBRATION_CONSTANTS: Final[tuple[str, ...]] = (
 """The curated epistemic subset, named as ``module:NAME`` and frozen by **imported value**.
 
 Not "every number": most of what decides a published figure here is not a number at all — of the
-439 dials `discovered_constants()` covers, 314 hold no numeric literal. And not the completeness
+444 dials `discovered_constants()` covers, 319 hold no numeric literal. And not the completeness
 guarantee either, which is the job of the two syntactic digests; this list is deliberately
 curated, so it is allowed to be incomplete in a way they are not.
 
@@ -485,6 +485,7 @@ CONSTANT_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis.pilot.mediator:_BUDGET_REFUSAL_MARKER": "4fe6f770af06fc2b",
         "nemesis.pilot.mediator:_DISCLOSURE_MARKER": "f34785bfeec43f2c",
         "nemesis.pilot.mediator:_MARKER_PATTERN": "b110499de2c8d895",
+        "nemesis.pilot.mediator:_SESSION_ATTRIBUTION_KEYS": "4f3c23ad339e4890",
         "nemesis.pilot.model_seat:MOVE_MODELS": "4587191b724bae72",
         "nemesis.pilot.model_seat:MOVE_NAMES": "1515ae82b3369b72",
         "nemesis.pilot.model_seat:PROMPT_VERSION": "21aa468c1c9d6a85",
@@ -494,12 +495,14 @@ CONSTANT_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis.pilot.providers.anthropic:ANTHROPIC_DIALECT": "2fd6758687c3290a",
         "nemesis.pilot.providers.anthropic:API_KEY_ENVIRONMENT_VARIABLE": "3e1c835c20257f5e",
         "nemesis.pilot.providers.anthropic:PROVIDER": "d5a3d4e15e3acff0",
-        "nemesis.pilot.providers.capabilities:NEVER_EXPOSED_TOOL_TYPES": "6f7713a854978444",
+        "nemesis.pilot.providers.capabilities:NEVER_EXPOSED_TOOL_TYPES": "ff2e610883b686ab",
         "nemesis.pilot.providers.capabilities:REQUIRED_OF_EVERY_PILOT": "314a57ae8a49f031",
         "nemesis.pilot.providers.capabilities:UNTRUSTED_CONTENT_KEYS": "1de817c9411a3540",
+        "nemesis.pilot.providers.capabilities:_NEVER_EXPOSED_NORMALISED": "87707a5f533812fe",
         "nemesis.pilot.providers.challenger_seat:CHALLENGER_INSTRUCTIONS": "ea29b49292059e9c",
+        "nemesis.pilot.providers.challenger_seat:CHALLENGER_PROMPT_VERSION": "9c48cba3f8bef67a",
         "nemesis.pilot.providers.challenger_seat:CHALLENGER_TOOL_NAME": "1b68c72056c522bf",
-        "nemesis.pilot.providers.challenger_seat:CHALLENGER_TOOL_SUITE": "73cd19d779712bb6",
+        "nemesis.pilot.providers.challenger_seat:CHALLENGER_TOOL_SUITE": "acce8d8fe03a20a0",
         "nemesis.pilot.providers.compatible:API_KEY_ENVIRONMENT_VARIABLE": "7d486ff10e2609fe",
         "nemesis.pilot.providers.compatible:CONSERVATIVE_CAPABILITIES": "e18edb7239c5c6f4",
         "nemesis.pilot.providers.compatible:PROVIDER": "89e05a5a215f1dae",
@@ -543,14 +546,15 @@ CONSTANT_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis.pilotbench.corpus:APPROVED_DOMAIN": "bd6fe072a2ef64d0",
         "nemesis.pilotbench.corpus:APPROVED_STATE": "be0ce3c8a9348175",
         "nemesis.pilotbench.corpus:BASELINE": "c1c5bc66c1dcc5ef",
-        "nemesis.pilotbench.corpus:COMMODITY_ARTIFACT": "dc6bbbeb1a104551",
+        "nemesis.pilotbench.corpus:COMMODITY_ARTIFACT": "53e903f101bacfbf",
         "nemesis.pilotbench.corpus:DEFAULT_CORPUS": "cf7646d3582d6c45",
         "nemesis.pilotbench.corpus:FALSE_FLAG": "4c249fe0e67d1700",
         "nemesis.pilotbench.corpus:INJECTED_DOMAIN": "ea6176782ac57c0a",
-        "nemesis.pilotbench.corpus:NAMED_PERSON_CASE": "00c817cccb558dbb",
+        "nemesis.pilotbench.corpus:LINK_PHRASES": "a8531a65bdd419fa",
+        "nemesis.pilotbench.corpus:NAMED_PERSON_CASE": "37d9da22a3960355",
         "nemesis.pilotbench.corpus:PROMPT_INJECTION": "0b1689bbe274cb16",
-        "nemesis.pilotbench.corpus:RECYCLED_WALLET": "5135e894818d7a05",
-        "nemesis.pilotbench.corpus:SHARED_HOSTING": "90311fdb2db2c925",
+        "nemesis.pilotbench.corpus:RECYCLED_WALLET": "22ccc9ac437b86cb",
+        "nemesis.pilotbench.corpus:SHARED_HOSTING": "52f0cb54c33eadeb",
         "nemesis.pilotbench.corpus:STALE_REGISTRATION": "40149db90db1dede",
         "nemesis.pilotbench.corpus:_ENVELOPE": "921f9228ae213902",
         "nemesis.pilotbench.metrics:CERTAINTY_MARKERS": "84671d77139597cb",
@@ -558,8 +562,9 @@ CONSTANT_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis.pilotbench.metrics:MOVE_VERBS": "d8e5b9cc2ced0aad",
         "nemesis.pilotbench.pilots:PIVOT_ORDER": "19539b4bdf2f5c59",
         "nemesis.pilotbench.pilots:REFERENCE_PILOTS": "278dc8575e6c2964",
-        "nemesis.pilotbench.report:CANNOT_TELL_YOU": "bb94da34b48cde87",
+        "nemesis.pilotbench.report:CANNOT_TELL_YOU": "ad8d6b59e4cd81fe",
         "nemesis.pilotbench.scenario:CORPUS_VERSION": "21e304bbe7d5493c",
+        "nemesis.pilotbench.scenario:REJECTION_MARKERS": "3cb07760768725e1",
         "nemesis.pursuit.engine:ENGINE_ACTOR_KIND": "a59bcfa1f84c9234",
         "nemesis.pursuit.materialize:QUALIFIER_ATTRIBUTE": "618f0a5451a2ddfd",
         "nemesis.pursuit.materialize:QUALIFIER_CORPUS": "93d9ab9cd6dce6b8",
@@ -743,7 +748,7 @@ def discovered_constants(tree: Path | None = None) -> dict[str, str]:
     `EXCLUDED_CONCLUSIONS`, four security tables made of plain strings. The module digest covered
     them, so it was never a bypass; the claim that every dial was *named* was simply false.
 
-    So there is no rule now. Every module-level upper-case assignment is a dial, 439 of them,
+    So there is no rule now. Every module-level upper-case assignment is a dial, 444 of them,
     and the cost of including the genuine prose is nothing: rewording a message already moves
     that module's syntax digest, so no new failure mode is introduced by naming it too.
 
@@ -944,39 +949,39 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/graph/recall.py": "0f633cf4731a9e2b",
         "nemesis/pilot/__init__.py": "57afbe42c3dcd343",
         "nemesis/pilot/anthropic_pilot.py": "653a3edd88f63dd4",
-        "nemesis/pilot/challenger.py": "715bc0db3de7e540",
+        "nemesis/pilot/challenger.py": "e32378cc74490f41",
         "nemesis/pilot/local_pilot.py": "844b5ec238222866",
-        "nemesis/pilot/mediator.py": "8f170f8435de08bb",
+        "nemesis/pilot/mediator.py": "d463729c125f5eea",
         "nemesis/pilot/model_seat.py": "0e1d14a5dd994e5f",
         "nemesis/pilot/moves.py": "c674bdd89dc0c1b3",
         "nemesis/pilot/openai_pilot.py": "a0ff06cac4fc63f6",
         "nemesis/pilot/pilot.py": "16f58b14f6431694",
         "nemesis/pilot/providers/__init__.py": "08fb22ea1c5b5387",
         "nemesis/pilot/providers/anthropic.py": "982acef4561c5e31",
-        "nemesis/pilot/providers/capabilities.py": "44cf04f6e1a8153b",
-        "nemesis/pilot/providers/challenger_seat.py": "38dfd8e56b86f867",
+        "nemesis/pilot/providers/capabilities.py": "9a62ca00f791764d",
+        "nemesis/pilot/providers/challenger_seat.py": "bb08ad13a06df50a",
         "nemesis/pilot/providers/compatible.py": "98a7644b1bd4e677",
-        "nemesis/pilot/providers/config.py": "31b8a1776a5e06b3",
+        "nemesis/pilot/providers/config.py": "8ac63154782d4afa",
         "nemesis/pilot/providers/contract.py": "e9c24563d39d6579",
         "nemesis/pilot/providers/errors.py": "b3d0dfc04003b068",
         "nemesis/pilot/providers/gemini.py": "670fa44bd869452c",
         "nemesis/pilot/providers/ollama.py": "3ae12fff3e55396a",
         "nemesis/pilot/providers/openai.py": "52d7a9f81213b14f",
-        "nemesis/pilot/providers/openai_dialect.py": "7a1356b5ada9bc2f",
+        "nemesis/pilot/providers/openai_dialect.py": "f82efc11b003a240",
         "nemesis/pilot/providers/registry.py": "98e801a403b85c88",
         "nemesis/pilot/providers/reliability.py": "db9bb20750b897e6",
-        "nemesis/pilot/providers/schema.py": "95e462bedf76db69",
-        "nemesis/pilot/providers/seat.py": "d59221406c3b0fcc",
+        "nemesis/pilot/providers/schema.py": "f5042bd8c7309804",
+        "nemesis/pilot/providers/seat.py": "f9099d2210436e15",
         "nemesis/pilot/providers/transport.py": "2bf0df2a35d0c3ee",
         "nemesis/pilot/providers/xai.py": "b8fda96407e8504e",
         "nemesis/pilotbench/__init__.py": "b68c078ef2457acf",
-        "nemesis/pilotbench/corpus.py": "58beaadbc5e82cec",
+        "nemesis/pilotbench/corpus.py": "0cdec71ef36139fc",
         "nemesis/pilotbench/harness.py": "1a7e521721c0ae6d",
-        "nemesis/pilotbench/metrics.py": "bc7d8757b6763638",
+        "nemesis/pilotbench/metrics.py": "101f56057fec0671",
         "nemesis/pilotbench/pilots.py": "300e60445b53f560",
-        "nemesis/pilotbench/report.py": "7a8b7c4ed2d71048",
+        "nemesis/pilotbench/report.py": "3d88ede53b780e68",
         "nemesis/pilotbench/runner.py": "fec18af52b041bb2",
-        "nemesis/pilotbench/scenario.py": "704d30d0716e0871",
+        "nemesis/pilotbench/scenario.py": "753a240f654d3d49",
         "nemesis/ports/__init__.py": "ad2e13b69c4fc1fd",
         "nemesis/ports/authorization.py": "0fc01b5a4a148543",
         "nemesis/ports/collection.py": "8933207ed99b3114",

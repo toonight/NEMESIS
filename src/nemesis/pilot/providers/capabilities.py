@@ -31,7 +31,9 @@ capability on that the platform would not otherwise have used.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from enum import StrEnum
+from types import MappingProxyType
 from typing import Final
 
 from pydantic import BaseModel, ConfigDict
@@ -125,6 +127,8 @@ NEVER_EXPOSED_TOOL_TYPES: Final[frozenset[str]] = frozenset(
         "url_context",
         "browser",
         "mcp",
+        "mcp_servers",
+        "mcp_toolset",
         "function_calling_with_execution",
     }
 )
@@ -170,6 +174,20 @@ positive*, which is loud and caught by the first test run, rather than a silent 
 """
 
 
+def _normalise(token: str) -> str:
+    """Fold a vendor's spelling to a comparable token: lowercase, no separators.
+
+    ``googleSearch``, ``google_search``, ``google-search`` and ``GOOGLE_SEARCH`` all become
+    ``googlesearch``. The list below is written in one spelling and matches all of them.
+    """
+    return "".join(character for character in token.lower() if character.isalnum())
+
+
+_NEVER_EXPOSED_NORMALISED: Final[Mapping[str, str]] = MappingProxyType(
+    {_normalise(name): name for name in NEVER_EXPOSED_TOOL_TYPES}
+)
+
+
 def forbidden_tool_types(payload: object) -> tuple[str, ...]:
     """Every never-exposed tool type appearing anywhere in a rendered request.
 
@@ -185,16 +203,14 @@ def forbidden_tool_types(payload: object) -> tuple[str, ...]:
 
 def _walk(node: object, found: set[str]) -> None:
     if isinstance(node, str):
-        if node in NEVER_EXPOSED_TOOL_TYPES:
-            found.add(node)
+        _record(node, found)
         return
     if isinstance(node, dict):
         for key, value in node.items():
             if not isinstance(key, str):
                 _walk(value, found)
                 continue
-            if key in NEVER_EXPOSED_TOOL_TYPES:
-                found.add(key)
+            _record(key, found)
             if key in UNTRUSTED_CONTENT_KEYS:
                 continue
             _walk(value, found)
@@ -202,6 +218,12 @@ def _walk(node: object, found: set[str]) -> None:
     if isinstance(node, list | tuple):
         for item in node:
             _walk(item, found)
+
+
+def _record(token: str, found: set[str]) -> None:
+    canonical = _NEVER_EXPOSED_NORMALISED.get(_normalise(token))
+    if canonical is not None:
+        found.add(canonical)
 
 
 __all__ = [

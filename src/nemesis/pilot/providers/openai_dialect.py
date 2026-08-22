@@ -192,7 +192,19 @@ def arguments_to_move(name: object, arguments: object) -> dict[str, Any]:
     mediator refuses the move and the transcript records *what* the model sent, which is the
     difference between "the model asked for something malformed" and "the model asked for
     nothing", two facts a benchmark must not confuse.
+
+    Both edges below exist because a fuzz of the four parsers against each other found them
+    disagreeing on identical responses — see the comments inline. Two dialects decode a JSON
+    string and two receive an object, so the decoding path has to arrive at exactly the same
+    place the object path does, and it did not.
     """
+    if not isinstance(name, str):
+        # A tool call with no usable name is the model choosing no verb, whatever it sent as
+        # arguments. Decided here as well as in `move_from` so the four dialects record the same
+        # fact: the string-decoding path used to emit `{"kind": "unknown", "__unparsable_..."}`
+        # (a malformed move) where the object path emitted the no-move sentinel (no verb chosen),
+        # which is two different things recorded for one input.
+        return no_move("the model named no tool")
     if isinstance(arguments, str):
         try:
             decoded: object = json.loads(arguments)
@@ -202,10 +214,15 @@ def arguments_to_move(name: object, arguments: object) -> dict[str, Any]:
             # mediator refuses the move and the transcript says *what* the model sent, which is
             # the difference between "the model asked for something malformed" and "the model
             # asked for nothing" — two facts a benchmark must not confuse.
-            return {
-                "kind": name if isinstance(name, str) else "unknown",
-                "__unparsable_arguments__": arguments[:400],
-            }
+            return {"kind": name, "__unparsable_arguments__": arguments[:400]}
+        if decoded is None or (isinstance(decoded, Mapping) and not decoded):
+            # `"null"` and `"{}"` decoded, and neither is an argument object. Recorded as
+            # unparsable rather than as "the tool was called with no arguments", because the
+            # model DID send an arguments field — and `conclude` requires nothing, so reading
+            # `json.loads("null")` as absence ended the session with an ACCEPTED conclusion on
+            # two providers while the other two refused the identical response. Found by fuzzing
+            # the four parsers against each other.
+            return {"kind": name, "__unparsable_arguments__": arguments[:400]}
         return move_from(name, decoded)
     return move_from(name, arguments)
 
