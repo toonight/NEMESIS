@@ -17,7 +17,7 @@ dependencies = [
 [project.optional-dependencies]
 api = [
     "fastapi>=0.115",
-    "uvicorn[standard]>=0.34",
+    "uvicorn[standard]>=0.52.4",
 ]
 cli = [
     "typer>=0.15",
@@ -25,14 +25,14 @@ cli = [
 ]
 darkweb = [
     # SOCKS support keeps .onion resolution inside Tor; the connector rejects clearnet URLs.
-    "httpx[socks]>=0.28",
+    "httpx[socks]>=0.28.1",
 ]
 
 [dependency-groups]
 dev = [
     "pytest>=8.3",
     "pytest-cov>=6.0",
-    "hypothesis>=6.122",
+    "hypothesis>=6.165.10",
     "mypy>=1.14",
     "ruff>=0.9",
     "import-linter>=2.1",
