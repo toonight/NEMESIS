@@ -694,6 +694,72 @@ def test_the_move_vocabulary_is_exactly_four_verbs() -> None:
         PILOT_MOVE_ADAPTER.validate_python({"kind": "assert_fact", "subject": "x"})
 
 
+def test_a_move_carrying_a_field_the_vocabulary_does_not_have_is_refused() -> None:
+    """A closed vocabulary is closed about arguments too, not only about verbs.
+
+    Found by an adversarial audit of the provider seam, and worth recording because the shape is
+    the one this repository keeps catching: the four move models used Pydantic's default
+    ``extra="ignore"``, so an unknown field was silently dropped rather than refused. Every
+    adapter's "the model sent arguments I could not parse" sentinel is a mapping carrying exactly
+    such a field — and because ``conclude`` requires nothing, the sentinel validated into a
+    clean, ACCEPTED conclusion. A model whose tool call arrived as broken JSON ended the session
+    successfully, and the transcript said it concluded.
+
+    The refusal has to be structural rather than a check on the sentinel's name, because the
+    sentinel is one instance of the general case: an argument the vocabulary does not define is
+    an argument nobody validated, and a pilot must not be able to attach one to a move.
+    """
+    for junk in (
+        {"kind": "conclude", "__unparsable_arguments__": "{{{ not json"},
+        {"kind": "conclude", "summary": "done", "operation": "domain_seizure"},
+        {
+            "kind": "record_belief",
+            "subject": "a",
+            "predicate": "b",
+            "obj": "c",
+            "natural_language": "d",
+            "supported_by_evidence": ["ev_1"],
+        },
+        {
+            "kind": "run_pivot",
+            "entity_id": "ent_1",
+            "pivot_type": "osint_search",
+            "current_target_attributes": {"registrar": "mine"},
+        },
+    ):
+        with pytest.raises(ValidationError):
+            PILOT_MOVE_ADAPTER.validate_python(junk)
+
+
+def test_an_unparsable_tool_call_never_becomes_an_accepted_conclusion() -> None:
+    """The same defect from the mediator's side: end to end, through the real seam.
+
+    The unit test above pins the vocabulary. This pins the consequence — a pilot whose output
+    carries an unparsable-arguments marker is REFUSED and the session does not record a
+    conclusion, because a run that ends on garbage and reports success is the failure mode an
+    investigation platform can least afford.
+    """
+
+    async def scenario() -> PilotSession:
+        h = await _build(max_consecutive_malformed=2)
+        pilot = ScriptedPilot(
+            "a-model-whose-arguments-did-not-parse",
+            [
+                {"kind": "conclude", "__unparsable_arguments__": "{{{ not json"},
+                {"kind": "conclude", "__unparsable_arguments__": "{{{ still not json"},
+            ],
+        )
+        return await h.mediator.drive(_hostile(pilot), h.seed)
+
+    session = _run(scenario())
+
+    assert not session.concluded, "garbage arguments were accepted as a clean conclusion"
+    assert all(ruling.status is RulingStatus.REFUSED_MALFORMED for ruling in session.rulings), [
+        r.status for r in session.rulings
+    ]
+    assert session.halted_reason is not None
+
+
 def test_a_request_effect_has_no_field_for_the_targets_current_state() -> None:
     """The pilot names a target; it may not tell NEMESIS what that target looks like now.
     The mediator observes the state from the graph, so a pilot cannot forge it to spend a

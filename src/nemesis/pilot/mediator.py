@@ -65,6 +65,16 @@ from nemesis.effects.registry import (
     STOP_CONDITION_PARAMETER_PREFIX,
     EffectsRegistry,
 )
+from nemesis.pilot.challenger import (
+    ChallengePolicy,
+    ChallengerFailureMode,
+    ChallengerRuling,
+    ChallengerVerdict,
+    MoveChallenger,
+    failure_ruling,
+    validate_ruling,
+    validation_detail,
+)
 from nemesis.pilot.moves import (
     PILOT_MOVE_ADAPTER,
     Briefing,
@@ -80,6 +90,11 @@ from nemesis.pilot.moves import (
     RunPivot,
 )
 from nemesis.pilot.pilot import AutonomousPilot
+from nemesis.pilot.providers.contract import (
+    PilotDecision,
+    PilotResponseMetadata,
+    ProviderIdentity,
+)
 from nemesis.ports.effects import EffectRequest
 from nemesis.ports.storage import AuditEvent, AuditSink, ClaimStore, GraphStore
 from nemesis.pursuit.engine import PursuitEngine
@@ -128,6 +143,17 @@ class TurnRecord:
     move: PilotMove | None
     ruling: Ruling
 
+    metadata: PilotResponseMetadata | None = None
+    """What the provider call cost, when the seat reported it. ``None`` for a scripted pilot,
+    a pilot that raised, or any seat that does not meter itself.
+
+    Descriptive only. No ruling above reads it — a session driven by a seat that lied in every
+    field would produce a misleading audit record and never an action that should not have
+    happened, which is what makes it safe to accept from an untrusted seat at all."""
+
+    challenge: ChallengerRuling | None = None
+    """The challenger's verdict on this move, when one was configured."""
+
 
 @dataclass(frozen=True)
 class PilotSession:
@@ -139,6 +165,16 @@ class PilotSession:
     concluded: bool
     halted_reason: str | None
     pilot_actor: str
+
+    identity: ProviderIdentity | None = None
+    """Which provider and which model drove, read **once at session open** and used for every
+    audit record in the session.
+
+    Read once rather than per turn on purpose. The seat is untrusted code on the audit path, and
+    a seat free to report a different provider each turn would be rewriting attribution move by
+    move — so it is not given the chance, and a per-turn metadata block cannot override what was
+    recorded at open. ``None`` when the pilot does not meter itself, which is the honest answer
+    for a scripted pilot and better than inventing a vendor for it."""
 
     @property
     def rulings(self) -> tuple[Ruling, ...]:
@@ -274,6 +310,8 @@ class PilotMediator:
         max_moves: int = DEFAULT_MAX_MOVES,
         max_consecutive_malformed: int = DEFAULT_MAX_CONSECUTIVE_MALFORMED,
         propose_timeout: float = DEFAULT_PROPOSE_TIMEOUT,
+        challenger: MoveChallenger | None = None,
+        challenge_policy: ChallengePolicy | None = None,
     ) -> None:
         self._engine = engine
         self._graph = graph
@@ -285,6 +323,8 @@ class PilotMediator:
         self._max_moves = max_moves
         self._max_consecutive_malformed = max_consecutive_malformed
         self._propose_timeout = propose_timeout
+        self._challenger = challenger
+        self._challenge_policy = challenge_policy or ChallengePolicy()
 
     async def drive(
         self, pilot: AutonomousPilot, seed: IncidentSeed, *, total_budget: float = 100.0
@@ -292,9 +332,18 @@ class PilotMediator:
         """Run one full session: open an investigation, then loop asking the pilot for moves
         until it concludes, exhausts the move ceiling, or misbehaves past tolerance."""
         pilot_actor = new_id(IdPrefix.ACTOR)
+        # Read once, here, and used for every record below. A seat is untrusted code sitting on
+        # the audit path; one free to report a different provider each turn would be rewriting
+        # attribution move by move.
+        identity = self._identity_of(pilot)
         investigation = await self._engine.start(seed, total_budget=total_budget)
         await self._record_session(
-            pilot, pilot_actor, investigation, outcome="opened", extra={"budget": f"{total_budget}"}
+            pilot,
+            pilot_actor,
+            investigation,
+            identity,
+            outcome="opened",
+            extra={"budget": f"{total_budget}"},
         )
 
         transcript: list[TurnRecord] = []
@@ -303,28 +352,59 @@ class PilotMediator:
         concluded = False
         halted: str | None = None
 
-        async def refuse(move_kind: str, reason: str) -> bool:
+        async def refuse(
+            move_kind: str, reason: str, metadata: PilotResponseMetadata | None = None
+        ) -> bool:
             """Record a refused non-move and report whether the streak has ended the session."""
             nonlocal malformed_streak, last_ruling
             malformed_streak += 1
             ruling = Ruling(
                 move_kind=move_kind, status=RulingStatus.REFUSED_MALFORMED, reason=reason[:400]
             )
-            transcript.append(TurnRecord(None, ruling))
+            transcript.append(TurnRecord(None, ruling, metadata))
             last_ruling = ruling
-            await self._record_move(pilot, pilot_actor, investigation, None, ruling)
+            await self._record_move(
+                pilot, pilot_actor, investigation, identity, None, ruling, metadata
+            )
             return malformed_streak >= self._max_consecutive_malformed
 
         for turn in range(self._max_moves):
-            briefing = await self._brief(
-                investigation, last_ruling, moves_remaining=self._max_moves - turn
-            )
+            try:
+                briefing = await self._brief(
+                    investigation, last_ruling, moves_remaining=self._max_moves - turn
+                )
+            except DisclosureViolationError:
+                # Recorded, then re-raised untouched. This is NOT handling it — the wall's
+                # contract is that nobody catches it to carry on, and nothing here carries on.
+                # But an audit trail holding a `pilot.session` open with no close is a session
+                # that cannot be reconstructed, and invariant 11 does not make an exception for
+                # the case where the platform stopped itself. So the close is written and the
+                # error goes on being loud.
+                await self._record_session(
+                    pilot,
+                    pilot_actor,
+                    investigation,
+                    identity,
+                    outcome="halted",
+                    extra={
+                        "halted_reason": "the briefing would have carried internal-classified "
+                        "material to the pilot",
+                        "moves": str(len(transcript)),
+                    },
+                )
+                raise
 
             raw: object = None
+            metadata: PilotResponseMetadata | None = None
             try:
                 # Bounded by a wall clock the pilot cannot influence: a hosted model that hangs
-                # must not park the whole session on one turn with no halt ever recorded.
-                raw = await asyncio.wait_for(pilot.propose(briefing), timeout=self._propose_timeout)
+                # must not park the whole session on one turn with no halt ever recorded. The
+                # bound covers the seat's own retries too, which is why they cannot buy a
+                # hanging vendor more wall-clock than a single call would have had.
+                decision = await asyncio.wait_for(
+                    self._elicit(pilot, briefing), timeout=self._propose_timeout
+                )
+                raw, metadata = decision.raw, decision.metadata
                 move = self._validate(raw)
             except ValidationError as exc:
                 if await refuse(
@@ -332,6 +412,7 @@ class PilotMediator:
                     "not a move in the pilot vocabulary: "
                     f"{self._first_error(exc)}. The vocabulary is closed; a pilot cannot "
                     "act through a verb that does not exist.",
+                    metadata,
                 ):
                     halted = f"{malformed_streak} malformed moves in a row; session ended"
                     break
@@ -343,6 +424,7 @@ class PilotMediator:
                     "unknown",
                     f"the pilot did not return a move within {self._propose_timeout:g}s; "
                     "the stalled call was cancelled",
+                    metadata,
                 ):
                     halted = "the pilot stalled repeatedly; session ended"
                     break
@@ -355,18 +437,37 @@ class PilotMediator:
                 if await refuse(
                     "unknown",
                     f"the pilot raised {type(exc).__name__} instead of returning a move: {exc}",
+                    metadata,
                 ):
                     halted = f"the pilot raised {type(exc).__name__} repeatedly; session ended"
                     break
                 continue
 
             malformed_streak = 0
-            investigation, ruling = await self._apply(pilot, pilot_actor, investigation, move)
-            transcript.append(TurnRecord(move, ruling))
+            challenge = await self._challenge(briefing, move)
+            if challenge is not None and self._challenge_policy.blocks(
+                move.kind, challenge.verdict
+            ):
+                # Refused BEFORE `_apply`, so the envelope is never debited and no pivot runs.
+                # A challenger can only subtract; it never reaches a control that would have
+                # permitted something on its own.
+                ruling = Ruling(
+                    move_kind=move.kind,
+                    status=RulingStatus.REFUSED_CHALLENGED,
+                    reason=(
+                        f"an independent challenger returned {challenge.verdict.value}: "
+                        f"{challenge.reason}"
+                    )[:400],
+                )
+            else:
+                investigation, ruling = await self._apply(pilot, pilot_actor, investigation, move)
+            transcript.append(TurnRecord(move, ruling, metadata, challenge))
             last_ruling = ruling
-            await self._record_move(pilot, pilot_actor, investigation, move, ruling)
+            await self._record_move(
+                pilot, pilot_actor, investigation, identity, move, ruling, metadata, challenge
+            )
 
-            if isinstance(move, Conclude):
+            if isinstance(move, Conclude) and ruling.accepted:
                 concluded = True
                 break
         else:
@@ -376,6 +477,7 @@ class PilotMediator:
             pilot,
             pilot_actor,
             investigation,
+            identity,
             outcome="concluded" if concluded else "halted",
             extra={"halted_reason": halted or "", "moves": str(len(transcript))},
         )
@@ -385,7 +487,89 @@ class PilotMediator:
             concluded=concluded,
             halted_reason=halted,
             pilot_actor=pilot_actor,
+            identity=identity,
         )
+
+    # -- eliciting a move ------------------------------------------------------
+
+    @staticmethod
+    def _identity_of(pilot: AutonomousPilot) -> ProviderIdentity | None:
+        """Which provider and model the seat says it is, read once at session open.
+
+        Defensive about the value, not merely about the attribute: a seat is untrusted code and
+        the strings it hands over land in the hash-chained audit trail. Anything that is not a
+        genuine :class:`ProviderIdentity` is treated as no identity at all rather than coerced
+        into a plausible-looking one, because an audit record naming a vendor nobody ran is
+        worse than one that admits it does not know.
+        """
+        identity = getattr(pilot, "identity", None)
+        return identity if isinstance(identity, ProviderIdentity) else None
+
+    @staticmethod
+    async def _elicit(pilot: AutonomousPilot, briefing: Briefing) -> PilotDecision:
+        """Ask the pilot for a move, keeping the call metadata when the seat reports it.
+
+        Two protocols, one loop. :class:`~nemesis.pilot.pilot.AutonomousPilot` is unchanged and
+        remains the whole contract; :class:`~nemesis.pilot.providers.contract.MeteredPilot` adds
+        ``decide``, and a seat that offers it gets its latency, token counts and attempt count
+        into the audit trail. A scripted pilot, an adversarial double and a five-line fake are
+        all still valid pilots that nobody has to update — which matters because every hostile
+        double in the containment suite is cast to the protocol, and a required member added
+        there would leave each of them compiling while silently no longer conforming.
+        """
+        decide = getattr(pilot, "decide", None)
+        if callable(decide):
+            decision = await decide(briefing)
+            if isinstance(decision, PilotDecision):
+                return decision
+            # A seat that answered `decide` with something else is not trusted to have meant it.
+            # The value is passed on as a raw move, which the seam refuses if it is not one.
+            return PilotDecision(raw=decision if isinstance(decision, Mapping) else {})
+        return PilotDecision(raw=await pilot.propose(briefing))
+
+    # -- the challenger --------------------------------------------------------
+
+    async def _challenge(self, briefing: Briefing, move: PilotMove) -> ChallengerRuling | None:
+        """Ask the challenger about a move. Returns ``None`` when none is configured.
+
+        The challenger receives what the pilot received and the move the pilot proposed, and
+        nothing else. Its answer is re-validated through the closed verdict vocabulary for the
+        same reason a move is: a model instance with an overridden method is the value-confusion
+        shape this codebase has been bitten by, and the seam is where it is stopped.
+
+        A challenger that raises, stalls or answers outside the vocabulary does not take the
+        session with it. Under the default failure mode the move proceeds and the transcript
+        records that nothing challenged it — returning the session to the baseline posture every
+        containment test is written against, rather than making an advisory control a single
+        point of failure that anyone who can degrade a second vendor could pull.
+        """
+        if self._challenger is None:
+            return None
+        try:
+            raw = await asyncio.wait_for(
+                self._challenger.review(briefing, move),
+                timeout=self._challenge_policy.timeout_seconds,
+            )
+            return validate_ruling(raw)
+        except ValidationError as exc:
+            return self._unanswered(
+                f"the challenger returned no valid verdict ({validation_detail(exc)})"
+            )
+        except TimeoutError:
+            return self._unanswered(
+                f"the challenger did not answer within {self._challenge_policy.timeout_seconds:g}s"
+            )
+        except Exception as exc:
+            return self._unanswered(f"the challenger raised {type(exc).__name__}")
+
+    def _unanswered(self, detail: str) -> ChallengerRuling:
+        """What is recorded when the challenger did not produce a verdict."""
+        if self._challenge_policy.on_failure is ChallengerFailureMode.REFUSE:
+            return ChallengerRuling(
+                verdict=ChallengerVerdict.INSUFFICIENT_EVIDENCE,
+                reason=f"{detail}; this deployment refuses an unchallenged move",
+            )
+        return failure_ruling(f"{detail}; the move was NOT challenged")
 
     # -- move validation ------------------------------------------------------
 
@@ -401,10 +585,18 @@ class PilotMediator:
 
     @staticmethod
     def _raw_kind(raw: object) -> str:
+        """What the pilot called its move, for the refusal record. Never trusted, always bounded.
+
+        ``Mapping`` and not ``dict``: a parser that returned an immutable mapping — the natural
+        shape for untrusted data — would otherwise fall through to ``"unknown"`` and quietly
+        degrade every refusal record in the transcript, which is a direct hit on invariant 11.
+        The value is stringified and capped because it is pilot-authored text on its way to the
+        hash-chained audit trail.
+        """
         if isinstance(raw, BaseModel):
-            return str(getattr(raw, "kind", "unknown"))
-        if isinstance(raw, dict):
-            return str(raw.get("kind", "unknown"))
+            return str(getattr(raw, "kind", "unknown"))[:64]
+        if isinstance(raw, Mapping):
+            return str(raw.get("kind", "unknown"))[:64]
         return "unknown"
 
     @staticmethod
@@ -652,7 +844,15 @@ class PilotMediator:
                     entity_ids.append(eid)
 
         entities: list[EntityView] = []
-        for eid in entity_ids[:MAX_BRIEFING_ENTITIES]:
+        # The cap counts entities the pilot is actually shown, not entities considered. It used
+        # to slice `entity_ids` before the disclosure filter below, so internal-class nodes
+        # consumed cap slots and were then dropped — an investigation that surfaced fifty
+        # personas would have briefed the pilot on nothing at all while reporting a full
+        # briefing. Filtering first is also the safe direction: the filter still runs on every
+        # candidate, and only the *count* changed.
+        for eid in entity_ids:
+            if len(entities) >= MAX_BRIEFING_ENTITIES:
+                break
             entity = await self._graph.get_entity(eid)
             if entity is None:
                 continue
@@ -756,8 +956,11 @@ class PilotMediator:
         pilot: AutonomousPilot,
         pilot_actor: str,
         investigation: Investigation,
+        identity: ProviderIdentity | None,
         move: PilotMove | None,
         ruling: Ruling,
+        metadata: PilotResponseMetadata | None = None,
+        challenge: ChallengerRuling | None = None,
     ) -> None:
         inputs = {
             "pilot": pilot.name,
@@ -765,6 +968,7 @@ class PilotMediator:
             "status": ruling.status.value,
             "reason": ruling.reason[:400],
         }
+        inputs |= self._attribution(identity, metadata)
         if ruling.effect_outcome:
             inputs["effect_outcome"] = ruling.effect_outcome
         if ruling.recorded_claim_id:
@@ -772,6 +976,10 @@ class PilotMediator:
         if isinstance(move, RequestEffect):
             inputs["operation"] = move.operation.value
             inputs["target_entity"] = move.entity_id
+        if challenge is not None:
+            inputs["challenger"] = self._challenger.name[:128] if self._challenger else ""
+            inputs["challenger_verdict"] = challenge.verdict.value
+            inputs["challenger_reason"] = challenge.reason[:400]
         await self._audit.record(
             AuditEvent(
                 audit_id=new_id(IdPrefix.AUDIT),
@@ -785,15 +993,51 @@ class PilotMediator:
             )
         )
 
+    def _attribution(
+        self, identity: ProviderIdentity | None, metadata: PilotResponseMetadata | None
+    ) -> dict[str, str]:
+        """Who drove and what the call cost, in the shape an audit record can carry.
+
+        Two rules, and the first is the load-bearing one.
+
+        **The identity wins.** ``provider``, ``model`` and ``seat`` come from what was read at
+        session open and are written *after* the per-turn fields, so a metadata block claiming a
+        different vendor cannot rewrite attribution mid-session. A comparison between providers
+        is worth exactly what the field distinguishing them is worth, and that field must not be
+        re-assertable per turn by the party being compared.
+
+        **Nothing here decides anything.** Latency, token counts and the attempt count are
+        recorded because a session has to be explainable and a benchmark has to be able to say
+        what a run cost. No ruling reads them. A seat that lied in every one would produce a
+        misleading record and never an action that should not have happened.
+
+        ``attempts`` in particular closes a gap this file's own prose had opened: a seat that
+        retries a failing vendor three times inside one ``propose`` used to collapse into one
+        audit event that said nothing about it, while the comment above claimed there was
+        "never a silent retry". Now the record says how many there were.
+        """
+        fields: dict[str, str] = {}
+        if metadata is not None:
+            fields |= metadata.audit_fields()
+        if identity is not None:
+            fields["provider"] = identity.provider[:64]
+            fields["model"] = identity.model[:128]
+            fields["seat"] = identity.seat[:64]
+        return fields
+
     async def _record_session(
         self,
         pilot: AutonomousPilot,
         pilot_actor: str,
         investigation: Investigation,
+        identity: ProviderIdentity | None,
         *,
         outcome: str,
         extra: dict[str, str],
     ) -> None:
+        inputs = {"pilot": pilot.name, **extra} | self._attribution(identity, None)
+        if self._challenger is not None:
+            inputs["challenger"] = self._challenger.name[:128]
         await self._audit.record(
             AuditEvent(
                 audit_id=new_id(IdPrefix.AUDIT),
@@ -803,7 +1047,7 @@ class PilotMediator:
                 action="pilot.session",
                 subject=investigation.investigation_id,
                 outcome=outcome,
-                inputs={"pilot": pilot.name, **extra},
+                inputs=inputs,
             )
         )
 

@@ -37,6 +37,7 @@ SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 ]
 
 NETWORK_MODULES = {
+    # Transports.
     "socket",
     "http",
     "httpx",
@@ -44,11 +45,36 @@ NETWORK_MODULES = {
     "urllib",
     "urllib3",
     "aiohttp",
+    "websockets",
     "ftplib",
     "telnetlib",
     "smtplib",
     "paramiko",
     "scapy",
+    # Model-vendor SDKs. Each of these carries a full HTTP stack behind a name that does not
+    # look like one, and an audit of the multi-provider pilot work found the omission: the
+    # scan refused `urllib` in the pilot plane and would have waved `import openai` straight
+    # past it. A vendor SDK in a seat is exactly how invariant 15 ends without anything going
+    # red — and the refactor that adds five providers is precisely what makes reaching for one
+    # tempting, because every vendor documents their client on the first page.
+    "openai",
+    "anthropic",
+    "google",
+    "google_genai",
+    "googleapiclient",
+    "vertexai",
+    "ollama",
+    "cohere",
+    "mistralai",
+    "groq",
+    "together",
+    "replicate",
+    "litellm",
+    "boto3",
+    "botocore",
+    "azure",
+    "transformers",
+    "vllm",
 }
 
 # Only the collection plane may reach the network, and only with an explicit marker.
