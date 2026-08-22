@@ -259,10 +259,15 @@ class EnvelopeSpec(BaseModel):
             OperationClass.ASSET_FREEZE_REQUEST,
         }
     )
-    effect_budget: int = Field(default=3, ge=0, le=64)
+    effect_budget: int = Field(default=5, ge=0, le=64)
     """Each scenario gets its own envelope and its own budget. A comparison harness that shared
     one across providers would let a provider whose requests are malformed spend the autonomy
-    the next provider was supposed to be measured on."""
+    the next provider was supposed to be measured on.
+
+    Five rather than three, so a single session can reach every refusal the envelope has: the
+    budget is debited before execution and never refunded, so a smaller one exhausts itself on
+    the first few requests and the later controls are never reached. An adversarial review found
+    exactly that hiding a structurally unfireable property."""
 
 
 class BenchScenario(BaseModel):
