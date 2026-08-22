@@ -66,6 +66,8 @@ from nemesis.attribute.dimensions import AttributionDimension, DimensionAssessme
 from nemesis.audit.trail import AppendOnlyAuditTrail, ChainVerification
 from nemesis.core.confidence import ConfidenceBand, Opinion
 from nemesis.evidence.vault import FileSystemEvidenceVault, FileSystemVaultIntegrityReport
+from nemesis.pilot.providers.schema import MOVE_TOOL_NAMES
+from nemesis.pilotbench.runner import BenchSubject
 from nemesis.slice.scenario import (
     STAGE_NAMES,
     AttributionStage,
@@ -853,6 +855,206 @@ def _verify_audit(path: Path) -> ChainVerification:
 
 
 __all__ = ["app", "render"]
+
+
+@app.command()
+def providers() -> None:
+    """List the model providers this build can seat, and what a deployment must supply.
+
+    Never prints a credential and never reads one: a provider entry carries the *name* of an
+    environment variable, and the variable is read by whatever transport a deployment wires,
+    outside this package entirely.
+    """
+    from nemesis.pilot.providers.registry import PROVIDERS
+
+    console = Console()
+    _heading(console, "PILOT PROVIDERS")
+    table = _table("provider", "credential variable", "declared capabilities")
+    for name in sorted(PROVIDERS):
+        spec = PROVIDERS[name]
+        table.add_row(
+            Text(name),
+            Text(spec.api_key_environment_variable or "— (local inference)"),
+            Text(", ".join(sorted(c.value for c in spec.capabilities.declared))),
+        )
+    console.print(table)
+
+    _heading(console, "WHAT EACH ONE DOES DIFFERENTLY")
+    for name in sorted(PROVIDERS):
+        spec = PROVIDERS[name]
+        if spec.notes:
+            console.print(Text(f"  {name}", style="bold"))
+            console.print(Text(f"    {spec.notes}", style="dim"))
+
+    console.print()
+    console.print(
+        Panel(
+            Text(
+                "A declared capability decides whether a PARAMETER is sent — a reasoning level, "
+                "a seed, a usage report. It is never a permission. What a pilot may do is the "
+                "four verbs and the pre-signed envelope, and nothing in this table can reach "
+                "either: a model that supports computer use is not a model NEMESIS grants it "
+                "to, and a test scans every provider's rendered request to keep it that way.",
+                style="dim",
+            ),
+            title="model capability is not NEMESIS authorization",
+            border_style="yellow",
+        )
+    )
+
+
+@app.command(name="pilot-preview")
+def pilot_preview(
+    provider: Annotated[str, typer.Option(help="Registry key: openai, anthropic, xai, ...")],
+    model: Annotated[str, typer.Option(help="The model id, as the provider names it.")],
+    reasoning: Annotated[
+        str | None, typer.Option(help="Reasoning effort where the provider offers one.")
+    ] = None,
+) -> None:
+    """Print exactly what would be transmitted to a vendor, without transmitting anything.
+
+    A hosted pilot sends every briefing to a third party, and whether CTI data may transit a
+    model vendor is a decision the founder owns rather than one this code makes. A decision like
+    that should be made by reading what leaves, not by imagining it — so this builds a real
+    briefing from the reference scenario, composes the real request the chosen seat would send,
+    scans it for internal-classified material, and prints it. Nothing here opens a socket.
+    """
+    import asyncio
+    import json
+
+    from nemesis.core.disclosure import scan_for_internal_material
+    from nemesis.pilot.providers.config import PilotConfig
+    from nemesis.pilot.providers.registry import UnknownProviderError, build_pilot
+    from nemesis.pilotbench.corpus import BASELINE
+    from nemesis.pilotbench.harness import run_scenario
+    from nemesis.pilotbench.pilots import ScriptedBenchPilot
+
+    console = Console()
+    try:
+        config = PilotConfig.model_validate(
+            {"provider": provider, "model": model, "reasoning": reasoning}
+        )
+        seat = build_pilot(config)
+    except (UnknownProviderError, ValueError) as refusal:
+        console.print(Text(str(refusal), style="bold red"))
+        raise typer.Exit(code=2) from refusal
+
+    captured: list[object] = []
+
+    def capture(briefing: object, turn: int) -> object:
+        from nemesis.pilot.moves import Conclude
+
+        captured.append(briefing)
+        return Conclude(summary="captured the briefing")
+
+    asyncio.run(run_scenario(BASELINE, ScriptedBenchPilot("preview", capture)))  # type: ignore[arg-type]
+    briefing = captured[0]
+    payload = seat.build_payload(briefing)  # type: ignore[arg-type]
+    rendered = json.dumps(payload, indent=2, sort_keys=True, default=str)
+
+    _heading(console, "WHAT WOULD LEAVE")
+    _field(console, "provider", seat.identity.provider)
+    _field(console, "model", seat.identity.model)
+    _field(console, "seat", seat.identity.seat)
+    _field(console, "bytes", str(len(rendered)))
+    _field(console, "tools offered", ", ".join(sorted(MOVE_TOOL_NAMES)))
+
+    leaked = scan_for_internal_material({"request": rendered})
+    _field(
+        console,
+        "internal-class material",
+        "none detected" if not leaked else "; ".join(leaked),
+        style="green" if not leaked else "bold red",
+    )
+
+    _heading(console, "THE REQUEST")
+    console.print(Text(rendered))
+    console.print()
+    console.print(
+        Panel(
+            Text(
+                "Nothing was sent. This is the request the seat composes from the briefing the "
+                "mediator already minimized to deliverable-class material — the filter keys on "
+                "entity TYPE, so it bounds classified material and not personal material: a "
+                "domain whose name happens to be a person's is DELIVERABLE by type and appears "
+                "verbatim. Read it before deciding whether this may transit a vendor.",
+                style="dim",
+            ),
+            title="REQUIRES_EXTERNAL_DATA — no transport is wired",
+            border_style="yellow",
+        )
+    )
+
+
+@app.command()
+def pilotbench(
+    providers_csv: Annotated[
+        str | None,
+        typer.Option(
+            "--providers",
+            help="Comma-separated provider keys to benchmark. Omitted, the offline "
+            "reference pilots run instead.",
+        ),
+    ] = None,
+    model: Annotated[
+        str | None, typer.Option(help="Model id, used for every provider named above.")
+    ] = None,
+    scenario: Annotated[str | None, typer.Option(help="Run one scenario only, by id.")] = None,
+) -> None:
+    """Run the NEMESIS pilot benchmark and print it, caveats first.
+
+    With no `--providers`, five deterministic reference pilots run — each written to fail in a
+    specific known way — so the scoring itself is exercised without an API key and without
+    contacting anything. Naming providers builds real seats through the registry; without a
+    wired transport each one refuses, which is itself the demonstration that a provider failure
+    cannot weaken policy enforcement.
+
+    Exits non-zero only if a control-plane property failed. A poor score against the corpus is
+    information, not a build break: the corpus's assumptions are ours rather than the world's.
+    """
+    from nemesis.pilotbench import DEFAULT_CORPUS, run_pilotbench, scenario_by_id
+
+    console = Console()
+    try:
+        scenarios = (scenario_by_id(scenario),) if scenario else DEFAULT_CORPUS
+    except KeyError as unknown:
+        console.print(Text(str(unknown), style="bold red"))
+        raise typer.Exit(code=2) from unknown
+
+    subjects = None
+    if providers_csv:
+        if not model:
+            console.print(
+                Text(
+                    "--providers needs --model; a provider without a model is not a pilot",
+                    style="bold red",
+                )
+            )
+            raise typer.Exit(code=2)
+        subjects = tuple(
+            _bench_subject(name.strip(), model) for name in providers_csv.split(",") if name.strip()
+        )
+
+    report = run_pilotbench(subjects, scenarios=scenarios)
+    console.print(report.render(), highlight=False)
+
+    if not report.properties_hold:
+        console.print()
+        console.print(
+            "[bold red]A control-plane property did not hold.[/] "
+            "These do not depend on the corpus's assumptions, and this is the one result here "
+            "that is a build break."
+        )
+        raise typer.Exit(code=1)
+
+
+def _bench_subject(provider: str, model: str) -> BenchSubject:
+    """Build a benchmark subject for one provider, deferring construction to run time."""
+    from nemesis.pilot.providers.config import PilotConfig
+    from nemesis.pilot.providers.registry import build_pilot
+
+    config = PilotConfig(provider=provider, model=model)
+    return BenchSubject(build=lambda: build_pilot(config), provider=provider, model=model)
 
 
 @app.command()
