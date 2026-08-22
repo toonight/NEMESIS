@@ -152,7 +152,11 @@ def test_the_request_is_built_only_from_the_briefing() -> None:
     request = build_request(_briefing(), model="claude-cyber")
 
     assert request["model"] == "claude-cyber"
-    assert request["tool_choice"] == {"type": "any"}
+    # `disable_parallel_tool_use` was added when the seam grew to five providers: exactly one
+    # action per turn, asked for at the vendor as well as enforced at the parser. Taking the
+    # first of several requested actions executes one and discards another the model asked for,
+    # and writes a transcript that is wrong about what was proposed.
+    assert request["tool_choice"] == {"type": "any", "disable_parallel_tool_use": True}
     assert request["system"] == SYSTEM_INSTRUCTIONS
     assert {t["name"] for t in request["tools"]} == {
         "run_pivot",
