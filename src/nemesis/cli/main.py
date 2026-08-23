@@ -869,11 +869,18 @@ def _render_collaboration(console: Console, result: CollaborationDemonstration) 
     replies.add_column("intent", style="bold")
     replies.add_column("author verified")
     replies.add_column("authorizes")
+    replies.add_column("what was actually said", overflow="fold")
     for intake in result.intakes:
         replies.add_row(
             intake.intent.value,
             "yes" if intake.author_verified else "no",
             Text("no", style="bold green") if not intake.authorizes else Text("YES", style="red"),
+            # The words, beside the reading. An adversarial review pointed out that this
+            # table showed only the parser's conclusion, so a human authorizer glancing at
+            # it saw "appears to approve" with no way to notice the message said the
+            # opposite. The parser is crude by design and will be wrong again; the reader
+            # is the last line of defence and cannot be one without the text.
+            Text(_excerpt(intake.excerpt), style="dim"),
         )
     console.print(replies)
 
@@ -890,6 +897,14 @@ def _render_collaboration(console: Console, result: CollaborationDemonstration) 
             box=box.ROUNDED,
         )
     )
+
+
+def _excerpt(text: str, limit: int = 90) -> str:
+    """One line of what a reply actually said, for the table beside the parser's reading."""
+    collapsed = " ".join(text.split())
+    if len(collapsed) <= limit:
+        return collapsed
+    return collapsed[: limit - 1] + "…"
 
 
 @app.command()

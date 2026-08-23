@@ -747,10 +747,27 @@ def test_a_channel_message_filter_selects_by_group_rather_than_by_kind_alone() -
         ("ws://localhost:3000/", "ws://127.0.0.1:3000"),
         ("ws://localhost", "ws://127.0.0.1"),
         ("ws://localhost/", "ws://127.0.0.1"),
-        ("ws://[::1]:3000", "ws://127.0.0.1:3000"),
-        ("ws://[::1]:3000/", "ws://127.0.0.1:3000"),
-        ("ws://::1", "ws://127.0.0.1"),
+        # IPv6 loopback is deliberately NOT folded, and this expectation was reversed
+        # after a review read the relay more carefully. The relay's condition is
+        # `host == "localhost" || host == "::1"`, but `host` comes from the url crate's
+        # `host_str()`, which returns IPv6 addresses *inside brackets* — so `[::1]` never
+        # equals `"::1"` and that arm cannot fire. Folding it here would send a tag the
+        # relay normalises to 127.0.0.1 while its own `[::1]` config normalises to
+        # something else, breaking a pair that works without us.
+        ("ws://[::1]:3000", "ws://[::1]:3000"),
+        ("ws://[::1]:3000/", "ws://[::1]:3000"),
+        ("ws://::1", "ws://::1"),
         ("ws://127.0.0.1:3000/", "ws://127.0.0.1:3000"),
+        # Case folding, which the URL parser does and this did not.
+        ("ws://LOCALHOST:3000", "ws://127.0.0.1:3000"),
+        ("wss://LocalHost:3000/", "wss://127.0.0.1:3000"),
+        # Anchored on both sides: a host that merely CONTAINS "localhost" is untouched.
+        # Without the trailing anchor, `ws://localhost.evil.example` became
+        # `ws://127.0.0.1.evil.example`.
+        ("ws://localhost.evil.example:3000", "ws://localhost.evil.example:3000"),
+        ("ws://localhost-relay.example", "ws://localhost-relay.example"),
+        ("ws://mylocalhost.example:3000", "ws://mylocalhost.example:3000"),
+        ("wss://relay.localhost.example", "wss://relay.localhost.example"),
         ("wss://buzz.example.org/", "wss://buzz.example.org"),
         ("wss://buzz.example.org:443", "wss://buzz.example.org:443"),
     ],

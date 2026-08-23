@@ -114,6 +114,20 @@ class LocalCollaborationProvider:
                 ),
             )
 
+        # Reconstruct before writing. A malformed event becomes a refused receipt; a
+        # DisclosureViolationError is a RuntimeError and deliberately propagates, because
+        # material that must not leave is not a delivery outcome to be reported and retried.
+        # See `_revalidated` and `nemesis.core.disclosure.DisclosureViolationError`.
+        try:
+            event = _revalidated(event)
+        except ValueError as exc:
+            return PublicationReceipt(
+                event_id=event.event_id,
+                provider=PROVIDER_NAME,
+                status=PublicationStatus.REFUSED_REJECTED,
+                detail=f"the event does not survive reconstruction: {exc}",
+            )
+
         line = json.dumps(
             {
                 "event_id": event.event_id,
@@ -236,9 +250,46 @@ class LocalCollaborationProvider:
 
     @staticmethod
     def _holds(path: Path, event_id: str) -> bool:
-        needle = f'"event_id":"{event_id}"'
+        """Whether this channel already stored an event with this identifier.
+
+        Parses each line rather than searching it for a substring. The substring form read
+        the whole raw line, so an event whose *summary* quoted another event's identifier
+        could be reported as a duplicate of it — and a duplicate is a success, so the second
+        event would have been silently dropped and its receipt would have said it landed.
+        JSON escaping happened to make that hard to trigger; relying on an escaping rule for
+        a correctness property is exactly the kind of accident this repository writes tests
+        against rather than depends on.
+        """
         with path.open("r", encoding="utf-8") as handle:
-            return any(needle in line for line in handle)
+            for line in handle:
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                try:
+                    stored = json.loads(stripped)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(stored, dict) and stored.get("event_id") == event_id:
+                    return True
+        return False
+
+
+def _revalidated(event: CollaborationEvent) -> CollaborationEvent:
+    """Rebuild the event from its own serialization, so the validators run again.
+
+    ADR-0006's rule, applied at this boundary: act on the object reconstructed from the
+    bytes, never on the object somebody handed you alongside them. It matters here because
+    Pydantic's ``model_copy(update=...)`` and ``model_construct()`` both produce instances
+    **without running validators** — an adversarial review used each to build a
+    ``CollaborationEvent`` classified ``RESTRICTED``, carrying an internal marker, with an
+    ``event_id`` that did not match its content, and the wall that refuses all three at
+    construction never ran.
+
+    Reconstruction closes that at the one place it can be closed: the publisher. A caller
+    can still hold a malformed event in memory; it cannot get it into a channel. The cost is
+    one serialize-and-parse per publication, which is negligible beside the I/O it precedes.
+    """
+    return CollaborationEvent.model_validate(event.model_dump(mode="json"))
 
 
 def _require_safe_key(key: str) -> str:

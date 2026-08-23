@@ -74,6 +74,7 @@ the examined backends enforce (the smallest observed content cap is 64 KiB).
 """
 
 MAX_PAYLOAD_ENTRIES: Final = 32
+MAX_PAYLOAD_KEY_LENGTH: Final = 120
 MAX_PAYLOAD_VALUE_LENGTH: Final = 500
 MAX_REFERENCES: Final = 64
 
@@ -188,11 +189,17 @@ class Reference(BaseModel):
     @model_validator(mode="after")
     def _reject_embedded_separators(self) -> Self:
         for field, value in (("case_id", self.case_id), ("locator", self.locator)):
-            if "/" in value or "://" in value:
+            if any(character in value for character in ("/", "\\", ":")):
                 raise ValueError(
-                    f"{field} must not contain a path separator; a reference is rendered by "
-                    "joining its parts, and a separator inside one of them lets a locator "
-                    "impersonate a different scheme or case"
+                    f"{field} must not contain a path or scheme separator; a reference is "
+                    "rendered by joining its parts, and a separator inside one of them lets "
+                    "a locator impersonate a different scheme or case"
+                )
+            if any(character.isspace() or ord(character) < 0x20 for character in value):
+                raise ValueError(
+                    f"{field} must not contain whitespace or control characters; a rendered "
+                    "reference is a single token a reader is invited to follow, and a "
+                    "newline inside one lets it display as two"
                 )
         return self
 
@@ -273,6 +280,15 @@ class CollaborationEvent(BaseModel):
                 "may be published"
             )
         for key, value in self.payload.items():
+            # Keys are bounded too. An adversarial review found that only values were, so a
+            # single event could carry 32 keys of unbounded length past a check whose whole
+            # purpose is to bound what one publication can move — a guard on one of two
+            # doors, which this repository elsewhere calls out as not a guard.
+            if len(key) > MAX_PAYLOAD_KEY_LENGTH:
+                raise ValueError(
+                    f"payload key {key[:60]!r}… is {len(key)} characters, at most "
+                    f"{MAX_PAYLOAD_KEY_LENGTH} may be published"
+                )
             if len(value) > MAX_PAYLOAD_VALUE_LENGTH:
                 raise ValueError(
                     f"payload[{key!r}] is {len(value)} characters, at most "
@@ -284,14 +300,7 @@ class CollaborationEvent(BaseModel):
                 f"{len(self.references)} references, at most {MAX_REFERENCES} may be published"
             )
 
-        leaked = scan_for_internal_material(
-            {
-                "summary": self.summary,
-                "event_type": self.event_type,
-                "uncertainty_note": self.uncertainty_note,
-                **{f"payload.{key}": value for key, value in self.payload.items()},
-            }
-        )
+        leaked = scan_for_internal_material(self.scannable_surfaces())
         if leaked:
             raise DisclosureViolationError(
                 "internal material reached the collaboration boundary: " + "; ".join(leaked)
@@ -306,6 +315,37 @@ class CollaborationEvent(BaseModel):
                 "deduplication silently wrong"
             )
         return self
+
+    def scannable_surfaces(self) -> dict[str, str]:
+        """Every string this event puts in front of a reader, keyed for the scan report.
+
+        The first version scanned four of nine, and an adversarial review demonstrated the
+        gap by putting an internal marker in ``actor`` and publishing it. The lesson is the
+        one this repository keeps relearning: a guard that covers the fields somebody
+        remembered is a guard against the leaks somebody predicted. So this method
+        enumerates from the model rather than from memory, and
+        :func:`~nemesis.collaboration.events.test-side` coverage asserts that every
+        ``str``-valued field on the model appears here — a new field fails the test rather
+        than escaping the scan.
+
+        Payload **keys** are included, not only values. A key is displayed to a reader
+        exactly as a value is.
+        """
+        surfaces: dict[str, str] = {
+            "case_id": self.case_id,
+            "investigation_id": self.investigation_id,
+            "correlation_id": self.correlation_id,
+            "actor": self.actor,
+            "event_type": self.event_type,
+            "summary": self.summary,
+            "uncertainty_note": self.uncertainty_note,
+        }
+        for key, value in self.payload.items():
+            surfaces[f"payload.key[{key}]"] = key
+            surfaces[f"payload[{key}]"] = value
+        for index, reference in enumerate(self.references):
+            surfaces[f"references[{index}]"] = reference.render()
+        return surfaces
 
     def publication_payload(self) -> Mapping[str, object]:
         """Everything the identifier covers: the whole event except the identifier itself.
@@ -442,6 +482,7 @@ def is_model_derived(claim: Claim) -> bool:
 
 __all__ = [
     "MAX_PAYLOAD_ENTRIES",
+    "MAX_PAYLOAD_KEY_LENGTH",
     "MAX_PAYLOAD_VALUE_LENGTH",
     "MAX_REFERENCES",
     "MAX_SUMMARY_LENGTH",

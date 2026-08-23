@@ -144,6 +144,11 @@ class BuzzCollaborationProvider:
     ) -> PublicationReceipt:
         try:
             self._require_relay_url("publish")
+            # ADR-0006 at this boundary: act on the object reconstructed from the bytes,
+            # never on the one handed to us. `model_copy(update=...)` and
+            # `model_construct()` both skip validators, so an event that never passed the
+            # classification wall can exist in memory — it must not reach a relay.
+            event = CollaborationEvent.model_validate(event.model_dump(mode="json"))
             unsigned = wire.build_collaboration_event(
                 pubkey=self._public_key(),
                 created_at=self._timestamp(),
@@ -297,7 +302,13 @@ class BuzzCollaborationProvider:
             received_at=received_at,
             author_reference=event.pubkey,
             author_verified=False,
-            kind=SignalKind.MESSAGE if envelope is None else SignalKind.DECISION_INTENT,
+            # A message that parses as a NEMESIS envelope is still a MESSAGE. Labelling it
+            # DECISION_INTENT was wrong twice over: the enum's own documentation says that
+            # member means the text looked like agreement or refusal, and an envelope is a
+            # projection NEMESIS published — most likely our own event read back, or a
+            # replay of it. Deciding what a reply means is `ApprovalNotice.intent_from`'s
+            # job, and a provider must not pre-empt it.
+            kind=SignalKind.MESSAGE,
             body=event.content[:8000],
             in_reply_to=event.tag_value("e"),
             metadata=metadata,
@@ -338,10 +349,16 @@ def _classify(outcome: PublishOutcome) -> PublicationStatus:
     one loses the event.
     """
     message = outcome.message.strip().lower()
-    if outcome.accepted:
-        return PublicationStatus.PUBLISHED
+    # The duplicate check comes FIRST, before `accepted`. NIP-01 says a relay acknowledging
+    # an event it already holds answers `OK <id> true` with a `duplicate:` message — it is a
+    # success, so `accepted` is true. Reading `accepted` first labelled that PUBLISHED and
+    # stamped a fresh `published_at`, so a retry after a lost acknowledgement reported a
+    # first publication at the wrong time. The prefix is the only thing that distinguishes
+    # the two, and it is on the success path as well as the failure path.
     if message.startswith(_DUPLICATE_PREFIXES):
         return PublicationStatus.DUPLICATE
+    if outcome.accepted:
+        return PublicationStatus.PUBLISHED
     if message.startswith(_AUTH_PREFIXES):
         return PublicationStatus.REFUSED_UNAUTHENTICATED
     if message.startswith(_REJECTION_PREFIXES):

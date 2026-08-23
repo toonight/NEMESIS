@@ -22,13 +22,24 @@ from __future__ import annotations
 import asyncio
 import importlib
 import pkgutil
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
 import nemesis.collaboration as collaboration_package
-from nemesis.collaboration.approvals import ApprovalNotice, DecisionIntent, read_intents
-from nemesis.collaboration.base import InboundSignal, SignalKind
+from nemesis.collaboration.approvals import (
+    _NEGATION_PATTERN,
+    ApprovalNotice,
+    DecisionIntent,
+    read_intents,
+)
+from nemesis.collaboration.base import (
+    ChannelDescriptor,
+    InboundSignal,
+    PublicationStatus,
+    SignalKind,
+)
 from nemesis.collaboration.events import (
     CollaborationEvent,
     EpistemicStanding,
@@ -37,6 +48,7 @@ from nemesis.collaboration.events import (
     standing_of_claim,
 )
 from nemesis.collaboration.identities import ActorRegistry, RegisteredActor
+from nemesis.collaboration.providers.local import LocalCollaborationProvider
 from nemesis.core.authorization import (
     IRREVERSIBLE_OPERATIONS,
     MVP_IMPLEMENTED_OPERATIONS,
@@ -161,7 +173,7 @@ def test_evidence_travels_as_a_reference_and_the_envelope_cannot_hold_bytes() ->
 
 
 def test_a_reference_cannot_smuggle_a_second_scheme_through_its_locator() -> None:
-    with pytest.raises(ValueError, match="path separator"):
+    with pytest.raises(ValueError, match="separator"):
         Reference(
             scheme=ReferenceScheme.EVIDENCE,
             case_id=CASE,
@@ -318,10 +330,264 @@ def test_an_unparseable_reply_is_recorded_rather_than_discarded() -> None:
     assert [intake.signal_id for intake in intakes] == ["sig-1", "sig-2"]
 
 
+NEGATED_APPROVALS = (
+    "do not approve",
+    "DO NOT APPROVE",
+    "I would not approve this",
+    "never approve",
+    "cannot approve",
+    "don't approve",
+    "hold off, do not approve yet",
+    "we should not approve until legal has looked",
+    # Every phrasing below was reported as APPEARS_TO_APPROVE by a version of this parser
+    # that the eight above already passed. The list is here because the earlier list was
+    # the defect: an invariant test whose cases all fall inside the covered set certifies a
+    # control it never exercised, which is worse than no test at all.
+    "I wouldn't approve this",
+    "I didn't approve this",
+    "we couldn't approve that",
+    "this isn't approved",
+    "this hasn't been approved",
+    "mustn't approve",
+    "shan't approve",
+    "I don\u2019t approve",
+    "under no circumstances approve",
+    "no way should we approve",
+    "approve nothing here",
+    "nope, approve",
+    "approve? absolutely no",
+)
+
+
+def test_the_contraction_branch_of_the_negation_pattern_is_not_dead() -> None:
+    """A regex alternation that can never match is invisible until someone writes its case.
+
+    The second attempt at the negation fix wrote the generic branch as ``\\bn't``, which
+    matches nothing in English: in ``wouldn't`` the ``n`` is preceded by a word character,
+    so the boundary cannot hold. Every test above still passed, because each of them also
+    contained a word from the hard-coded list. This asserts the branch itself.
+    """
+    for contraction in ("wouldn't", "didn't", "couldn't", "isn't", "hasn't", "ain't"):
+        assert _NEGATION_PATTERN.search(contraction), f"{contraction!r} is not caught"
+
+
+def test_a_curly_apostrophe_does_not_defeat_the_negation_guard() -> None:
+    """Slack, iOS and macOS autocorrect all emit U+2019.
+
+    ``don't`` was caught and ``don\u2019t`` was not, so the difference between reading a
+    refusal and reading an approval was an apostrophe codepoint.
+    """
+    notice = _notice()
+    (intake,) = read_intents(
+        notice,
+        [_signal(f"I don\u2019t approve {notice.proposal_digest()}")],
+        now=T0 + timedelta(minutes=10),
+    )
+    assert intake.intent is DecisionIntent.UNCLEAR
+
+
+def test_the_proposal_digest_does_not_depend_on_how_a_time_was_spelled() -> None:
+    """One proposal must have one code.
+
+    ``proposal_digest()`` hashes ``responses_close_at.isoformat()``. An earlier version
+    called ``require_utc`` and discarded its normalised return, so the same instant written
+    ``15:30+02:00`` and ``13:30+00:00`` produced two different codes — and a reply quoting
+    either one matched only half the time.
+    """
+    shared = {
+        "capability_id": new_id(IdPrefix.CAPABILITY),
+        "case_id": CASE,
+        "requested_by": "nemesis-pilot",
+        "requested_by_kind": ActorKind.AGENT,
+        "operation": OperationClass.PROVIDER_NOTIFICATION,
+        "targets": (_target(),),
+        "rationale": "same proposal, two spellings of one instant",
+        "proposed_at": T0,
+    }
+    in_utc = ApprovalNotice(**shared, responses_close_at=datetime(2026, 5, 4, 13, 30, tzinfo=UTC))
+    in_offset = ApprovalNotice(
+        **shared,
+        responses_close_at=datetime(2026, 5, 4, 15, 30, tzinfo=timezone(timedelta(hours=2))),
+    )
+    assert in_utc.proposal_digest() == in_offset.proposal_digest()
+
+
+@pytest.mark.parametrize("phrasing", NEGATED_APPROVALS)
+def test_a_negated_approval_never_reads_as_an_approval(phrasing: str) -> None:
+    """The defect this test exists for, found by attacking the parser rather than reading it.
+
+    The first implementation matched approval tokens by substring containment, so every
+    phrasing above contained ``approve``, matched, and was read as APPEARS_TO_APPROVE — a
+    table saying *appears to approve* beside a message saying the opposite. Nothing acted on
+    it, because a ``DecisionIntake`` authorizes nothing whatever it says. The harm was always
+    going to be a human authorizer glancing at that table and signing.
+
+    The reading is UNCLEAR rather than APPEARS_TO_REJECT on purpose. "Do not approve" reads
+    as refusal to a person, and this is not a person: inferring intent from
+    adversary-reachable prose is precisely what a deliberately crude parser exists to avoid.
+    Mis-reading a refusal as unclear costs a round trip; mis-reading one as approval costs
+    the control.
+    """
+    notice = _notice()
+    (intake,) = read_intents(
+        notice,
+        [_signal(f"{phrasing} {notice.proposal_digest()}")],
+        now=T0 + timedelta(minutes=10),
+    )
+    assert intake.intent is not DecisionIntent.APPEARS_TO_APPROVE
+    assert intake.intent is DecisionIntent.UNCLEAR
+    assert intake.authorizes is False
+
+
+@pytest.mark.parametrize("phrasing", ["unapproved", "disapprove", "disapproved"])
+def test_a_word_merely_containing_approve_does_not_read_as_an_approval(phrasing: str) -> None:
+    """The other half of the same defect: word boundaries, not substrings."""
+    notice = _notice()
+    (intake,) = read_intents(
+        notice,
+        [_signal(f"{phrasing} {notice.proposal_digest()}")],
+        now=T0 + timedelta(minutes=10),
+    )
+    assert intake.intent is not DecisionIntent.APPEARS_TO_APPROVE
+
+
+@pytest.mark.parametrize(
+    ("phrasing", "expected"),
+    [
+        ("APPROVE", DecisionIntent.APPEARS_TO_APPROVE),
+        ("approved", DecisionIntent.APPEARS_TO_APPROVE),
+        ("authorised", DecisionIntent.APPEARS_TO_APPROVE),
+        ("granted", DecisionIntent.APPEARS_TO_APPROVE),
+        ("REJECT", DecisionIntent.APPEARS_TO_REJECT),
+        ("denied", DecisionIntent.APPEARS_TO_REJECT),
+        ("declined", DecisionIntent.APPEARS_TO_REJECT),
+        ("veto", DecisionIntent.APPEARS_TO_REJECT),
+        ("looks fine", DecisionIntent.UNCLEAR),
+    ],
+)
+def test_the_plain_readings_still_read(phrasing: str, expected: DecisionIntent) -> None:
+    """A guard against over-correcting: the negation rule must not swallow ordinary replies."""
+    notice = _notice()
+    (intake,) = read_intents(
+        notice,
+        [_signal(f"{phrasing} {notice.proposal_digest()}")],
+        now=T0 + timedelta(minutes=10),
+    )
+    assert intake.intent is expected
+
+
 def test_an_approval_notice_has_no_field_that_could_hold_a_decision() -> None:
     """A published notice is a question. The answer lives on the signed capability."""
     fields = set(ApprovalNotice.model_fields)
     assert not fields & {"status", "approved_by", "approved_at", "decision", "approval"}
+
+
+# --- 3b. The bypasses an adversarial review demonstrated, each now closed ----------
+
+
+def test_every_string_field_on_the_event_is_scanned_for_internal_material() -> None:
+    """The scan must cover the model, not the fields somebody remembered.
+
+    A review put an internal marker in ``actor`` — unscanned in the first version, along
+    with ``case_id``, ``investigation_id``, ``correlation_id``, payload keys and rendered
+    references — and published it. This derives the expected surface set from the model, so
+    a field added later fails here rather than escaping the scan.
+    """
+    event = _event()
+    scanned = set(event.scannable_surfaces())
+
+    # Free-text fields only. `standing`, `classification` and `actor_kind` are StrEnums —
+    # `str` instances whose values are closed vocabularies, so no marker can reach them —
+    # and `event_id` is a derived digest. Everything else is prose somebody typed.
+    free_text = {
+        name
+        for name in type(event).model_fields
+        if type(getattr(event, name)) is str and name != "event_id"
+    }
+    assert free_text, "the model has no free-text fields, so this test proves nothing"
+    assert free_text <= scanned, f"unscanned free-text fields: {free_text - scanned}"
+
+
+@pytest.mark.parametrize(
+    "field", ["actor", "case_id", "investigation_id", "correlation_id", "event_type"]
+)
+def test_an_internal_marker_in_any_scanned_field_is_refused(field: str) -> None:
+    with pytest.raises(DisclosureViolationError, match="internal material"):
+        _event(**{field: "persona_linkage"})
+
+
+def test_an_internal_marker_in_a_payload_key_is_refused() -> None:
+    """Keys are displayed to a reader exactly as values are."""
+    with pytest.raises(DisclosureViolationError, match="internal material"):
+        _event(payload={"persona_linkage": "x"})
+
+
+def test_a_payload_key_is_bounded_like_a_value() -> None:
+    with pytest.raises(ValueError, match="payload key"):
+        _event(payload={"k" * 500: "v"})
+
+
+@pytest.mark.parametrize("bad", ["a\\b", "a:b", "a b", "a\nb", "a\tb", "../x"])
+def test_a_reference_refuses_every_character_that_could_split_it(bad: str) -> None:
+    """A rendered reference is one token a reader is invited to follow."""
+    with pytest.raises(ValueError):
+        Reference(scheme=ReferenceScheme.EVIDENCE, case_id=CASE, locator=bad)
+
+
+def test_an_event_that_skipped_validation_cannot_be_published(tmp_path: Path) -> None:
+    """The wall is at construction — and Pydantic has two doors around construction.
+
+    ``model_copy(update=...)`` and ``model_construct()`` both produce instances without
+    running validators, and a review used each to build an event classified RESTRICTED and
+    an event carrying an internal marker. Neither is reachable through
+    :meth:`CollaborationEvent.for_publication`, but both exist in the language.
+
+    The publisher therefore rebuilds the event from its own serialization before writing —
+    ADR-0006's rule applied to this boundary: act on the object reconstructed from the
+    bytes, never on the one you were handed. A caller may still hold a malformed event; it
+    cannot get one into a channel.
+    """
+    provider = LocalCollaborationProvider(tmp_path)
+    channel = asyncio.run(provider.open_channel(ChannelDescriptor(key="ops", display_name="Ops")))
+    clean = _event()
+
+    for smuggled in (
+        clean.model_copy(update={"classification": DisclosureClass.RESTRICTED}),
+        clean.model_copy(update={"summary": "shares a persona_linkage with the operator"}),
+        clean.model_copy(update={"actor": "human_identity_lead-bot"}),
+    ):
+        with pytest.raises(DisclosureViolationError):
+            asyncio.run(provider.publish(channel, smuggled))
+
+    forged = CollaborationEvent.model_construct(
+        **{**clean.model_dump(), "event_id": "collab_sha256-" + "00" * 32}
+    )
+    receipt = asyncio.run(provider.publish(channel, forged))
+    assert receipt.status is PublicationStatus.REFUSED_REJECTED
+
+    assert provider.published("ops") == ()
+
+
+def test_an_event_quoting_another_events_identifier_is_not_a_duplicate(
+    tmp_path: Path,
+) -> None:
+    """Deduplication parses the record; it does not search the line for a substring.
+
+    The substring form read the whole raw line, so an event whose summary quoted another
+    event's identifier could be reported DUPLICATE — and a duplicate is a success, so the
+    second event would have been dropped while its receipt said it landed.
+    """
+    provider = LocalCollaborationProvider(tmp_path)
+    channel = asyncio.run(provider.open_channel(ChannelDescriptor(key="ops", display_name="Ops")))
+    first = _event(summary="the first thing")
+    assert asyncio.run(provider.publish(channel, first)).succeeded
+
+    quoting = _event(summary=f'chatter quoting "event_id":"{first.event_id}" verbatim')
+    assert quoting.event_id != first.event_id
+    receipt = asyncio.run(provider.publish(channel, quoting))
+
+    assert receipt.status is PublicationStatus.PUBLISHED
+    assert len(provider.published("ops")) == 2
 
 
 # --- 4. Risk classification agrees with what the code enforces ---------------------

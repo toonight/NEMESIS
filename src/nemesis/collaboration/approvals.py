@@ -46,7 +46,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Annotated, Final, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
 from nemesis.collaboration.base import InboundSignal
 from nemesis.collaboration.events import (
@@ -75,8 +75,63 @@ what a person mistyping a code could hit, and short enough to read aloud.
 
 _DIGEST_PATTERN: Final = re.compile(rf"\b([0-9a-f]{{{PROPOSAL_DIGEST_LENGTH}}})\b")
 
-_APPROVE_TOKENS: Final = ("approve", "approved", "authorize", "authorise", "grant")
-_REJECT_TOKENS: Final = ("reject", "rejected", "deny", "denied", "refuse", "refused", "no-go")
+_APPROVE_PATTERN: Final = re.compile(r"\b(approve[ds]?|authori[sz]e[ds]?|grant(?:ed)?)\b")
+_REJECT_PATTERN: Final = re.compile(
+    r"\b(reject(?:ed)?|den(?:y|ied)|refuse[ds]?|decline[ds]?|no-?go|veto(?:ed)?)\b"
+)
+"""Whole-word matching, and the word boundaries are the fix rather than a tidy-up.
+
+The first version used plain substring containment, and two English words defeated it
+immediately: ``unapproved`` and ``disapprove`` both contain ``approve``, so a message saying
+the exact opposite of approval was read as approval. Both are now excluded by ``\\b``, and a
+test constructs each.
+"""
+
+_APOSTROPHES: Final = str.maketrans({"\u2019": "'", "\u2018": "'", "\u02bc": "'"})
+"""Curly apostrophes folded to the ASCII one before any matching.
+
+Slack, iOS and macOS autocorrect all emit U+2019. Without this, ``don't`` was caught and
+``don\u2019t`` — the form a person actually types on a phone — was not, so the difference
+between reading a refusal and reading an approval was an apostrophe codepoint.
+"""
+
+_NEGATION_PATTERN: Final = re.compile(
+    r"\w*n't\b|\b(?:not|no|nope|nah|none|nothing|nobody|never|neither|nor|cannot|"
+    r"wont|dont|cant|unable|without|hold|wait|pause|unless|abstain|refrain|"
+    r"blocked|blocking|objection)\b"
+)
+"""Words whose presence means an approval reading is no longer safe.
+
+This is the second half of the same defect, and the more dangerous half, because no word
+boundary catches it: ``do not approve <digest>`` contains an approval token, matched it, and
+was read as ``APPEARS_TO_APPROVE``. So did ``never approve``, ``cannot approve`` and ``I
+would not approve this``. Nothing acted on that reading — a `DecisionIntake` authorizes
+nothing whatever it says — but the harm was never going to be a machine acting on it. It was
+a human authorizer glancing at a table that said *appears to approve* beside a message that
+said the opposite, and signing.
+
+Contractions are matched generically as ``\\w*n't``, not by a hard-coded list, and this
+took two attempts to get right — both failures the same shape as the original defect, one
+layer up. The first listed ``don't``, ``won't``, ``doesn't`` and ``shouldn't``, and a review
+produced ``couldn't``, ``mustn't`` and ``shan't`` immediately. The second wrote the generic
+branch as ``\\bn't``, which cannot fire at all: in ``wouldn't`` the ``n`` is preceded by a
+word character, so the boundary never holds. ``\\w*n't\\b`` is the form that works, and a test
+asserts directly that it matches ``wouldn't`` — because a dead alternation in a regex is
+invisible until someone writes the case it was supposed to catch.
+
+A deliberate consequence, stated rather than discovered: bare ``no`` is a negation, so
+"approved, no concerns" now reads as ``UNCLEAR``. That is the asymmetry below, applied.
+
+The response is deliberately blunt and deliberately asymmetric. A negation anywhere in the
+message makes ``APPEARS_TO_APPROVE`` unreachable; it does **not** promote the message to
+``APPEARS_TO_REJECT``, because "do not approve" reads as refusal to a person and this is not
+a person — inferring intent from adversary-reachable prose is the exact thing a crude parser
+exists to avoid doing. The message becomes :attr:`DecisionIntent.UNCLEAR`, its text is kept
+verbatim in the intake, and a human reads it.
+
+The asymmetry is the point. Mis-reading a refusal as unclear costs a round trip. Mis-reading
+a refusal as approval costs the control.
+"""
 
 
 class DecisionIntent(StrEnum):
@@ -150,13 +205,20 @@ class ApprovalNotice(BaseModel):
     policy already refuses is a question worth showing, because the answer is no and the
     request itself is a signal."""
 
-    responses_close_at: datetime
-    proposed_at: datetime
+    responses_close_at: Annotated[
+        datetime, AfterValidator(lambda v: require_utc(v, "responses_close_at"))
+    ]
+    proposed_at: Annotated[datetime, AfterValidator(lambda v: require_utc(v, "proposed_at"))]
+    """Both normalised to UTC on the way in, and the normalisation is load-bearing.
+
+    :meth:`proposal_digest` hashes ``responses_close_at.isoformat()``. A first version called
+    ``require_utc`` inside the model validator and discarded its return value, so a notice
+    built with ``15:30+02:00`` kept that offset and digested differently from the identical
+    instant written ``13:30+00:00`` — two codes for one proposal, and a reply quoting either
+    one matching only half the time."""
 
     @model_validator(mode="after")
     def _enforce_notice_rules(self) -> Self:
-        require_utc(self.responses_close_at, "responses_close_at")
-        require_utc(self.proposed_at, "proposed_at")
         if self.responses_close_at <= self.proposed_at:
             raise ValueError(
                 "responses_close_at must be after proposed_at; a proposal that is closed "
@@ -286,18 +348,22 @@ class ApprovalNotice(BaseModel):
         if now >= self.responses_close_at:
             return DecisionIntent.REFUSED_EXPIRED
 
-        body = signal.body.lower()
+        body = signal.body.lower().translate(_APOSTROPHES)
         if not _matches_digest(body, self.proposal_digest()):
             return DecisionIntent.UNCLEAR
 
-        approves = any(token in body for token in _APPROVE_TOKENS)
-        rejects = any(token in body for token in _REJECT_TOKENS)
+        approves = _APPROVE_PATTERN.search(body) is not None
+        rejects = _REJECT_PATTERN.search(body) is not None
+        negated = _NEGATION_PATTERN.search(body) is not None
+
         if approves and rejects:
             return DecisionIntent.REFUSED_CONFLICTING
         if rejects:
             return DecisionIntent.APPEARS_TO_REJECT
-        if approves:
+        if approves and not negated:
             return DecisionIntent.APPEARS_TO_APPROVE
+        # An approval token under a negation, or no decision token at all. Both are the same
+        # answer: this did not read as a decision, and a person should look at it.
         return DecisionIntent.UNCLEAR
 
 

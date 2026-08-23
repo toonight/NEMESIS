@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import uuid
 from collections.abc import Mapping, Sequence
 from typing import Annotated, Final, Self
@@ -407,17 +408,46 @@ def parse_collaboration_event(nostr_event: NostrEvent) -> CollaborationEvent | N
 
 
 def normalize_relay_url(url: str) -> str:
-    """Normalise a relay URL the way the relay does before comparing it.
+    """Fold a relay URL the way the relay folds it, before putting it in a NIP-42 tag.
 
-    The relay folds ``localhost`` and ``::1`` to ``127.0.0.1`` and strips a trailing slash
-    before comparing the NIP-42 ``relay`` tag. A client that does not do the same sends a
-    tag that looks correct to a human and fails the comparison, surfacing as the generic
-    ``auth-required: verification failed``.
+    The relay parses both its own configured URL *and* the client's ``relay`` tag through
+    the same normaliser (``crates/buzz-auth/src/nip42.rs``), so a client that sends an
+    un-normalised but equivalent URL still matches. This function is therefore defensive
+    alignment rather than a correctness requirement — an earlier version of this docstring
+    claimed a client skipping it would fail the handshake, which the relay's own
+    double-normalisation makes false. What it buys is a legible tag and a local answer
+    instead of the relay's generic ``auth-required: verification failed``, which names no
+    field.
+
+    **Only ``localhost`` is folded, and the exclusion of IPv6 is deliberate.** The relay's
+    code reads ``if host == "localhost" || host == "::1"``, but it takes ``host`` from the
+    ``url`` crate's ``host_str()``, which returns IPv6 addresses *inside brackets* — so
+    ``[::1]`` never equals ``"::1"`` and the second arm cannot fire. Folding ``[::1]`` here
+    would therefore produce a tag the relay normalises to ``127.0.0.1`` while normalising
+    its own configured ``[::1]`` URL to something else, and the handshake would fail on a
+    pair that works without us. Buzz's own tests cover only the ``localhost`` case and the
+    trailing slash, so this reading rests on the ``url`` crate's documented bracket
+    behaviour rather than on an executed Rust test: **not independently confirmed**, and
+    recorded that way rather than asserted.
+
+    The host match is anchored on both sides — ``//`` before, and ``:``, ``/`` or
+    end-of-string after — and folded case-insensitively to match the URL parser, which
+    lowercases hosts. Both halves were defects: without the trailing anchor
+    ``ws://localhost.evil.example`` became ``ws://127.0.0.1.evil.example``, and without case
+    folding ``ws://LOCALHOST:3000`` passed through untouched.
+
+    Scheme and path are left exactly as given. This is not a URL parser and must not pretend
+    to be one.
     """
     trimmed = url.rstrip("/")
-    for host in ("localhost", "[::1]", "::1"):
-        trimmed = trimmed.replace(f"//{host}:", "//127.0.0.1:").replace(f"//{host}", "//127.0.0.1")
-    return trimmed
+    match = _LOCALHOST_AUTHORITY.search(trimmed)
+    if match is None:
+        return trimmed
+    return trimmed[: match.start(1)] + "127.0.0.1" + trimmed[match.end(1) :]
+
+
+_LOCALHOST_AUTHORITY: Final = re.compile(r"//(localhost)(?=[:/]|$)", re.IGNORECASE)
+"""Matches only a whole ``localhost`` authority, never a host that merely starts with it."""
 
 
 __all__ = [

@@ -135,7 +135,19 @@ class CircuitBreaker:
         self._opened_at: datetime | None = None
 
     def allows(self, now: datetime) -> bool:
-        """Whether a call may be attempted. Closes the circuit when the cool-down expires."""
+        """Whether a call may be attempted, closing the circuit if the cool-down has passed.
+
+        This mutates, and the name does not say so — which a review flagged, correctly, as a
+        query with a side effect. It is kept because the alternative is worse: a pure
+        ``allows()`` plus a separate ``tick()`` means every caller must remember to call
+        both, and a caller that forgets leaves the circuit open forever with no symptom but
+        silence. The transition is idempotent and monotonic — it only ever closes an expired
+        circuit, never opens one — so calling it twice, or with an older ``now``, cannot
+        produce a state a single call would not have produced.
+
+        :meth:`is_open` is the pure reader for anyone who needs the state without advancing
+        it.
+        """
         require_utc(now, "now")
         if self._opened_at is None:
             return True
@@ -270,6 +282,14 @@ class Outbox:
                 return None
 
             record = records[index]
+            if record.state.is_terminal:
+                # A settled record is settled. Without this, a late or duplicated receipt —
+                # two publisher loops, a retry that raced its own acknowledgement — demoted a
+                # DELIVERED record to DEAD_LETTER, and the outbox then reported an event as
+                # lost that it had in fact delivered. Returning the record unchanged makes a
+                # late receipt a no-op rather than a regression.
+                return record
+
             attempts = record.attempts + 1
 
             if receipt.succeeded:
