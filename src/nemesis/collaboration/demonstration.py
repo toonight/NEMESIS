@@ -31,7 +31,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Final
 
-from nemesis.collaboration.approvals import ApprovalNotice, DecisionIntake, read_intents
+from nemesis.collaboration.approvals import ApprovalNotice, DecisionIntake
 from nemesis.collaboration.base import (
     ChannelDescriptor,
     ChannelHandle,
@@ -48,9 +48,11 @@ from nemesis.collaboration.events import (
 from nemesis.collaboration.identities import STANDING_ACTORS, ActorRegistry
 from nemesis.collaboration.outbox import Outbox
 from nemesis.collaboration.providers.local import LocalCollaborationProvider
+from nemesis.collaboration.publisher import ACTION_PUBLISH, CollaborationPublisher
 from nemesis.core.authorization import OperationClass, TargetFingerprint
 from nemesis.core.identity import ActorKind
 from nemesis.core.ids import IdPrefix, content_id, new_id
+from nemesis.ports.storage import AuditEvent, PublicationRecorder
 
 T0: Final = datetime(2026, 5, 4, 9, 30, tzinfo=UTC)
 """A fixed instant. The demonstration is deterministic apart from the identifiers minted for
@@ -92,6 +94,18 @@ class CollaborationDemonstration:
     intakes: tuple[DecisionIntake, ...]
     outbox_pending: int
     outbox_dead_letters: int
+    audit_entries: tuple[AuditEvent, ...]
+    """Every entry the run wrote, so a test can assert the trail rather than trust it.
+
+    The demonstration used to publish without recording anything, which made "all meaningful
+    actions are auditable" (invariant 11) true of every plane except the one that talks to
+    the outside. Carrying the entries out is what lets a test count them against the
+    publications instead of reading a docstring that says they match."""
+
+    @property
+    def publication_entries(self) -> tuple[AuditEvent, ...]:
+        """The audit entries that record a publication attempt, refusals included."""
+        return tuple(entry for entry in self.audit_entries if entry.action == ACTION_PUBLISH)
 
     @property
     def published(self) -> int:
@@ -138,9 +152,16 @@ class CollaborationDemonstration:
 
 
 async def run_collaboration_demonstration(
-    *, workspace: Path | None = None
+    *, workspace: Path | None = None, recorder: PublicationRecorder | None = None
 ) -> CollaborationDemonstration:
-    """Run the flow. Synthetic throughout; contacts nothing."""
+    """Run the flow. Synthetic throughout; contacts nothing.
+
+    ``recorder`` is injected because :mod:`nemesis.collaboration` cannot import
+    :mod:`nemesis.audit` — the layering forbids it and a contract names the package. A
+    caller that has an ``AppendOnlyAuditTrail`` passes it and gets a hash-chained record;
+    the default is an in-memory collector, so the demonstration runs and is assertable with
+    no filesystem trail. Either way the plane sees one write-only method.
+    """
     root = (
         Path(workspace)
         if workspace is not None
@@ -148,13 +169,22 @@ async def run_collaboration_demonstration(
     )
     provider = LocalCollaborationProvider(root / "collaboration", clock=lambda: T0)
     outbox = Outbox(root / "outbox.jsonl")
+    collector = _CollectingRecorder(recorder)
+    publisher = CollaborationPublisher(
+        provider=provider,
+        outbox=outbox,
+        recorder=collector,
+        actor="nemesis-collaboration-publisher",
+        actor_kind=ActorKind.SYSTEM,
+        clock=lambda: T0,
+    )
 
     registry = ActorRegistry(provider.name)
     for index, actor in enumerate(STANDING_ACTORS.values()):
-        await provider.bind_actor(registry.enrol(actor, f"npub-fixture-{index:02d}"))
+        await publisher.bind_actor(registry.enrol(actor, f"npub-fixture-{index:02d}"))
 
     channels = (
-        await provider.open_channel(
+        await publisher.open_channel(
             ChannelDescriptor(
                 key=OPS_CHANNEL,
                 display_name="NEMESIS operations",
@@ -162,7 +192,7 @@ async def run_collaboration_demonstration(
                 visibility=ChannelVisibility.RESTRICTED,
             )
         ),
-        await provider.open_channel(
+        await publisher.open_channel(
             ChannelDescriptor(
                 key=CASE_CHANNEL,
                 display_name="Case 2026-000123",
@@ -171,7 +201,7 @@ async def run_collaboration_demonstration(
                 case_id=CASE_ID,
             )
         ),
-        await provider.open_channel(
+        await publisher.open_channel(
             ChannelDescriptor(
                 key=APPROVALS_CHANNEL,
                 display_name="Approvals",
@@ -294,10 +324,7 @@ async def run_collaboration_demonstration(
 
     published: list[CollaborationEvent] = []
     for channel, event in ladder:
-        outbox.enqueue(event, channel_key=channel.key, provider=provider.name, now=T0)
-        receipt = await provider.publish(channel, event)
-        outbox.settle(receipt, now=T0)
-        receipts.append(receipt)
+        receipts.append(await publisher.publish(channel, event))
         published.append(event)
 
     # --- the approval request ---------------------------------------------------------
@@ -336,10 +363,7 @@ async def run_collaboration_demonstration(
         actor="nemesis-authorization",
         actor_kind=ActorKind.SYSTEM,
     )
-    outbox.enqueue(notice_event, channel_key=approvals.key, provider=provider.name, now=T0)
-    notice_receipt = await provider.publish(approvals, notice_event)
-    outbox.settle(notice_receipt, now=T0)
-    receipts.append(notice_receipt)
+    receipts.append(await publisher.publish(approvals, notice_event))
     published.append(notice_event)
 
     # --- what came back ---------------------------------------------------------------
@@ -381,8 +405,9 @@ async def run_collaboration_demonstration(
     for reply in replies:
         provider.deliver_inbound(approvals.key, reply)
 
-    signals = await provider.poll(approvals, since=T0)
-    intakes = read_intents(notice, signals, now=T0 + timedelta(minutes=45))
+    intakes = await publisher.read_decisions(
+        approvals, notice, since=T0, now=T0 + timedelta(minutes=45)
+    )
 
     return CollaborationDemonstration(
         workspace=root,
@@ -394,7 +419,30 @@ async def run_collaboration_demonstration(
         intakes=intakes,
         outbox_pending=outbox.pending_count(),
         outbox_dead_letters=len(outbox.dead_letters()),
+        audit_entries=collector.entries,
     )
+
+
+class _CollectingRecorder:
+    """Keeps every entry, and forwards to a real trail when one was supplied.
+
+    Two jobs in one object because they must not diverge: what a test asserts and what a
+    hash-chained trail holds have to be the same entries, or the assertion is about the
+    collector rather than about the platform.
+    """
+
+    def __init__(self, delegate: PublicationRecorder | None) -> None:
+        self._delegate = delegate
+        self._entries: list[AuditEvent] = []
+
+    @property
+    def entries(self) -> tuple[AuditEvent, ...]:
+        return tuple(self._entries)
+
+    async def record(self, event: AuditEvent) -> AuditEvent:
+        sealed = await self._delegate.record(event) if self._delegate is not None else event
+        self._entries.append(sealed)
+        return sealed
 
 
 __all__ = [

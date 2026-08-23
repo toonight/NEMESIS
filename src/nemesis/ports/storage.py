@@ -239,6 +239,26 @@ class AuditEvent(BaseModel):
 
 
 @runtime_checkable
+class PublicationRecorder(Protocol):
+    """Write to the audit trail, and read nothing back.
+
+    A deliberate narrowing of :class:`AuditSink`, and the narrowing is the whole reason it
+    exists. The collaboration plane must record what it published — invariant 11 does not
+    have an exception for the outward-facing plane — but it is the plane whose whole job is
+    to talk to a backend NEMESIS does not control. Handing it an ``AuditSink`` would hand it
+    ``query``, and a compromised collaboration path could then read the platform's history
+    of every action rather than only the events it was given to publish.
+
+    Structural typing makes this free: :class:`AuditSink` and
+    :class:`~nemesis.audit.trail.AppendOnlyAuditTrail` both already satisfy it, so a caller
+    passes the trail it already has and the plane sees one method. No adapter, no second
+    implementation, and nothing to keep in step.
+    """
+
+    async def record(self, event: AuditEvent) -> AuditEvent: ...
+
+
+@runtime_checkable
 class AuditSink(Protocol):
     """Append-only, tamper-evident record of what the platform and its operators did."""
 

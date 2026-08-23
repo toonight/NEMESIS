@@ -93,6 +93,19 @@ class OutboxRecord(BaseModel):
 
     event: CollaborationEvent
     channel_key: Annotated[str, Field(min_length=1)]
+    channel_backend_id: Annotated[str, Field(min_length=1)]
+    """What the backend calls the channel, stored so a retry can reach it.
+
+    Deliberately required, with no default. A queue whose whole purpose is to survive a
+    process death must hold everything a later attempt needs, and the first version of
+    :meth:`Outbox.due`'s consumer rebuilt the destination from ``channel_key`` alone —
+    which the local provider reads as a filesystem path, so every retry published to a
+    path that did not exist and was abandoned as a permanent rejection. A record from an
+    older file without this field fails validation and takes the whole queue with it,
+    which is the same refusal :meth:`Outbox._read` already makes for a corrupted line and
+    for the same reason: a publication silently dropped is one nobody is ever told about.
+    """
+
     provider: Annotated[str, Field(min_length=1)]
     state: OutboxState = OutboxState.PENDING
     attempts: Annotated[int, Field(ge=0)] = 0
@@ -220,6 +233,7 @@ class Outbox:
         event: CollaborationEvent,
         *,
         channel_key: str,
+        channel_backend_id: str,
         provider: str,
         now: datetime,
     ) -> OutboxRecord:
@@ -237,6 +251,7 @@ class Outbox:
             record = OutboxRecord(
                 event=event,
                 channel_key=channel_key,
+                channel_backend_id=channel_backend_id,
                 provider=provider,
                 enqueued_at=now,
                 next_attempt_at=now,

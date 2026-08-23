@@ -126,10 +126,22 @@ That is a genuinely good relay. Everything below is about what it is *not*.
 - **G3 — A stolen backend key can publish convincing NEMESIS-shaped events.** Mitigated for
   *authorization* (it grants nothing) and not for *misleading a human reader*. Closing it needs G1
   plus rejecting any event whose author key is not enrolled in `ActorRegistry`.
-- **G4 — The plane is not audited.** Publications do not currently write to
-  `AppendOnlyAuditTrail`, because the plane cannot import `nemesis.audit` — by design. The caller
-  is the correct place for that, and the demonstration does not yet do it. `PROPOSED`, and the
-  highest-value follow-up in this area.
+- **G4 — CLOSED.** `CollaborationPublisher` (`src/nemesis/collaboration/publisher.py`) records
+  every publication attempt, channel open, actor binding, signal read and decision reading into
+  the hash-chained trail. The plane still cannot import `nemesis.audit`: it takes a
+  `PublicationRecorder` (`src/nemesis/ports/storage.py`) — one method, `record`, and no `query`,
+  so a compromised collaboration path can write what it published and cannot read the platform's
+  history of everything else. `AppendOnlyAuditTrail` satisfies it structurally, so a caller passes
+  the trail it already has and no adapter exists to keep in step. Refusals are recorded **before**
+  the exception propagates, and an audit-write failure stops the publisher rather than being
+  swallowed. `tests/invariants/test_collaboration_audit.py` pins it, including by tampering with a
+  publication entry and asserting the chain reports the break.
+
+  What it does **not** close: an entry holds the event's content-addressed id and its integrity
+  hash, not its content, so the trail proves *which* event was published without holding a second
+  copy of what it said. The excerpt of a human's reply **is** kept, because the reply itself lives
+  on a backend whose retention is not ours. And this trail is anchored no better than any other —
+  see G6.
 - **G5 — Buzz's non-member edit carve-out.** A NIP-OA agent owner can edit or delete NEMESIS
   messages in a private channel and can flip its visibility. Not mitigable from our side.
 - **G6 — Nothing here improves evidence defensibility.** `SealedExport.is_defensible_against_operator`
