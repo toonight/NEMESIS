@@ -25,7 +25,7 @@ guarantee, and it is the only one that sees a bare literal inside a function bod
 field default, or a two-line logic change that touches no constant at all. `engine_drifted()`
 names the modules that moved.
 
-**Every module-level constant**, by normalised syntax, in `CONSTANT_DIGESTS` — 488 of them,
+**Every module-level constant**, by normalised syntax, in `CONSTANT_DIGESTS` — 492 of them,
 with no classification whatsoever. A dial does not have to hold a digit and does not have to
 look like a table; four rules for deciding what counted were tried and all four excluded
 something load-bearing. `constants_drifted()` names what moved, appeared or vanished.
@@ -135,7 +135,7 @@ CALIBRATION_CONSTANTS: Final[tuple[str, ...]] = (
 """The curated epistemic subset, named as ``module:NAME`` and frozen by **imported value**.
 
 Not "every number": most of what decides a published figure here is not a number at all — of the
-488 dials `discovered_constants()` covers, 345 hold no numeric literal. And not the completeness
+492 dials `discovered_constants()` covers, 348 hold no numeric literal. And not the completeness
 guarantee either, which is the job of the two syntactic digests; this list is deliberately
 curated, so it is allowed to be incomplete in a way they are not.
 
@@ -238,9 +238,11 @@ CONSTANT_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis.cli.main:NOT_DEMONSTRATED": "e41c22bbab46065a",
         "nemesis.cli.main:_RULE": "a534e579c0df6936",
         "nemesis.collaboration.approvals:PROPOSAL_DIGEST_LENGTH": "39ee4693e6f28322",
-        "nemesis.collaboration.approvals:_APPROVE_TOKENS": "9eca4ea973ccf66c",
+        "nemesis.collaboration.approvals:_APOSTROPHES": "d756ca57674cf394",
+        "nemesis.collaboration.approvals:_APPROVE_PATTERN": "4c51bfd0ac286700",
         "nemesis.collaboration.approvals:_DIGEST_PATTERN": "b1fa3a4ae173a648",
-        "nemesis.collaboration.approvals:_REJECT_TOKENS": "d3236c7c2cc436d4",
+        "nemesis.collaboration.approvals:_NEGATION_PATTERN": "2bc1622301a3845f",
+        "nemesis.collaboration.approvals:_REJECT_PATTERN": "e2f883f890b91be5",
         "nemesis.collaboration.demonstration:APPROVALS_CHANNEL": "664a9121afaf0423",
         "nemesis.collaboration.demonstration:CASE_CHANNEL": "3e491ef9f542c491",
         "nemesis.collaboration.demonstration:CASE_ID": "3e72a43c65dc0ba0",
@@ -250,6 +252,7 @@ CONSTANT_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis.collaboration.demonstration:OPS_CHANNEL": "abbb2adbc0cb474d",
         "nemesis.collaboration.demonstration:T0": "9946e428f9328b55",
         "nemesis.collaboration.events:MAX_PAYLOAD_ENTRIES": "ce45f23294e4e97e",
+        "nemesis.collaboration.events:MAX_PAYLOAD_KEY_LENGTH": "dd39e13ea6ed6e64",
         "nemesis.collaboration.events:MAX_PAYLOAD_VALUE_LENGTH": "d04447ae4ad65fe4",
         "nemesis.collaboration.events:MAX_REFERENCES": "b22358a9d1d12262",
         "nemesis.collaboration.events:MAX_SUMMARY_LENGTH": "957578585db3a82b",
@@ -280,6 +283,7 @@ CONSTANT_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis.collaboration.providers.buzz.wire:MAX_CONTENT_BYTES": "ddc9122b752d5192",
         "nemesis.collaboration.providers.buzz.wire:MAX_TAG_VALUE_BYTES": "a3b9681275ec9b89",
         "nemesis.collaboration.providers.buzz.wire:NEMESIS_TAG_NAMESPACE": "489cdf89263b4cac",
+        "nemesis.collaboration.providers.buzz.wire:_LOCALHOST_AUTHORITY": "f730cbd8a33449fd",
         "nemesis.collaboration.providers.local:PROVIDER_NAME": "fe31a8d5063857f8",
         "nemesis.collaboration.providers.local:_SAFE_KEY": "aac5f98a2d9d64e5",
         "nemesis.collaboration.providers.registry:DEFAULT_PROVIDER": "2f0d287c962ee682",
@@ -796,7 +800,7 @@ def discovered_constants(tree: Path | None = None) -> dict[str, str]:
     `EXCLUDED_CONCLUSIONS`, four security tables made of plain strings. The module digest covered
     them, so it was never a bypass; the claim that every dial was *named* was simply false.
 
-    So there is no rule now. Every module-level upper-case assignment is a dial, 488 of them,
+    So there is no rule now. Every module-level upper-case assignment is a dial, 492 of them,
     and the cost of including the genuine prose is nothing: rewording a message already moves
     that module's syntax digest, so no new failure mode is introduced by naming it too.
 
@@ -948,20 +952,20 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/calibration/harness.py": "1b251a700a9cf876",
         "nemesis/calibration/scoring.py": "b2e7a193a30d65a1",
         "nemesis/cli/__init__.py": "ad2e13b69c4fc1fd",
-        "nemesis/cli/main.py": "e625e19f4ca4075a",
+        "nemesis/cli/main.py": "bfe15d782bb371bb",
         "nemesis/collaboration/__init__.py": "ca1145a798cbf210",
-        "nemesis/collaboration/approvals.py": "398e1094be3f8ba6",
+        "nemesis/collaboration/approvals.py": "9e5aef566b46d5d1",
         "nemesis/collaboration/base.py": "0f24972d696c4060",
         "nemesis/collaboration/demonstration.py": "39c8a0e0c5cc8b47",
-        "nemesis/collaboration/events.py": "1bc9a320c15f0237",
+        "nemesis/collaboration/events.py": "ff3f238a4fe8440b",
         "nemesis/collaboration/identities.py": "a70773dde74fa74d",
-        "nemesis/collaboration/outbox.py": "a79eefbdfeba310c",
+        "nemesis/collaboration/outbox.py": "bfdd909991c8e298",
         "nemesis/collaboration/providers/__init__.py": "ca1145a798cbf210",
         "nemesis/collaboration/providers/buzz/__init__.py": "ca1145a798cbf210",
-        "nemesis/collaboration/providers/buzz/provider.py": "d86c40447125a0e1",
+        "nemesis/collaboration/providers/buzz/provider.py": "60500894d273f034",
         "nemesis/collaboration/providers/buzz/transport.py": "21524752b51dc4dd",
-        "nemesis/collaboration/providers/buzz/wire.py": "3d2512fc07b9ca21",
-        "nemesis/collaboration/providers/local.py": "f18579b744236c76",
+        "nemesis/collaboration/providers/buzz/wire.py": "c189e4bd40f7e2fb",
+        "nemesis/collaboration/providers/local.py": "b562c27002f59de6",
         "nemesis/collaboration/providers/registry.py": "3f06a0cbfdd90da1",
         "nemesis/collect/__init__.py": "ad2e13b69c4fc1fd",
         "nemesis/collect/base.py": "b1e03b526cdb8019",
