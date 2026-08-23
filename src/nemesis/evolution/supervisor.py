@@ -189,6 +189,14 @@ class TrajectoryDossier(BaseModel):
     open_contradictions: Annotated[int, Field(ge=0)] = 0
     steps_remaining: Annotated[int, Field(ge=0)] = 0
 
+    directives_tried_without_gain: tuple[Annotated[str, Field(max_length=64)], ...] = ()
+    """Every posture already issued during the current gainless streak.
+
+    ``last_directive`` below was the first attempt at this and is kept because it still names
+    what is *in force*. It could not carry the guard, though: comparing against the previous
+    directive alone is defeated by a two-cycle, and was — see
+    :attr:`~nemesis.evolution.controller.EvolutionState.directives_tried_without_gain`."""
+
     last_directive: Annotated[str, Field(max_length=64)] = ""
     """The directive currently in force, if any.
 
@@ -338,8 +346,15 @@ class DeterministicSupervisor:
         # is the plateau restated rather than a response to it — and the honest next move is a
         # different posture, or a stop. Learned from the reference run, where this rule fired on
         # every plateau of an eight-step trajectory and said the same thing each time.
+        # What is in force has obviously been tried, so it belongs in the set whether or not a
+        # caller listed it. Folding it in here rather than at every call site means a dossier
+        # built with `last_directive` alone still behaves the way it did before the set existed.
+        tried = set(dossier.directives_tried_without_gain)
+        if dossier.last_directive:
+            tried.add(dossier.last_directive)
+
         exhausted_redirect = (
-            dossier.last_directive == DirectiveType.SEEK_INDEPENDENT_ORIGIN.value
+            DirectiveType.SEEK_INDEPENDENT_ORIGIN.value in tried
             and dossier.directive_steps_without_gain >= 2
         )
         if (
@@ -366,10 +381,7 @@ class DeterministicSupervisor:
             if mapped is None:
                 continue
             directive, focus = mapped
-            if (
-                directive.value == dossier.last_directive
-                and dossier.directive_steps_without_gain >= 2
-            ):
+            if directive.value in tried and dossier.directive_steps_without_gain >= 2:
                 # Same reasoning as above, applied to the table: a posture that has been in force
                 # for two steps without moving anything does not get re-issued as though it were
                 # news.
