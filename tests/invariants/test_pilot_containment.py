@@ -25,7 +25,7 @@ from typing import Final, cast
 import pytest
 from pydantic import ValidationError
 
-from nemesis.authz.envelope import AutonomyEnvelope
+from nemesis.authz.envelope import AutonomyEnvelope, SpendRecord
 from nemesis.authz.gateway import RevocationRegistry
 from nemesis.authz.keys import CapabilitySigningKey
 from nemesis.collect.fixtures.glass_anvil import NAMED_PERSON, PERSONA_CURRENT
@@ -1044,6 +1044,84 @@ def test_the_session_is_replayable_from_the_audit_trail() -> None:
     assert len(session_events) == 2
     # Every ruling's outcome is in the trail, in order.
     assert [e.outcome for e in move_events] == [r.status.value for r in session.rulings]
+
+
+def test_a_store_failure_mid_session_still_closes_the_session_in_the_trail() -> None:
+    """Invariant 11 has no exception for the case where the platform itself broke.
+
+    A `pilot.session` opened with no close cannot be reconstructed, and the reconstruction is
+    the whole point of a replayable trail. The disclosure wall already wrote its own close
+    before re-raising for exactly that reason — but it was the only path that did, and it was
+    not the only path that raises.
+
+    Measured, not reasoned. `SqliteAuthorizationStore.debit` raises `AuthorizationStoreError`
+    on any `sqlite3.Error`, and it is called at the top of `_apply_effect` with no handler
+    between it and the move loop. Patching the ledger to raise it and running the shipped
+    `nemesis pilot` demonstration produced a trail ending on a single `pilot.session` entry
+    whose outcome was `opened`: a disk error during an effect erased the session's own record
+    of having happened.
+
+    The exception still escapes — a store that cannot be read is a real failure and nothing
+    here carries on. What changed is that the close is written first.
+    """
+
+    class ExplodingLedger:
+        """The failure `SqliteAuthorizationStore.debit` already has, made deterministic."""
+
+        def register(self, capability_id: str, budget: int) -> int:
+            return budget
+
+        def debit(self, **_: object) -> SpendRecord | None:
+            raise RuntimeError("the spend ledger could not be consulted: disk I/O error")
+
+        def spends(self, capability_id: str) -> tuple[SpendRecord, ...]:
+            return ()
+
+    async def scenario() -> RecordingAudit:
+        h = await _build()
+        # Swap the ledger under the envelope the mediator already holds, so the failure lands
+        # exactly where a disk error would: inside `_apply_effect`, after the move validated.
+        h.envelope._ledger_impl = ExplodingLedger()
+
+        def react(briefing: Briefing, turn: int) -> object:
+            if turn == 1:
+                return RequestEffect(
+                    entity_id=h.approved.entity_id, operation=OperationClass.SIMULATION
+                )
+            return Conclude(summary="unreachable")
+
+        with pytest.raises(RuntimeError, match="spend ledger"):
+            await h.mediator.drive(_hostile(ReactivePilot("unlucky", react)), h.seed)
+        return h.audit
+
+    audit = asyncio.run(scenario())
+
+    sessions = [e for e in audit.events if getattr(e, "action", None) == "pilot.session"]
+    assert [e.outcome for e in sessions] == ["opened", "halted"], (
+        "a session that ended on a store failure must still be closed in the trail"
+    )
+    assert "RuntimeError" in sessions[-1].inputs["halted_reason"]
+
+
+def test_the_session_close_is_written_exactly_once() -> None:
+    """The disclosure path closes the session and then re-raises through the same net.
+
+    Without idempotence that would put two ends on one session, which is its own kind of
+    unreadable — and it would have been introduced by the fix for the gap above rather than
+    found in review.
+    """
+
+    async def scenario() -> RecordingAudit:
+        h = await _build()
+        session = await h.mediator.drive(
+            _hostile(ReactivePilot("plain", lambda b, t: Conclude(summary="done"))), h.seed
+        )
+        assert session.concluded
+        return h.audit
+
+    audit = asyncio.run(scenario())
+    sessions = [e for e in audit.events if getattr(e, "action", None) == "pilot.session"]
+    assert [e.outcome for e in sessions] == ["opened", "concluded"]
 
 
 # --- The pilot does not attest to the world ----------------------------------

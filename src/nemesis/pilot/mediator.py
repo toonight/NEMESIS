@@ -490,6 +490,39 @@ class PilotMediator:
         last_ruling: Ruling | None = None
         concluded = False
         halted: str | None = None
+        closed = False
+
+        async def close(outcome: str, reason: str) -> None:
+            """Write the session close exactly once, whatever ended the session.
+
+            Invariant 11 asks for a session that can be reconstructed, and a `pilot.session`
+            opened with no close cannot be. The disclosure wall below already wrote its own
+            close before re-raising, for exactly that reason — but it was the only path that
+            did, and it was not the only path that raises.
+
+            Measured, not reasoned: patch the spend ledger to raise the `AuthorizationStoreError`
+            that `SqliteAuthorizationStore.debit` already raises on any `sqlite3.Error`, run
+            `nemesis pilot`, and the trail ends with one `pilot.session` entry whose outcome is
+            `opened`. The debit sits at the top of `_apply_effect` with no handler between it
+            and here, so a disk error during an effect erased the session's own record of
+            having happened.
+
+            Idempotent because the disclosure path calls it and then re-raises through the
+            same net; a second close would put two ends on one session, which is its own kind
+            of unreadable.
+            """
+            nonlocal closed
+            if closed:
+                return
+            closed = True
+            await self._record_session(
+                pilot,
+                pilot_actor,
+                investigation,
+                identity,
+                outcome=outcome,
+                extra={"halted_reason": reason, "moves": str(len(transcript))},
+            )
 
         async def refuse(
             move_kind: str,
@@ -511,131 +544,136 @@ class PilotMediator:
             )
             return malformed_streak >= self._max_consecutive_malformed
 
-        for turn in range(max_moves):
-            try:
-                briefing = await self._brief(
-                    investigation,
-                    last_ruling,
-                    moves_remaining=max_moves - turn,
-                    research_context=research_context,
-                )
-            except DisclosureViolationError:
-                # Recorded, then re-raised untouched. This is NOT handling it — the wall's
-                # contract is that nobody catches it to carry on, and nothing here carries on.
-                # But an audit trail holding a `pilot.session` open with no close is a session
-                # that cannot be reconstructed, and invariant 11 does not make an exception for
-                # the case where the platform stopped itself. So the close is written and the
-                # error goes on being loud.
-                await self._record_session(
-                    pilot,
-                    pilot_actor,
-                    investigation,
-                    identity,
-                    outcome="halted",
-                    extra={
-                        "halted_reason": "the briefing would have carried internal-classified "
-                        "material to the pilot",
-                        "moves": str(len(transcript)),
-                    },
-                )
-                raise
+        # Everything that ends a session goes through one close. The loop is wrapped
+        # rather than each raising call site guarded, because the set of things that can
+        # raise in here is not closed: the spend ledger, the graph, the vault and the
+        # audit sink all reach a filesystem, and a session that vanished from the trail
+        # because a disk filled up is as unreconstructable as one that vanished because
+        # somebody deleted it.
+        try:
+            for turn in range(max_moves):
+                try:
+                    briefing = await self._brief(
+                        investigation,
+                        last_ruling,
+                        moves_remaining=max_moves - turn,
+                        research_context=research_context,
+                    )
+                except DisclosureViolationError:
+                    # Recorded, then re-raised untouched. This is NOT handling it — the wall's
+                    # contract is that nobody catches it to carry on, and nothing here carries on.
+                    # But an audit trail holding a `pilot.session` open with no close is a session
+                    # that cannot be reconstructed, and invariant 11 does not make an exception for
+                    # the case where the platform stopped itself. So the close is written and the
+                    # error goes on being loud.
+                    await close(
+                        "halted",
+                        "the briefing would have carried internal-classified material to the pilot",
+                    )
+                    raise
 
-            raw: object = None
-            metadata: PilotResponseMetadata | None = None
-            try:
-                # Bounded by a wall clock the pilot cannot influence: a hosted model that hangs
-                # must not park the whole session on one turn with no halt ever recorded. The
-                # bound covers the seat's own retries too, which is why they cannot buy a
-                # hanging vendor more wall-clock than a single call would have had.
-                decision = await asyncio.wait_for(
-                    self._elicit(pilot, briefing), timeout=self._propose_timeout
-                )
-                raw, metadata = decision.raw, decision.metadata
-                move = self._validate(raw)
-            except ValidationError as exc:
-                if await refuse(
-                    self._raw_kind(raw),
-                    "not a move in the pilot vocabulary: "
-                    f"{self._first_error(exc)}. The vocabulary is closed; a pilot cannot "
-                    "act through a verb that does not exist.",
-                    metadata,
-                ):
-                    halted = f"{malformed_streak} malformed moves in a row; session ended"
-                    break
-                continue
-            except TimeoutError:
-                # `wait_for` cancels the stalled call. A stall is a refused move, and a run of
-                # them ends the session — the same containment as a pilot that raises.
-                if await refuse(
-                    "unknown",
-                    f"the pilot did not return a move within {self._propose_timeout:g}s; "
-                    "the stalled call was cancelled",
-                    metadata,
-                ):
-                    halted = "the pilot stalled repeatedly; session ended"
-                    break
-                continue
-            except Exception as exc:
-                # An untrusted pilot must not be able to end a session by raising. A model that
-                # hangs, a transport that is not wired, a vendor call that fails — each is a
-                # refused move and eventually a halt, never a crash of the harness and never a
-                # silent retry against whatever the pilot was about to contact.
-                #
-                # The *reason* is composed from the exception TYPE and, for a classified
-                # provider failure, its kind — never from the vendor's own error text. That text
-                # is written by a third party, and a ruling reason is echoed back to the pilot in
-                # the next briefing: passing it through would make a vendor's response body an
-                # input to the model's next turn. The detail is kept, bounded, in the audit
-                # record, where it is read by people rather than by a model.
-                if await refuse(
-                    "unknown",
-                    self._failure_reason(exc),
-                    metadata,
-                    error=exc,
-                ):
-                    halted = f"the pilot raised {type(exc).__name__} repeatedly; session ended"
-                    break
-                continue
+                raw: object = None
+                metadata: PilotResponseMetadata | None = None
+                try:
+                    # Bounded by a wall clock the pilot cannot influence: a hosted model that hangs
+                    # must not park the whole session on one turn with no halt ever recorded. The
+                    # bound covers the seat's own retries too, which is why they cannot buy a
+                    # hanging vendor more wall-clock than a single call would have had.
+                    decision = await asyncio.wait_for(
+                        self._elicit(pilot, briefing), timeout=self._propose_timeout
+                    )
+                    raw, metadata = decision.raw, decision.metadata
+                    move = self._validate(raw)
+                except ValidationError as exc:
+                    if await refuse(
+                        self._raw_kind(raw),
+                        "not a move in the pilot vocabulary: "
+                        f"{self._first_error(exc)}. The vocabulary is closed; a pilot cannot "
+                        "act through a verb that does not exist.",
+                        metadata,
+                    ):
+                        halted = f"{malformed_streak} malformed moves in a row; session ended"
+                        break
+                    continue
+                except TimeoutError:
+                    # `wait_for` cancels the stalled call. A stall is a refused move, and a run of
+                    # them ends the session — the same containment as a pilot that raises.
+                    if await refuse(
+                        "unknown",
+                        f"the pilot did not return a move within {self._propose_timeout:g}s; "
+                        "the stalled call was cancelled",
+                        metadata,
+                    ):
+                        halted = "the pilot stalled repeatedly; session ended"
+                        break
+                    continue
+                except Exception as exc:
+                    # An untrusted pilot must not be able to end a session by raising. A model that
+                    # hangs, a transport that is not wired, a vendor call that fails — each is a
+                    # refused move and eventually a halt, never a crash of the harness and never a
+                    # silent retry against whatever the pilot was about to contact.
+                    #
+                    # The *reason* is composed from the exception TYPE and, for a classified
+                    # provider failure, its kind — never from the vendor's own error text.
+                    # That text is written by a third party, and a ruling reason is echoed
+                    # back to the pilot in the next briefing: passing it through would make
+                    # a vendor's response body an
+                    # input to the model's next turn. The detail is kept, bounded, in the audit
+                    # record, where it is read by people rather than by a model.
+                    if await refuse(
+                        "unknown",
+                        self._failure_reason(exc),
+                        metadata,
+                        error=exc,
+                    ):
+                        halted = f"the pilot raised {type(exc).__name__} repeatedly; session ended"
+                        break
+                    continue
 
-            malformed_streak = 0
-            outcome = await self._challenge(briefing, move)
-            challenge = outcome.ruling if outcome is not None else None
-            if outcome is not None and self._challenge_policy.blocks(move.kind, outcome):
-                # Refused BEFORE `_apply`, so the envelope is never debited and no pivot runs.
-                # A challenger can only subtract; it never reaches a control that would have
-                # permitted something on its own.
-                what = (
-                    f"returned {outcome.ruling.verdict.value}"
-                    if outcome.answered
-                    else "did not answer, and this deployment refuses an unchallenged move"
+                malformed_streak = 0
+                outcome = await self._challenge(briefing, move)
+                challenge = outcome.ruling if outcome is not None else None
+                if outcome is not None and self._challenge_policy.blocks(move.kind, outcome):
+                    # Refused BEFORE `_apply`, so the envelope is never debited and no pivot runs.
+                    # A challenger can only subtract; it never reaches a control that would have
+                    # permitted something on its own.
+                    what = (
+                        f"returned {outcome.ruling.verdict.value}"
+                        if outcome.answered
+                        else "did not answer, and this deployment refuses an unchallenged move"
+                    )
+                    ruling = Ruling(
+                        move_kind=move.kind,
+                        status=RulingStatus.REFUSED_CHALLENGED,
+                        reason=f"an independent challenger {what}: {outcome.ruling.reason}"[:400],
+                    )
+                else:
+                    investigation, ruling = await self._apply(
+                        pilot, pilot_actor, investigation, move
+                    )
+                transcript.append(TurnRecord(move, ruling, metadata, challenge))
+                last_ruling = ruling
+                await self._record_move(
+                    pilot, pilot_actor, investigation, identity, move, ruling, metadata, challenge
                 )
-                ruling = Ruling(
-                    move_kind=move.kind,
-                    status=RulingStatus.REFUSED_CHALLENGED,
-                    reason=f"an independent challenger {what}: {outcome.ruling.reason}"[:400],
-                )
+
+                if isinstance(move, Conclude) and ruling.accepted:
+                    concluded = True
+                    break
             else:
-                investigation, ruling = await self._apply(pilot, pilot_actor, investigation, move)
-            transcript.append(TurnRecord(move, ruling, metadata, challenge))
-            last_ruling = ruling
-            await self._record_move(
-                pilot, pilot_actor, investigation, identity, move, ruling, metadata, challenge
+                halted = f"reached the {max_moves}-move ceiling without concluding"
+        except BaseException as exc:
+            # Recorded, then re-raised untouched. This is not handling it — nothing here
+            # carries on, and `BaseException` is deliberate so that a cancellation or a
+            # KeyboardInterrupt closes the session too rather than being the one way to
+            # end a run without a record.
+            await close(
+                "halted",
+                f"the session ended on an unhandled {type(exc).__name__}: {exc}"[:400],
             )
+            raise
 
-            if isinstance(move, Conclude) and ruling.accepted:
-                concluded = True
-                break
-        else:
-            halted = f"reached the {max_moves}-move ceiling without concluding"
-
-        await self._record_session(
-            pilot,
-            pilot_actor,
-            investigation,
-            identity,
-            outcome="concluded" if concluded else "halted",
-            extra={"halted_reason": halted or "", "moves": str(len(transcript))},
-        )
+        await close("concluded" if concluded else "halted", halted or "")
         return PilotSession(
             investigation=investigation,
             transcript=tuple(transcript),
