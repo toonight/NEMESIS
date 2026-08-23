@@ -1076,7 +1076,7 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/pilot/anthropic_pilot.py": "653a3edd88f63dd4",
         "nemesis/pilot/challenger.py": "e32378cc74490f41",
         "nemesis/pilot/local_pilot.py": "844b5ec238222866",
-        "nemesis/pilot/mediator.py": "bb2951e6c46a1e32",
+        "nemesis/pilot/mediator.py": "ec2a072d1b58363f",
         "nemesis/pilot/model_seat.py": "0e1d14a5dd994e5f",
         "nemesis/pilot/moves.py": "cf2c7cc9c62e23ba",
         "nemesis/pilot/openai_pilot.py": "a0ff06cac4fc63f6",

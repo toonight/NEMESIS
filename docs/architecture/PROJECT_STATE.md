@@ -161,7 +161,7 @@ can be until a corpus of resolved cases exists.
 | Calibration harness | `IMPLEMENTED` | `nemesis calibrate`. Six structural properties, plus scores that state what they are conditional on. |
 | Robustness margin | `IMPLEMENTED` | A conclusion must survive losing a plantable fact. Laundering false-match rate 100% to 0%. See ADR-0004. |
 
-**1642 tests.** Gate: ruff, ruff format, mypy strict (232 source files), 13 plane contracts,
+**1644 tests.** Gate: ruff, ruff format, mypy strict (232 source files), 13 plane contracts,
 prohibited-content scan. All green. `nemesis demo`, `nemesis pilot`, `nemesis evolution` and
 `nemesis calibrate` each exit 0. (The count read "472" through 2026-08-15; that was stale
 documentation, corrected since — the suite grows with every hardening pass.)
