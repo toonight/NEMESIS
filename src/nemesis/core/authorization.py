@@ -35,8 +35,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from datetime import datetime, timedelta
-from enum import StrEnum
+from enum import IntEnum, StrEnum
+from types import MappingProxyType
 from typing import Annotated, Final, Self
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
@@ -107,6 +109,117 @@ IRREVERSIBLE_OPERATIONS: frozenset[OperationClass] = frozenset(
     }
 )
 """Operations whose effects cannot be undone by us. Always require dual control."""
+
+
+class ActionRisk(IntEnum):
+    """How much of the world an operation can move, on the scale a governance process uses.
+
+    An ``IntEnum`` because the ordering is used — a policy floor is a comparison — and
+    because "at least level 3" is how an approval rule is actually written down.
+
+    This does not replace :data:`MVP_IMPLEMENTED_OPERATIONS` or
+    :data:`IRREVERSIBLE_OPERATIONS`, and it must not disagree with them. Those two sets are
+    what the code enforces; this is the vocabulary a human policy is expressed in, and
+    :data:`OPERATION_RISK` is checked against both by
+    :func:`_check_risk_table_agrees_with_enforcement` at import time. A classification that
+    can drift away from the enforcement it describes is worse than none, because it is the
+    one people read.
+    """
+
+    READ_ONLY = 0
+    """Observes and changes nothing outside NEMESIS. Pivots, queries, sandboxed analysis.
+    Not an :class:`OperationClass` at all — pivots do not go through the effects plane —
+    but the level exists so a policy can say "level 0 needs no approval" without a gap."""
+
+    INTERNAL_MUTATION = 1
+    """Changes NEMESIS's own state and nothing else. Recording a claim, opening a case,
+    adding an edge. Audited, not approved."""
+
+    EXTERNAL_BENIGN = 2
+    """Produces something addressed to an outsider without sending it. A drafted
+    notification, a takedown package, a sealed evidence export. The artifact exists; a human
+    still has to move it."""
+
+    SENSITIVE_EXTERNAL = 3
+    """Actually contacts an outside party or system. Nothing in this build reaches this
+    level: no adapter exists for any operation classified here, and
+    :meth:`~nemesis.effects.registry.EffectsRegistry.register` refuses any adapter that
+    reports external contact."""
+
+    HIGH_IMPACT = 4
+    """Alters, disables or seizes infrastructure. Disabled by default, and disabled by the
+    absence of an implementation rather than by a flag. ``REQUIRES_LEGAL_AUTHORITY``."""
+
+
+OPERATION_RISK: Mapping[OperationClass, ActionRisk] = MappingProxyType(
+    {
+        OperationClass.SIMULATION: ActionRisk.READ_ONLY,
+        OperationClass.PROVIDER_NOTIFICATION: ActionRisk.EXTERNAL_BENIGN,
+        OperationClass.TAKEDOWN_REQUEST_DRAFT: ActionRisk.EXTERNAL_BENIGN,
+        OperationClass.EVIDENCE_EXPORT: ActionRisk.EXTERNAL_BENIGN,
+        OperationClass.EXCHANGE_NOTIFICATION: ActionRisk.SENSITIVE_EXTERNAL,
+        OperationClass.LAW_ENFORCEMENT_REFERRAL: ActionRisk.SENSITIVE_EXTERNAL,
+        OperationClass.JUDICIAL_SEIZURE_PACKAGE: ActionRisk.SENSITIVE_EXTERNAL,
+        OperationClass.REGISTRAR_SUSPENSION: ActionRisk.HIGH_IMPACT,
+        OperationClass.HOSTING_TERMINATION: ActionRisk.HIGH_IMPACT,
+        OperationClass.ACCOUNT_SUSPENSION: ActionRisk.HIGH_IMPACT,
+        OperationClass.ASSET_FREEZE_REQUEST: ActionRisk.HIGH_IMPACT,
+        OperationClass.DOMAIN_SEIZURE: ActionRisk.HIGH_IMPACT,
+        OperationClass.SINKHOLE: ActionRisk.HIGH_IMPACT,
+    }
+)
+"""Total over :class:`OperationClass`. A new operation class fails at import, not at use."""
+
+
+def _check_risk_table_agrees_with_enforcement() -> None:
+    """Refuse to import if the published classification contradicts the enforced sets.
+
+    Three rules, each one a way the table could quietly become a lie:
+
+    1. **Total.** Every operation class has a level. A missing entry would make
+       :func:`risk_of` raise on exactly the operation nobody thought about.
+    2. **Irreversible implies high impact.** :data:`IRREVERSIBLE_OPERATIONS` already forces
+       dual control; a table that called one of them level 2 would let a policy written in
+       this vocabulary demand less than the code does.
+    3. **No adapter implies at least sensitive.** Anything outside
+       :data:`MVP_IMPLEMENTED_OPERATIONS` has no implementation and is marked
+       ``REQUIRES_LEGAL_AUTHORITY``. Classifying one of them as benign would describe an
+       unbuildable operation as routine.
+    """
+    missing = set(OperationClass) - set(OPERATION_RISK)
+    if missing:
+        raise RuntimeError(
+            f"OPERATION_RISK is missing {sorted(op.value for op in missing)}. Every operation "
+            "class must carry a risk level, or a policy expressed in these levels has a hole "
+            "at exactly the operation nobody classified"
+        )
+    understated = sorted(
+        op.value for op in IRREVERSIBLE_OPERATIONS if OPERATION_RISK[op] < ActionRisk.HIGH_IMPACT
+    )
+    if understated:
+        raise RuntimeError(
+            f"OPERATION_RISK understates irreversible operations {understated}: they force "
+            "dual control in code and must not be classified below HIGH_IMPACT"
+        )
+    unbuilt_but_benign = sorted(
+        op.value
+        for op in OperationClass
+        if op not in MVP_IMPLEMENTED_OPERATIONS
+        and OPERATION_RISK[op] < ActionRisk.SENSITIVE_EXTERNAL
+    )
+    if unbuilt_but_benign:
+        raise RuntimeError(
+            f"OPERATION_RISK classifies {unbuilt_but_benign} below SENSITIVE_EXTERNAL, but "
+            "they have no adapter and are marked REQUIRES_LEGAL_AUTHORITY"
+        )
+
+
+_check_risk_table_agrees_with_enforcement()
+
+
+def risk_of(operation: OperationClass) -> ActionRisk:
+    """The risk level of an operation. Never a default — the table is total."""
+    return OPERATION_RISK[operation]
 
 
 class LegalBasis(StrEnum):

@@ -17,6 +17,7 @@ forbidden_modules =
     nemesis.evidence
     nemesis.audit
     nemesis.collect
+    nemesis.collaboration
     nemesis.pursuit
     nemesis.resolve
     nemesis.attribute
@@ -52,6 +53,7 @@ source_modules =
 forbidden_modules =
     nemesis.graph
     nemesis.collect
+    nemesis.collaboration
     nemesis.pursuit
     nemesis.resolve
     nemesis.attribute
@@ -70,6 +72,7 @@ forbidden_modules =
     nemesis.effects
     nemesis.authz
     nemesis.disrupt
+    nemesis.collaboration
 
 ; --- Least privilege: analysis planes need no network -------------------------
 [importlinter:contract:analysis-has-no-network]
@@ -91,6 +94,7 @@ source_modules =
 forbidden_modules =
     nemesis.graph
     nemesis.collect
+    nemesis.collaboration
     nemesis.pursuit
     nemesis.resolve
     nemesis.attribute
@@ -137,6 +141,7 @@ forbidden_modules =
     nemesis.graph
     nemesis.evidence
     nemesis.collect
+    nemesis.collaboration
     nemesis.audit
     nemesis.api
     nemesis.slice
@@ -156,6 +161,43 @@ source_modules =
 forbidden_modules =
     nemesis.resolve
 
+; --- The collaboration plane holds nothing it could leak -------------------------
+; This plane exists to say things to humans on a backend NEMESIS does not control. What
+; it can reach is therefore what a compromised relay, a stolen agent key or a backdoored
+; client library learns. The answer is: the domain model, and whatever was handed to it.
+;
+; Two doors in particular are closed here and would not be closed by the layers contract
+; alone. It cannot reach `nemesis.authz`, so a message in a channel cannot become an
+; authorization however it is signed -- the brief's "signature is not authorization" rule,
+; enforced by the import graph rather than by a check somebody could forget. And it cannot
+; reach `nemesis.evidence`, so a publication path has no way to read an artifact and put
+; it in a message, which is how a tamper-evident object becomes an untracked copy in a
+; plaintext channel.
+;
+; Named by PACKAGE, for the reason the provider-adapter contract gives: a list of modules
+; covers the backends somebody remembered, a package covers the third one nobody has
+; written yet.
+[importlinter:contract:collaboration-holds-no-handles]
+name = The collaboration plane cannot reach authorization, evidence or the platform
+type = forbidden
+source_modules =
+    nemesis.collaboration
+forbidden_modules =
+    nemesis.authz
+    nemesis.evidence
+    nemesis.graph
+    nemesis.collect
+    nemesis.audit
+    nemesis.pursuit
+    nemesis.resolve
+    nemesis.attribute
+    nemesis.disrupt
+    nemesis.effects
+    nemesis.pilot
+    nemesis.api
+    nemesis.slice
+    nemesis.cli
+
 ; --- Overall layering ---------------------------------------------------------
 [importlinter:contract:layers]
 name = Plane layering
@@ -170,5 +212,6 @@ layers =
     nemesis.disrupt : nemesis.attribute : nemesis.resolve : nemesis.effects
     nemesis.authz
     nemesis.graph : nemesis.evidence : nemesis.collect : nemesis.audit
+    nemesis.collaboration
     nemesis.ports
     nemesis.core : nemesis.sandbox

@@ -43,13 +43,13 @@ import os
 import threading
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import UTC, datetime
-from enum import StrEnum
 from pathlib import Path
 from typing import Final, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from nemesis.core.authorization import AuthorizationDecision
+from nemesis.core.identity import ActorKind as ActorKind
 from nemesis.core.ids import IdPrefix, new_id
 from nemesis.core.relationships import PivotMethod, RelationType
 from nemesis.core.temporal import utcnow
@@ -93,25 +93,6 @@ A system action is still attributable: the actor is the component
 token would let a whole class of actions accumulate under one meaningless name, which is
 the same failure as not recording an actor at all — only harder to notice.
 """
-
-
-class ActorKind(StrEnum):
-    """Who or what performed an action.
-
-    The port types ``AuditEvent.actor_kind`` as ``str``; this enum is the accepted set and
-    :meth:`AppendOnlyAuditTrail.record` enforces it. The distinction is operational: "an
-    agent did this unsupervised" and "a named human decided this" carry different weight in
-    a review, and a trail that cannot separate them cannot answer the first question anyone
-    asks after an incident.
-    """
-
-    HUMAN = "human"
-    AGENT = "agent"
-    RULE = "rule"
-    """A deterministic policy that fired without a model or a person in the loop."""
-
-    SYSTEM = "system"
-    """Platform machinery: schedulers, retention jobs, integrity checks."""
 
 
 class AuditWriteError(RuntimeError):
