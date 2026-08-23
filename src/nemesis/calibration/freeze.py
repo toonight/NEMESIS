@@ -25,7 +25,7 @@ guarantee, and it is the only one that sees a bare literal inside a function bod
 field default, or a two-line logic change that touches no constant at all. `engine_drifted()`
 names the modules that moved.
 
-**Every module-level constant**, by normalised syntax, in `CONSTANT_DIGESTS` — 492 of them,
+**Every module-level constant**, by normalised syntax, in `CONSTANT_DIGESTS` — 499 of them,
 with no classification whatsoever. A dial does not have to hold a digit and does not have to
 look like a table; four rules for deciding what counted were tried and all four excluded
 something load-bearing. `constants_drifted()` names what moved, appeared or vanished.
@@ -135,7 +135,7 @@ CALIBRATION_CONSTANTS: Final[tuple[str, ...]] = (
 """The curated epistemic subset, named as ``module:NAME`` and frozen by **imported value**.
 
 Not "every number": most of what decides a published figure here is not a number at all — of the
-492 dials `discovered_constants()` covers, 348 hold no numeric literal. And not the completeness
+499 dials `discovered_constants()` covers, 354 hold no numeric literal. And not the completeness
 guarantee either, which is the job of the two syntactic digests; this list is deliberately
 curated, so it is allowed to be incomplete in a way they are not.
 
@@ -288,6 +288,13 @@ CONSTANT_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis.collaboration.providers.local:_SAFE_KEY": "aac5f98a2d9d64e5",
         "nemesis.collaboration.providers.registry:DEFAULT_PROVIDER": "2f0d287c962ee682",
         "nemesis.collaboration.providers.registry:PROVIDERS": "47ef34f172dd524a",
+        "nemesis.collaboration.publisher:ACTION_BIND_ACTOR": "4e79b975de76ae43",
+        "nemesis.collaboration.publisher:ACTION_OPEN_CHANNEL": "9faac86bde84d534",
+        "nemesis.collaboration.publisher:ACTION_PUBLISH": "7457d47937b80d77",
+        "nemesis.collaboration.publisher:ACTION_READ_INTENT": "94bee46cf2548efd",
+        "nemesis.collaboration.publisher:ACTION_READ_SIGNALS": "c5cf42c459871a6b",
+        "nemesis.collaboration.publisher:MAX_INPUT_LENGTH": "ea3d784b639f1625",
+        "nemesis.collaboration.publisher:OUTCOME_REFUSED_DISCLOSURE": "001402fac62aee88",
         "nemesis.collect.base:CONNECTOR_VERSION": "d1134bd96f5e31fb",
         "nemesis.collect.base:FIXTURE_SET": "8149c197f890fe74",
         "nemesis.collect.base:QUALIFIER_GLOBALLY_UNIQUE": "9988864a7b7ef12e",
@@ -800,7 +807,7 @@ def discovered_constants(tree: Path | None = None) -> dict[str, str]:
     `EXCLUDED_CONCLUSIONS`, four security tables made of plain strings. The module digest covered
     them, so it was never a bypass; the claim that every dial was *named* was simply false.
 
-    So there is no rule now. Every module-level upper-case assignment is a dial, 492 of them,
+    So there is no rule now. Every module-level upper-case assignment is a dial, 499 of them,
     and the cost of including the genuine prose is nothing: rewording a message already moves
     that module's syntax digest, so no new failure mode is introduced by naming it too.
 
@@ -952,14 +959,14 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/calibration/harness.py": "1b251a700a9cf876",
         "nemesis/calibration/scoring.py": "b2e7a193a30d65a1",
         "nemesis/cli/__init__.py": "ad2e13b69c4fc1fd",
-        "nemesis/cli/main.py": "bfe15d782bb371bb",
+        "nemesis/cli/main.py": "f757d824da49e6b6",
         "nemesis/collaboration/__init__.py": "ca1145a798cbf210",
         "nemesis/collaboration/approvals.py": "9e5aef566b46d5d1",
         "nemesis/collaboration/base.py": "0f24972d696c4060",
-        "nemesis/collaboration/demonstration.py": "39c8a0e0c5cc8b47",
+        "nemesis/collaboration/demonstration.py": "dc979a4713f99d22",
         "nemesis/collaboration/events.py": "ff3f238a4fe8440b",
         "nemesis/collaboration/identities.py": "a70773dde74fa74d",
-        "nemesis/collaboration/outbox.py": "bfdd909991c8e298",
+        "nemesis/collaboration/outbox.py": "9a730ff313bfd4c0",
         "nemesis/collaboration/providers/__init__.py": "ca1145a798cbf210",
         "nemesis/collaboration/providers/buzz/__init__.py": "ca1145a798cbf210",
         "nemesis/collaboration/providers/buzz/provider.py": "60500894d273f034",
@@ -967,6 +974,7 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/collaboration/providers/buzz/wire.py": "c189e4bd40f7e2fb",
         "nemesis/collaboration/providers/local.py": "b562c27002f59de6",
         "nemesis/collaboration/providers/registry.py": "3f06a0cbfdd90da1",
+        "nemesis/collaboration/publisher.py": "2795a37b55ec8a5d",
         "nemesis/collect/__init__.py": "ad2e13b69c4fc1fd",
         "nemesis/collect/base.py": "b1e03b526cdb8019",
         "nemesis/collect/dark_web.py": "2a1fa5c9e03df787",
@@ -1054,7 +1062,7 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/ports/effects.py": "52e15df7ab222655",
         "nemesis/ports/identity.py": "e2cc63ebcc7f117c",
         "nemesis/ports/isolation.py": "3304b03d616feaea",
-        "nemesis/ports/storage.py": "e63004243bec62a5",
+        "nemesis/ports/storage.py": "66a510c423666609",
         "nemesis/pursuit/__init__.py": "ad2e13b69c4fc1fd",
         "nemesis/pursuit/engine.py": "9436ef99a9a9c8cf",
         "nemesis/pursuit/investigation.py": "69e3d2c8b22a5960",
