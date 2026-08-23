@@ -18,6 +18,7 @@ forbidden_modules =
     nemesis.audit
     nemesis.collect
     nemesis.collaboration
+    nemesis.evolution
     nemesis.pursuit
     nemesis.resolve
     nemesis.attribute
@@ -54,6 +55,7 @@ forbidden_modules =
     nemesis.graph
     nemesis.collect
     nemesis.collaboration
+    nemesis.evolution
     nemesis.pursuit
     nemesis.resolve
     nemesis.attribute
@@ -73,6 +75,7 @@ forbidden_modules =
     nemesis.authz
     nemesis.disrupt
     nemesis.collaboration
+    nemesis.evolution
 
 ; --- Least privilege: analysis planes need no network -------------------------
 [importlinter:contract:analysis-has-no-network]
@@ -95,6 +98,7 @@ forbidden_modules =
     nemesis.graph
     nemesis.collect
     nemesis.collaboration
+    nemesis.evolution
     nemesis.pursuit
     nemesis.resolve
     nemesis.attribute
@@ -135,6 +139,7 @@ source_modules =
     nemesis.pilot.providers
 forbidden_modules =
     nemesis.pilot.mediator
+    nemesis.evolution
     nemesis.pursuit
     nemesis.effects
     nemesis.authz
@@ -194,9 +199,73 @@ forbidden_modules =
     nemesis.disrupt
     nemesis.effects
     nemesis.pilot
+    nemesis.evolution
     nemesis.api
     nemesis.slice
     nemesis.cli
+
+; --- Invariant 6 + ADR-0011: the Evolution plane holds none of the limiter's handles ---------
+; The Evolution plane sits ABOVE the pilot seam and drives it. That placement is the whole design
+; and it is also the risk: a research loop that could reach past the mediator would be a research
+; loop that made the limiter optional. So it may name the seam it drives -- `nemesis.pilot` -- and
+; the read models of what it is driving, and nothing that acts.
+;
+; `allow_indirect_imports` is set deliberately and is the one subtlety here. `nemesis.pilot.mediator`
+; imports the envelope, the effects registry and the engine, because holding them is its job; a
+; contract without this flag would therefore report Evolution as reaching all three transitively and
+; would be unsatisfiable without severing Evolution from the very seam it must go through. What is
+; forbidden is what this package can *name*: no module under `nemesis.evolution` may import an
+; effect adapter, the authorization plane (capability minting, signing keys, the spend ledger), the
+; vault, the graph implementation, a connector, or the pursuit engine that executes pivots.
+;
+; Reading the graph, the claim store and evidence metadata happens through narrow Protocols in
+; `nemesis.evolution.ports`, which a caller satisfies with the store it already holds. A Protocol
+; bounds what a caller hands over; this contract bounds what the package can reach for itself.
+[importlinter:contract:evolution-holds-no-platform-handles]
+name = The Evolution plane cannot reach effects, authorization, evidence, the graph or the engine
+type = forbidden
+allow_indirect_imports = True
+source_modules =
+    nemesis.evolution
+forbidden_modules =
+    nemesis.effects
+    nemesis.authz
+    nemesis.evidence
+    nemesis.graph
+    nemesis.collect
+    nemesis.disrupt
+    nemesis.resolve
+    nemesis.attribute
+    nemesis.audit
+    nemesis.api
+    nemesis.cli
+    nemesis.slice
+    nemesis.pursuit.engine
+    nemesis.pursuit.materialize
+    nemesis.pursuit.policy
+
+; --- The pilot seam does not know the Evolution plane exists ---------------------------------
+; The other direction, and it matters as much. The four-verb vocabulary, the mediator and every
+; provider adapter must behave identically whether a long-horizon driver is running or not --
+; which is what makes every containment test written before this plane existed still the test of
+; record. A `nemesis.pilot` that imported `nemesis.evolution` could branch on it, and a control
+; with a branch for "when the research loop is driving" is a control with an off switch.
+;
+; The layers contract below already implies this. It is stated separately because the layering
+; would also be satisfied by moving Evolution underneath the pilot, and this contract is the one
+; that fails if somebody does.
+[importlinter:contract:pilot-does-not-know-about-evolution]
+name = The pilot seam and its benchmark cannot import the Evolution plane
+type = forbidden
+source_modules =
+    nemesis.pilot
+    nemesis.pilotbench
+    nemesis.pursuit
+    nemesis.collaboration
+    nemesis.core
+    nemesis.ports
+forbidden_modules =
+    nemesis.evolution
 
 ; --- Overall layering ---------------------------------------------------------
 [importlinter:contract:layers]
@@ -207,6 +276,7 @@ layers =
     nemesis.pilotbench
     nemesis.slice : nemesis.calibration
     nemesis.api
+    nemesis.evolution
     nemesis.pilot
     nemesis.pursuit
     nemesis.disrupt : nemesis.attribute : nemesis.resolve : nemesis.effects

@@ -84,6 +84,7 @@ from nemesis.pilot.moves import (
     PilotMove,
     RecordBelief,
     RequestEffect,
+    ResearchContext,
     Ruling,
     RulingStatus,
     RunPivot,
@@ -129,6 +130,59 @@ Read once at session open from a typed identity and never from a turn's metadata
 untrusted code on the audit path. Enumerated here rather than relied on through dict-merge
 ordering, because the merge order was the bug: it overrode these keys only when a session
 identity existed, so a pilot exposing no identity at all could supply them itself."""
+
+
+CONTEXT_REDACTION: Final = "[redacted]"
+"""What an internal marker becomes inside a research context.
+
+Ten characters, and shorter than the shortest marker in
+:data:`~nemesis.core.disclosure.INTERNAL_MARKERS` — which is the whole reason it is a different
+token from the one :func:`_redact_markers` uses. Redaction inside a research context happens
+after the model's own length bounds have been checked, so a substitution that could *lengthen* a
+line would carry a briefing past a cap that nothing re-checks. A test asserts the inequality
+rather than leaving it to whoever adds the next marker.
+"""
+
+
+def _redacted_context(context: ResearchContext | None) -> ResearchContext | None:
+    """Neutralise NEMESIS's internal vocabulary in the driver-supplied research context.
+
+    Redaction rather than refusal, and the choice is the same one the entity listing makes for a
+    natural key. Every string in a :class:`~nemesis.pilot.moves.ResearchContext` originates with a
+    model that ran earlier in this trajectory or with a human typing into a collaboration channel
+    — both adversary-reachable. Raising :class:`DisclosureViolationError` on a marker found there
+    would hand anyone who can put ``same_operator_as`` into a chat message a way to halt the whole
+    investigation, which is a denial of service dressed as a control.
+
+    There is no leak to prevent in that case: nothing in this structure is classified, because a
+    driver may only fill it from material the briefing already carries plus its own record of what
+    it tried. So the token is neutralised where an adversary can reach, and the fail-closed scan at
+    the end of :meth:`PilotMediator._brief` keeps its single meaning for the fields the platform
+    itself authors.
+
+    Field-agnostic on purpose. It walks whatever the model declares rather than a list of field
+    names somebody remembered, so a context field added later is redacted the day it appears
+    instead of the day someone notices it was not.
+    """
+    if context is None:
+        return None
+    return context.model_copy(
+        update={
+            field: (
+                _redact(value)
+                if isinstance(value, str)
+                else tuple(_redact(item) for item in value)
+                if isinstance(value, tuple)
+                else value
+            )
+            for field, value in context
+        }
+    )
+
+
+def _redact(text: str) -> str:
+    """Substitute every internal marker with a token no longer than the marker it replaces."""
+    return _MARKER_PATTERN.sub(CONTEXT_REDACTION, text)
 
 
 def _redact_markers(text: str) -> str:
@@ -353,7 +407,84 @@ class PilotMediator:
             outcome="opened",
             extra={"budget": f"{total_budget}"},
         )
+        return await self._run(
+            pilot,
+            pilot_actor,
+            investigation,
+            identity,
+            max_moves=self._max_moves,
+            research_context=None,
+        )
 
+    async def continue_session(
+        self,
+        pilot: AutonomousPilot,
+        investigation: Investigation,
+        *,
+        max_moves: int | None = None,
+        research_context: ResearchContext | None = None,
+    ) -> PilotSession:
+        """Run a bounded segment of an investigation that is already open.
+
+        The seam a **long-horizon** driver sits behind, and the reason it exists is that
+        :meth:`drive` opens a new investigation every time it is called. A driver that wanted to
+        evaluate a trajectory every few moves would therefore have had to restart the pursuit on
+        each segment — new hypotheses, new branches, a budget that resets — which loses precisely
+        the accumulated state the exercise is about, and hands back a fresh pivot budget on every
+        step. Continuing one investigation instead is what makes a five-hundred-move run one run.
+
+        Nothing about the seam changes. The same closed vocabulary, the same envelope, the same
+        challenger, the same disclosure wall, the same audit records — this method is the loop
+        `drive` already ran, entered at a different point. Two bounds are worth naming because a
+        caller supplies them:
+
+        ``max_moves`` is **clamped down, never up**: ``min(requested, self._max_moves)``. The
+        deployment's ceiling is a containment control and a segment cannot buy itself a larger
+        one; asking for more than the mediator was constructed with gets the mediator's number.
+
+        ``research_context`` is bounded by its own model and redacted in :meth:`_brief` before it
+        reaches a briefing. It is operational memory and other people's suggestions — data the
+        pilot reads, at the same standing as everything else it reads.
+        """
+        if max_moves is not None and max_moves < 0:
+            raise ValueError("a move ceiling cannot be negative")
+        ceiling = self._max_moves if max_moves is None else min(max_moves, self._max_moves)
+        pilot_actor = new_id(IdPrefix.ACTOR)
+        identity = self._identity_of(pilot)
+        await self._record_session(
+            pilot,
+            pilot_actor,
+            investigation,
+            identity,
+            outcome="resumed",
+            extra={
+                "moves_allowed": str(ceiling),
+                "budget_remaining": f"{investigation.budget_remaining:.2f}",
+                "research_context": "present" if research_context is not None else "absent",
+                "directive": research_context.directive if research_context else "",
+            },
+        )
+        return await self._run(
+            pilot,
+            pilot_actor,
+            investigation,
+            identity,
+            max_moves=ceiling,
+            research_context=research_context,
+        )
+
+    async def _run(
+        self,
+        pilot: AutonomousPilot,
+        pilot_actor: str,
+        investigation: Investigation,
+        identity: ProviderIdentity | None,
+        *,
+        max_moves: int,
+        research_context: ResearchContext | None,
+    ) -> PilotSession:
+        """The move loop. Entered by :meth:`drive` on a new investigation and by
+        :meth:`continue_session` on one already open; identical in every other respect."""
         transcript: list[TurnRecord] = []
         malformed_streak = 0
         last_ruling: Ruling | None = None
@@ -380,10 +511,13 @@ class PilotMediator:
             )
             return malformed_streak >= self._max_consecutive_malformed
 
-        for turn in range(self._max_moves):
+        for turn in range(max_moves):
             try:
                 briefing = await self._brief(
-                    investigation, last_ruling, moves_remaining=self._max_moves - turn
+                    investigation,
+                    last_ruling,
+                    moves_remaining=max_moves - turn,
+                    research_context=research_context,
                 )
             except DisclosureViolationError:
                 # Recorded, then re-raised untouched. This is NOT handling it — the wall's
@@ -492,7 +626,7 @@ class PilotMediator:
                 concluded = True
                 break
         else:
-            halted = f"reached the {self._max_moves}-move ceiling without concluding"
+            halted = f"reached the {max_moves}-move ceiling without concluding"
 
         await self._record_session(
             pilot,
@@ -873,6 +1007,7 @@ class PilotMediator:
         last_ruling: Ruling | None,
         *,
         moves_remaining: int,
+        research_context: ResearchContext | None = None,
     ) -> Briefing:
         entity_ids: list[str] = []
         seen: set[str] = set()
@@ -994,6 +1129,7 @@ class PilotMediator:
             hypotheses=hypotheses,
             entities=tuple(entities),
             envelope=envelope,
+            research_context=_redacted_context(research_context),
             last_ruling=safe_last_ruling,
         )
 

@@ -6,9 +6,9 @@
 
 [![CI](https://github.com/toonight/NEMESIS/actions/workflows/ci.yml/badge.svg)](https://github.com/toonight/NEMESIS/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.13-1f6feb)
-![Tests](https://img.shields.io/badge/tests-1485-2ea043)
+![Tests](https://img.shields.io/badge/tests-1642-2ea043)
 ![Typing](https://img.shields.io/badge/mypy-strict-2ea043)
-![Plane contracts](https://img.shields.io/badge/plane%20contracts-11%20enforced-ff8a3d)
+![Plane contracts](https://img.shields.io/badge/plane%20contracts-13%20enforced-ff8a3d)
 ![Status](https://img.shields.io/badge/status-default%20simulated%20%7C%20opt--in%20Tor-e5a50a)
 
 **N**etworked **E**ngine for **M**alicious **E**ntity **S**urveillance, **I**dentification &amp; **S**uppression
@@ -167,8 +167,9 @@ can be made by *reading what would leave the building* rather than imagining it.
 
 ## Architecture
 
-Eleven planes, separated by **trust level** rather than by function. Two components sit in
-different planes when a compromise of one must not become a compromise of the other.
+Twelve planes, separated by **trust level** rather than by function. Two components sit in
+different planes when a compromise of one must not become a compromise of the other. Eleven of
+them are the investigation pipeline; the twelfth sits above it and drives it.
 
 | Plane | | Status |
 |---|---|---|
@@ -183,10 +184,16 @@ different planes when a compromise of one must not become a compromise of the ot
 | 9 · Authorization | Ed25519, target binding, dual control, expiry, verified identity | `IMPLEMENTED` |
 | 10 · Effects | no ambient authority; simulation and drafting only | `SIMULATED` |
 | 11 · Resurgence | post-disruption watch | `SIMULATED` |
+| 12 · Evolution | the long-horizon research loop **above** the pilot seam — it holds no engine, no writer, no vault and no capability | `IMPLEMENTED` (single lineage) / `PROPOSED` (multi-model islands) |
 
 The arrows that **do not** exist matter as much as those that do. Collection holds hostile
 content and Effects holds outward reach; if those two could talk, planted content could
-steer a real-world action. 11 `import-linter` contracts enforce that in CI.
+steer a real-world action. 13 `import-linter` contracts enforce that in CI.
+
+Plane 12 is the one that most needs its absences stated. It decides what the untrusted model is
+*asked* next across hundreds of moves — and every action it causes is that model proposing one of
+four verbs, ruled on by a mediator the plane cannot reach. A research loop that made the limiter
+more permissive would be a worse system than no research loop.
 
 ## Scope and current state
 

@@ -48,6 +48,11 @@ class IdPrefix(StrEnum):
     COLLECTION = "coll"
     AUDIT = "aud"
     COLLABORATION = "collab"
+    EVOLUTION = "evo"
+    CHECKPOINT = "ckpt"
+    EVOLUTION_BRANCH = "evb"
+    DIRECTIVE = "dctv"
+    MEMORY = "mem"
 
 
 _UUID7_ID: Final = re.compile(r"^[a-z]+_[0-9a-f]{32}$")
@@ -133,6 +138,17 @@ OperationId = Annotated[str, _make_validator(IdPrefix.OPERATION, content_address
 ActorId = Annotated[str, _make_validator(IdPrefix.ACTOR, content_addressed=False)]
 CollectionId = Annotated[str, _make_validator(IdPrefix.COLLECTION, content_addressed=False)]
 AuditId = Annotated[str, _make_validator(IdPrefix.AUDIT, content_addressed=False)]
+EvolutionRunId = Annotated[str, _make_validator(IdPrefix.EVOLUTION, content_addressed=False)]
+CheckpointId = Annotated[str, _make_validator(IdPrefix.CHECKPOINT, content_addressed=False)]
+EvolutionBranchId = Annotated[
+    str, _make_validator(IdPrefix.EVOLUTION_BRANCH, content_addressed=False)
+]
+DirectiveId = Annotated[str, _make_validator(IdPrefix.DIRECTIVE, content_addressed=False)]
+MemoryEntryId = Annotated[str, _make_validator(IdPrefix.MEMORY, content_addressed=False)]
+"""Evolution-plane identifiers. Time-ordered, because an evolution object's identity is its
+existence at a point in a trajectory — a checkpoint recording the same graph digest twice is
+two different moments in the run, not one object observed twice, and collapsing them would
+erase exactly the repetition the plateau detector exists to notice."""
 
 # Content-addressed: identity is the content itself.
 ClaimId = Annotated[str, _make_validator(IdPrefix.CLAIM, content_addressed=True)]
