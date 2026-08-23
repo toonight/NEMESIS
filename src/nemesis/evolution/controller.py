@@ -32,7 +32,7 @@ Status: `IMPLEMENTED`.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -68,6 +68,7 @@ from nemesis.evolution.stagnation import (
     StagnationAssessment,
     StagnationDetector,
     StepRecord,
+    tier_one_movement,
 )
 from nemesis.evolution.supervisor import (
     CONTINUE_ON_FAILURE,
@@ -83,7 +84,12 @@ from nemesis.evolution.supervisor import (
     without_imperative_rationale,
 )
 from nemesis.pilot.mediator import PilotMediator, PilotSession
-from nemesis.pilot.moves import MAX_CONTEXT_ITEM_LENGTH, MAX_CONTEXT_ITEMS, ResearchContext
+from nemesis.pilot.moves import (
+    MAX_CONTEXT_ITEM_LENGTH,
+    MAX_CONTEXT_ITEMS,
+    ResearchContext,
+    RunPivot,
+)
 from nemesis.pilot.pilot import AutonomousPilot
 from nemesis.pursuit.investigation import Investigation
 
@@ -109,6 +115,33 @@ MAX_CONSECUTIVE_INVALID = 2
 Two. A gate failure is not an unlucky pivot — it means the trajectory produced a state that must
 not be promoted at any score, and a loop that kept spending budget to produce more of them is a
 loop doing harm slowly."""
+
+
+def _families_proposed_in(session: PilotSession) -> tuple[str, ...]:
+    """The pivot families this step proposed, in order, without repeats.
+
+    Per step, and that word is the fix. This used to be ``checkpoint.pivots_attempted``, which
+    is built from ``investigation.all_executed_pivots`` — the investigation's **cumulative**
+    history. A family run once therefore appeared in every later checkpoint, so the detector's
+    ``REPEATED_PIVOT_FAMILY`` signal counted it once per step in the window and tripped forever
+    on a run that never repeated anything. The reference demonstration escaped it only by
+    overriding the window to 3, where the count lands exactly on a strict ``>``.
+
+    Read from the transcript's *proposals* rather than from what the mediator accepted, because
+    the signal this feeds says "the pilot keeps asking the same question" — and a pilot that
+    proposes the same refused pivot ten times is exactly the behaviour it exists to notice.
+    """
+    return _unique(
+        move.pivot_type.value
+        for move in (turn.move for turn in session.transcript)
+        if isinstance(move, RunPivot)
+    )
+
+
+def _families_from_facts(facts: Mapping[str, str]) -> tuple[str, ...]:
+    """Recover a resumed step's families from the lineage facts it recorded."""
+    raw = facts.get("pivot_families", "")
+    return tuple(part for part in raw.split(",") if part)
 
 
 @dataclass
@@ -143,6 +176,21 @@ class EvolutionState:
     steps: list[StepRecord] = field(default_factory=list)
     step_index: int = 0
     consecutive_invalid: int = 0
+    directives_tried_without_gain: tuple[str, ...] = ()
+    """Every posture issued during the current gainless streak, not just the last one.
+
+    A set rather than a single value because a single value is defeatable by alternation, and
+    was. The supervisor's two guards both compared against the *immediately previous* directive,
+    so a run that cycled ``seek_independent_origin`` and ``revisit_prior_branch`` found neither
+    ever "in force for two steps" — and the ``STOP_LOW_YIELD`` fallback below them, whose whole
+    job is to end a run whose repertoire is spent, became unreachable. Measured on the reference
+    demonstration: four consecutive steps with no promotion, no epistemic gain, every candidate
+    rejected and the budget burning, and the supervisor answered with the same two directives in
+    turn, for ever.
+
+    Cleared the moment a tier-1 term moves, because a posture that worked is not a posture that
+    has been tried and failed."""
+
     directive_steps_without_gain: int = 0
     """How long the standing directive has been in force without moving a tier-1 term.
 
@@ -274,7 +322,11 @@ class EvolutionController:
             StepRecord(
                 evaluation=entry.checkpoint.evaluation,
                 promoted=entry.kind is LineageEventKind.CHECKPOINT_PROMOTED,
-                pivot_families=entry.checkpoint.pivots_attempted,
+                # Same per-step reading as `step()`. The checkpoint's `pivots_attempted` is
+                # the investigation's CUMULATIVE history and is kept as such for the
+                # projection; a resumed run that fed it to the detector would inherit the
+                # defect this replaced.
+                pivot_families=_families_from_facts(entry.facts),
                 state_digest=entry.checkpoint.graph_digest,
             )
             for entry in verdicts
@@ -377,12 +429,16 @@ class EvolutionController:
             CandidateStatus.REJECTED: LineageEventKind.CANDIDATE_REJECTED,
             CandidateStatus.INVALID: LineageEventKind.CANDIDATE_INVALID,
         }[status]
+        families = _families_proposed_in(session)
         self._lineage.append(
             run_id=state.run_id,
             kind=kind,
             occurred_at=self._clock(),
             detail=self._verdict_detail(settled, promoted),
-            facts=self._score_facts(settled),
+            # The families are recorded beside the score because `resume` rebuilds the
+            # detector's window from these facts, and the per-step reading cannot be
+            # recovered from the checkpoint (whose `pivots_attempted` is cumulative).
+            facts=self._score_facts(settled) | {"pivot_families": ",".join(families)},
             checkpoint=checkpoint,
         )
 
@@ -392,7 +448,7 @@ class EvolutionController:
             StepRecord(
                 evaluation=settled,
                 promoted=promoted,
-                pivot_families=checkpoint.pivots_attempted,
+                pivot_families=families,
                 state_digest=checkpoint.graph_digest,
             )
         )
@@ -403,11 +459,11 @@ class EvolutionController:
         if promoted:
             state.head = checkpoint
             state.head_measurement = settled.measurement
-        state.directive_steps_without_gain = (
-            0
-            if settled.score.made_epistemic_progress
-            else state.directive_steps_without_gain + (1 if state.directive is not None else 0)
-        )
+        if settled.score.made_epistemic_progress:
+            state.directive_steps_without_gain = 0
+            state.directives_tried_without_gain = ()
+        else:
+            state.directive_steps_without_gain += 1 if state.directive is not None else 0
 
         assessment = self._detector.assess(state.steps, pursuit_budget=investigation.total_budget)
         issued: IssuedDirective | None = None
@@ -421,6 +477,10 @@ class EvolutionController:
             )
             issued = await self._consult(state, assessment)
             state.directive = issued.directive
+            # Remembered for the whole gainless streak, so a posture cannot be re-offered as
+            # though it were new simply because a different one was tried in between.
+            if issued.directive.directive.value not in state.directives_tried_without_gain:
+                state.directives_tried_without_gain += (issued.directive.directive.value,)
 
         self._apply_stop_conditions(state, session, assessment)
         return StepOutcome(
@@ -682,6 +742,7 @@ class EvolutionController:
             steps_remaining=max(0, self._max_steps - state.step_index),
             last_directive=state.directive.directive.value if state.directive else "",
             directive_steps_without_gain=state.directive_steps_without_gain,
+            directives_tried_without_gain=state.directives_tried_without_gain,
         )
         self._lineage.append(
             run_id=state.run_id,
@@ -814,7 +875,20 @@ class EvolutionController:
                 f"{finding.gate.value}: {finding.detail}" for finding in evaluation.gate_findings
             )[:1000]
         if promoted:
-            return "the candidate beat the incumbent on the epistemic tier"
+            # Names the tier that actually moved, because `promotes()` does not compare
+            # epistemic tiers and never did. It checks `made_any_progress` — any tier-1 term
+            # OR any tier-2 term above zero — so a step promoted purely on `novel_pivot_families`
+            # was being written into the hash-chained lineage as having "beat the incumbent on
+            # the epistemic tier" with an all-zero epistemic key. A false sentence in the record
+            # an auditor reads is worse than a vague one, and this one was false on exactly the
+            # promotions worth questioning.
+            moved = tier_one_movement(evaluation.score)
+            if moved > 0:
+                return f"promoted on epistemic progress (tier-1 movement {moved:g})"
+            return (
+                "promoted on utility only: no tier-1 term moved, and the gain was in entities, "
+                "relationships or a pivot family the memory had not seen"
+            )
         return (
             "the candidate is valid and did not beat the incumbent; kept in the trajectory so the "
             "direction is not retried for free"

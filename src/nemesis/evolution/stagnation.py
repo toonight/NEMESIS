@@ -27,7 +27,12 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from nemesis.evolution.models import MAX_NOTE_LENGTH, CandidateStatus, EvaluationResult
+from nemesis.evolution.models import (
+    MAX_NOTE_LENGTH,
+    CandidateStatus,
+    EvaluationResult,
+    ScoreVector,
+)
 
 
 class StagnationSignal(StrEnum):
@@ -130,6 +135,27 @@ class StepRecord:
     state_digest: str
 
 
+def tier_one_movement(score: ScoreVector) -> float:
+    """How far the epistemic tier moved in one step: **every** term, not four of six.
+
+    Folded over :meth:`~nemesis.evolution.models.ScoreVector.epistemic_key` rather than over a
+    hand-written list, because a hand-written list is what went wrong. The first version read
+    ``epistemic_key[0]`` and ``[1]`` positionally and then named ``contradictions_resolved`` and
+    ``hypotheses_settled`` by attribute — the same tuple, reached two ways — and the two terms
+    at indices 4 and 5 were never added at all. So a step that gained an evidence-backed claim,
+    which is a tier-1 gain, counted as zero movement, and the detector reported "tier-1 movement
+    over the window was 0" about a trajectory that was gaining ground every step. Measured
+    against the shipped default policy: four steps each gaining an evidence-backed claim were
+    assessed as a plateau.
+
+    Reading the key means a term added to the tier is counted the day it exists, rather than the
+    day somebody remembers this function. Negative terms are clamped for the same reason they
+    were before: this is a "did anything move forward" sum, and a regression on one term must
+    not be able to cancel a gain on another into an apparent zero.
+    """
+    return sum(max(0.0, float(term)) for term in score.epistemic_key)
+
+
 class StagnationDetector:
     """Deterministic plateau detection over a window of recent steps."""
 
@@ -162,13 +188,7 @@ class StagnationDetector:
         reasons: list[str] = []
 
         promotions = sum(1 for step in recent if step.promoted)
-        epistemic = sum(
-            max(0, step.evaluation.score.epistemic_key[0])
-            + max(0, step.evaluation.score.epistemic_key[1])
-            + step.evaluation.score.contradictions_resolved
-            + max(0, step.evaluation.score.hypotheses_settled)
-            for step in recent
-        )
+        epistemic = sum(tier_one_movement(step.evaluation.score) for step in recent)
         rejected = sum(
             1 for step in recent if step.evaluation.status is not CandidateStatus.PROMOTED
         )
@@ -255,4 +275,5 @@ __all__ = [
     "StagnationPolicy",
     "StagnationSignal",
     "StepRecord",
+    "tier_one_movement",
 ]
