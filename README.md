@@ -6,9 +6,9 @@
 
 [![CI](https://github.com/toonight/NEMESIS/actions/workflows/ci.yml/badge.svg)](https://github.com/toonight/NEMESIS/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.13-1f6feb)
-![Tests](https://img.shields.io/badge/tests-1188-2ea043)
+![Tests](https://img.shields.io/badge/tests-1467-2ea043)
 ![Typing](https://img.shields.io/badge/mypy-strict-2ea043)
-![Plane contracts](https://img.shields.io/badge/plane%20contracts-10%20enforced-ff8a3d)
+![Plane contracts](https://img.shields.io/badge/plane%20contracts-11%20enforced-ff8a3d)
 ![Status](https://img.shields.io/badge/status-default%20simulated%20%7C%20opt--in%20Tor-e5a50a)
 
 **N**etworked **E**ngine for **M**alicious **E**ntity **S**urveillance, **I**dentification &amp; **S**uppression
@@ -186,7 +186,7 @@ different planes when a compromise of one must not become a compromise of the ot
 
 The arrows that **do not** exist matter as much as those that do. Collection holds hostile
 content and Effects holds outward reach; if those two could talk, planted content could
-steer a real-world action. 10 `import-linter` contracts enforce that in CI.
+steer a real-world action. 11 `import-linter` contracts enforce that in CI.
 
 ## Scope and current state
 

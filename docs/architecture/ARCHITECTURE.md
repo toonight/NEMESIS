@@ -60,6 +60,14 @@ made, see [`docs/adr/`](../adr/). For what the adversary is assumed to do, see
 
   AUDIT TRAIL spans everything. Hash-chained, append-only, records denials as
   carefully as approvals.
+
+  COLLABORATION sits to one side of all of it, below every plane above, and reads
+  from none of them. Things that have already been established are *projected* into
+  it — with their epistemic standing intact and their classification checked — and
+  humans read those projections in a channel. What comes back is a signal, never an
+  instruction and never an authorization. The arrow into the AUTHORIZATION GATEWAY
+  that a reader expects here does not exist: `import-linter` forbids it, and the
+  contract was verified to break on a probe rather than merely to pass.
 ```
 
 The arrows that *do not* exist are as load-bearing as the ones that do. Effects has no
@@ -81,6 +89,7 @@ compromise of one must not become a compromise of the other.
 | Evidence | **Evidence** | Its own operator is in the threat model. |
 | Graph, claims | Data | Revisable; poisoning is expected and must leave a trace. |
 | Pursuit, disrupt, authz | Control | Decides what happens next. |
+| Collaboration | **Outward** | Talks to humans on a backend NEMESIS does not control. A compromise learns what was published and nothing else: no authorization, no evidence, no platform handle. |
 | Core | — | Pure. No I/O, no internal dependencies. |
 
 The collection plane holds hostile content and the effects plane holds outward reach. If
@@ -188,6 +197,7 @@ reviewer's attention. Every row below was re-checked against the code on that da
 | `sandbox/` | — | `IMPLEMENTED` — one confinement launch path, two opposite policies |
 | `audit/` | — | `IMPLEMENTED` — hash-chained, denials recorded, single-writer enforced |
 | `calibration/` | — | `IMPLEMENTED` (structural) — coherence laws that need no ground truth. **Not** empirical: no confidence figure has been scored against a resolved case, and no corpus exists |
+| `collaboration/` | — | `IMPLEMENTED` (local provider) / **unwired on the wire** (Buzz) — projects established findings into human channels and reads replies back as intents that authorize nothing. Default provider is a local directory and reaches no network. The Buzz seat implements the relay's wire format and ships no transport and no signer (ADR-0010). |
 | `ui/` | — | `IMPLEMENTED` — the analyst view, uncertainty visible by default, filtered to DELIVERABLE-class material |
 | `cli/` | — | `IMPLEMENTED` — `demo`, `pilot`, `verify`, `view`, `corpus`, `calibrate`, `providers`, `pilot-preview`, `pilotbench` |
 | `slice/` | — | `IMPLEMENTED` — the end-to-end reference scenario and the pilot session it drives |

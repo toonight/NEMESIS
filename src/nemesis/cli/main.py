@@ -41,6 +41,7 @@ from typing import Annotated, Final
 
 try:
     import typer
+    from rich import box
     from rich.console import Console
     from rich.panel import Panel
     from rich.table import Table
@@ -64,6 +65,11 @@ except ModuleNotFoundError as missing:  # pragma: no cover - exercised by a clea
 
 from nemesis.attribute.dimensions import AttributionDimension, DimensionAssessment
 from nemesis.audit.trail import AppendOnlyAuditTrail, ChainVerification
+from nemesis.collaboration.demonstration import (
+    CollaborationDemonstration,
+    run_collaboration_demonstration,
+)
+from nemesis.collaboration.providers.registry import PROVIDERS as COLLABORATION_PROVIDERS
 from nemesis.core.confidence import ConfidenceBand, Opinion
 from nemesis.evidence.vault import FileSystemEvidenceVault, FileSystemVaultIntegrityReport
 from nemesis.pilot.providers.schema import MOVE_TOOL_NAMES
@@ -779,6 +785,126 @@ def demo(
 
     result = run_glass_anvil_scenario(workspace=workspace)
     render(console, result, stage=stage)
+
+
+@app.command()
+def collaborate(
+    workspace: Annotated[
+        Path | None,
+        typer.Option(help="Directory for the local channels and the publication outbox."),
+    ] = None,
+) -> None:
+    """Run the collaboration flow and stop at the authorization boundary.
+
+    Synthetic throughout, against the local provider. Contacts nothing: there is no relay,
+    no socket and no credential anywhere in this path. The point of the run is what it
+    refuses to do at the end.
+    """
+    console = Console()
+    result = asyncio.run(run_collaboration_demonstration(workspace=workspace))
+    _render_collaboration(console, result)
+
+
+@app.command(name="collab-providers")
+def collab_providers() -> None:
+    """List the collaboration backends this build knows, and what each can actually do."""
+    console = Console()
+    table = Table(title="Collaboration providers", box=box.SIMPLE_HEAVY)
+    table.add_column("key", style="bold")
+    table.add_column("what it is")
+    for key, description in COLLABORATION_PROVIDERS.items():
+        table.add_row(key, description)
+    console.print(table)
+    console.print(
+        Text(
+            "The Buzz seat implements the wire format and ships no transport and no signer, "
+            "so it reaches nothing until an operator supplies both. See ADR-0010.",
+            style="dim",
+        )
+    )
+
+
+def _render_collaboration(console: Console, result: CollaborationDemonstration) -> None:
+    console.print(
+        Panel(
+            Text.from_markup(
+                f"[bold]{result.published}[/bold] of {len(result.receipts)} events published "
+                f"to {len(result.channels)} channels via the [bold]{result.provider_name}[/bold] "
+                f"provider\n"
+                f"outbox: {result.outbox_pending} pending, "
+                f"{result.outbox_dead_letters} dead-lettered"
+            ),
+            title="Collaboration",
+            box=box.ROUNDED,
+        )
+    )
+
+    ladder = Table(title="What was published, and on what standing", box=box.SIMPLE_HEAVY)
+    ladder.add_column("standing", style="bold")
+    ladder.add_column("event type")
+    ladder.add_column("confidence")
+    ladder.add_column("delivery")
+    for event, receipt in zip(result.events, result.receipts, strict=True):
+        # A vacuous opinion publishes no number at all. Rendering `None` as 0.0 here would
+        # print a prior as a finding, which is the exact confusion `confidence` is nullable
+        # to prevent.
+        confidence = "—" if event.confidence is None else f"{event.confidence:.2f}"
+        ladder.add_row(event.standing.value, event.event_type, confidence, receipt.status.value)
+    console.print(ladder)
+
+    approval = Table(title="The approval request", box=box.SIMPLE_HEAVY)
+    approval.add_column("field", style="bold")
+    approval.add_column("value")
+    approval.add_row("operation", result.notice.operation.value)
+    approval.add_row(
+        "risk level",
+        f"{int(result.notice.risk)} — {result.notice.risk.name.lower().replace('_', ' ')}",
+    )
+    approval.add_row("targets", str(len(result.notice.targets)))
+    approval.add_row("proposal digest", result.notice.proposal_digest())
+    approval.add_row("responses close", result.notice.responses_close_at.isoformat())
+    console.print(approval)
+
+    replies = Table(title="What came back, and what it was worth", box=box.SIMPLE_HEAVY)
+    replies.add_column("intent", style="bold")
+    replies.add_column("author verified")
+    replies.add_column("authorizes")
+    replies.add_column("what was actually said", overflow="fold")
+    for intake in result.intakes:
+        replies.add_row(
+            intake.intent.value,
+            "yes" if intake.author_verified else "no",
+            Text("no", style="bold green") if not intake.authorizes else Text("YES", style="red"),
+            # The words, beside the reading. An adversarial review pointed out that this
+            # table showed only the parser's conclusion, so a human authorizer glancing at
+            # it saw "appears to approve" with no way to notice the message said the
+            # opposite. The parser is crude by design and will be wrong again; the reader
+            # is the last line of defence and cannot be one without the text.
+            Text(_excerpt(intake.excerpt), style="dim"),
+        )
+    console.print(replies)
+
+    console.print(
+        Panel(
+            Text(
+                "Stop. A verified reply quoting the correct proposal digest is an intent, not "
+                "an authorization. Minting a capability needs the authorization gateway and a "
+                "verified identity assertion, which the collaboration plane cannot import — "
+                "the layering forbids it and a contract names the package. See ADR-0010.",
+                style="bold",
+            ),
+            title="The authorization boundary",
+            box=box.ROUNDED,
+        )
+    )
+
+
+def _excerpt(text: str, limit: int = 90) -> str:
+    """One line of what a reply actually said, for the table beside the parser's reading."""
+    collapsed = " ".join(text.split())
+    if len(collapsed) <= limit:
+        return collapsed
+    return collapsed[: limit - 1] + "…"
 
 
 @app.command()

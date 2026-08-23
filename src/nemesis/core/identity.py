@@ -77,6 +77,37 @@ class Role(StrEnum):
     does not require the ability to act."""
 
 
+class ActorKind(StrEnum):
+    """Who or what performed an action.
+
+    Lives here rather than in the audit trail, where it was first written, because it is now
+    read by two planes that cannot see each other: the audit trail seals it into every entry,
+    and the collaboration plane sits below the audit trail in the layering and so cannot
+    import it. The alternative was a second four-member enum with the same members, which is
+    the shape of defect where a value is "agent" in one plane and "AGENT" in the other and
+    nothing compares equal at the boundary.
+
+    ``nemesis.audit.trail`` re-exports this name so every existing import keeps working, and
+    it does so with the redundant-looking ``import ActorKind as ActorKind``. That is not a
+    typo: mypy runs ``strict`` here, which implies ``no_implicit_reexport``, and the plain
+    form makes the name private to that module — the two callers that had imported it from
+    there for months stopped type-checking the moment this enum moved. The alias is what
+    keeps the re-export a promise rather than a runtime accident.
+
+    The distinction is operational: "an agent did this unsupervised" and "a named human
+    decided this" carry different weight in a review, and a trail that cannot separate them
+    cannot answer the first question anyone asks after an incident.
+    """
+
+    HUMAN = "human"
+    AGENT = "agent"
+    RULE = "rule"
+    """A deterministic policy that fired without a model or a person in the loop."""
+
+    SYSTEM = "system"
+    """Platform machinery: schedulers, retention jobs, integrity checks."""
+
+
 DEFAULT_TENANT: Final = "tenant:single"
 """The tenant of a deployment that serves one customer.
 

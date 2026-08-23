@@ -47,6 +47,7 @@ class IdPrefix(StrEnum):
     ACTOR = "actor"
     COLLECTION = "coll"
     AUDIT = "aud"
+    COLLABORATION = "collab"
 
 
 _UUID7_ID: Final = re.compile(r"^[a-z]+_[0-9a-f]{32}$")
@@ -135,5 +136,16 @@ AuditId = Annotated[str, _make_validator(IdPrefix.AUDIT, content_addressed=False
 
 # Content-addressed: identity is the content itself.
 ClaimId = Annotated[str, _make_validator(IdPrefix.CLAIM, content_addressed=True)]
+CollaborationEventId = Annotated[
+    str, _make_validator(IdPrefix.COLLABORATION, content_addressed=True)
+]
+"""Content-addressed on purpose, and the reason is delivery rather than storage.
+
+A collaboration event is published across a boundary that can fail after the write and
+before the acknowledgement, so the same event will be sent twice. Deriving the identifier
+from the content makes the second send recognisable as the first one — by the outbox that
+retries it and by any provider that stores it — instead of a duplicate nobody can tell
+apart from a genuine second occurrence of the same action.
+"""
 EvidenceId = Annotated[str, _make_validator(IdPrefix.EVIDENCE, content_addressed=True)]
 ObservationId = Annotated[str, _make_validator(IdPrefix.OBSERVATION, content_addressed=True)]
