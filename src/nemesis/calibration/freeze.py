@@ -25,7 +25,7 @@ guarantee, and it is the only one that sees a bare literal inside a function bod
 field default, or a two-line logic change that touches no constant at all. `engine_drifted()`
 names the modules that moved.
 
-**Every module-level constant**, by normalised syntax, in `CONSTANT_DIGESTS` — 499 of them,
+**Every module-level constant**, by normalised syntax, in `CONSTANT_DIGESTS` — 539 of them,
 with no classification whatsoever. A dial does not have to hold a digit and does not have to
 look like a table; four rules for deciding what counted were tried and all four excluded
 something load-bearing. `constants_drifted()` names what moved, appeared or vanished.
@@ -135,7 +135,7 @@ CALIBRATION_CONSTANTS: Final[tuple[str, ...]] = (
 """The curated epistemic subset, named as ``module:NAME`` and frozen by **imported value**.
 
 Not "every number": most of what decides a published figure here is not a number at all — of the
-499 dials `discovered_constants()` covers, 354 hold no numeric literal. And not the completeness
+539 dials `discovered_constants()` covers, 376 hold no numeric literal. And not the completeness
 guarantee either, which is the job of the two syntactic digests; this list is deliberately
 curated, so it is allowed to be incomplete in a way they are not.
 
@@ -522,6 +522,31 @@ CONSTANT_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis.evidence.vault:GENESIS_HASH": "5331b8352e875673",
         "nemesis.evidence.vault:_ARTIFACT_MODE": "18489d94c4c2fbcc",
         "nemesis.evidence.vault:_EVIDENCE_ID_RE": "fc179ed3159da6e7",
+        "nemesis.evolution.controller:DEFAULT_MAX_STEPS": "3caf27c32718835e",
+        "nemesis.evolution.controller:DEFAULT_MOVES_PER_STEP": "3887eeafa5551337",
+        "nemesis.evolution.controller:DEFAULT_SUPERVISOR_TIMEOUT": "b0d7da1939709750",
+        "nemesis.evolution.controller:MAX_CONSECUTIVE_INVALID": "25689fc62d7d7847",
+        "nemesis.evolution.evaluator:NEIGHBOURHOOD_DEPTH": "880ce71b3916af82",
+        "nemesis.evolution.lineage:LINEAGE_JOURNAL": "167e4ec1e254c7df",
+        "nemesis.evolution.lineage:MAX_DETAIL_LENGTH": "fd3de7a78c739b3b",
+        "nemesis.evolution.memory:INSTRUCTION_PATTERNS": "684f1ae9934cb6b2",
+        "nemesis.evolution.memory:MAX_ENTRIES_PER_KIND": "cf489d9e9358ba46",
+        "nemesis.evolution.memory:MAX_ENTRY_LENGTH": "3d56794ae9125774",
+        "nemesis.evolution.memory:MEMORY_CLASSIFICATION": "33e7eb3247a93991",
+        "nemesis.evolution.memory:REDACTION": "acc2011a6513267f",
+        "nemesis.evolution.memory:UNTRUSTED_SOURCES": "a9c4421da4b287a3",
+        "nemesis.evolution.memory:_CONTROL": "9ae7ee9596cdc70c",
+        "nemesis.evolution.memory:_MARKERS": "e780fdbbaf78a2ec",
+        "nemesis.evolution.models:MAX_NOTE_LENGTH": "b6848260a49bf26d",
+        "nemesis.evolution.models:MAX_REFS": "f98f26a697e35aa6",
+        "nemesis.evolution.projection:EVOLUTION_ACTOR": "f81395cb1c34bea2",
+        "nemesis.evolution.projection:MAX_PROJECTED_REFERENCES": "692c1d483ed4b219",
+        "nemesis.evolution.projection:NO_CONFIDENCE_NOTE": "20a3f524b5b9bf27",
+        "nemesis.evolution.projection:SUPERVISOR_ACTOR": "d5ab2d543bd5fc6d",
+        "nemesis.evolution.projection:_MARKERS": "2551e521f9980504",
+        "nemesis.evolution.supervisor:CONTINUE_ON_FAILURE": "29530ae7667ee363",
+        "nemesis.evolution.supervisor:RESEARCH_DIRECTIVE_ADAPTER": "f9fc47e7ab10d9bb",
+        "nemesis.evolution.supervisor:_SIGNAL_DIRECTIVE": "6e732b64d85c56c7",
         "nemesis.graph.journal:CLAIM_JOURNAL": "f544ac14824b4e8a",
         "nemesis.graph.journal:GRAPH_JOURNAL": "343df7775bcd424a",
         "nemesis.graph.journal:OP_CLAIM": "4dbe5bff29a4a8f7",
@@ -535,6 +560,7 @@ CONSTANT_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis.pilot.anthropic_pilot:DEFAULT_MAX_TOKENS": "ef50f21e2ac1d6b7",
         "nemesis.pilot.challenger:BLOCKING_VERDICTS": "60752462e18e8819",
         "nemesis.pilot.challenger:CHALLENGER_RULING_ADAPTER": "fab8116e295026f0",
+        "nemesis.pilot.mediator:CONTEXT_REDACTION": "2ef7b77be7649984",
         "nemesis.pilot.mediator:DEFAULT_MAX_CONSECUTIVE_MALFORMED": "6d4c3d199ba61d9d",
         "nemesis.pilot.mediator:DEFAULT_MAX_MOVES": "d020a8bbf6f69bbe",
         "nemesis.pilot.mediator:DEFAULT_PROPOSE_TIMEOUT": "65af83e835d24a64",
@@ -549,6 +575,8 @@ CONSTANT_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis.pilot.model_seat:MOVE_NAMES": "1515ae82b3369b72",
         "nemesis.pilot.model_seat:PROMPT_VERSION": "21aa468c1c9d6a85",
         "nemesis.pilot.model_seat:SYSTEM_INSTRUCTIONS": "3239cd9c2fcae38e",
+        "nemesis.pilot.moves:MAX_CONTEXT_ITEMS": "a709e0fdba136384",
+        "nemesis.pilot.moves:MAX_CONTEXT_ITEM_LENGTH": "d3b0f7a52acefdef",
         "nemesis.pilot.moves:PILOT_MOVE_ADAPTER": "50afc3bffd57b821",
         "nemesis.pilot.providers.anthropic:ANTHROPIC_CAPABILITIES": "7337e74d15c08666",
         "nemesis.pilot.providers.anthropic:ANTHROPIC_DIALECT": "2fd6758687c3290a",
@@ -661,6 +689,18 @@ CONSTANT_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis.sandbox.process:MAX_STDOUT_BYTES": "56e3a54004d25a3d",
         "nemesis.sandbox.process:REAP_SECONDS": "93303611d297f3fe",
         "nemesis.sandbox.process:SANDBOX_EXEC": "17c4a33127ffe04e",
+        "nemesis.slice.evolution_session:APPROVED_DOMAIN": "70f83dd7d092654b",
+        "nemesis.slice.evolution_session:APPROVED_STATE": "982d5401dd8f2be0",
+        "nemesis.slice.evolution_session:BENIGN_HINT": "bfe0399cec6667dd",
+        "nemesis.slice.evolution_session:DEAD_DIRECTION": "c08558f7658c8307",
+        "nemesis.slice.evolution_session:EFFECT_BUDGET": "e8f7303ef0dee53b",
+        "nemesis.slice.evolution_session:EVOLUTION_STEPS": "55e76511338367b4",
+        "nemesis.slice.evolution_session:HOSTILE_HINT": "04cd259dfd4c5951",
+        "nemesis.slice.evolution_session:INJECTION": "c15efea25a1546fc",
+        "nemesis.slice.evolution_session:MOVES_PER_STEP": "131c23c74e67bf9d",
+        "nemesis.slice.evolution_session:PURSUIT_BUDGET": "0c14bc45d8d36a89",
+        "nemesis.slice.evolution_session:SCENARIO_NOW": "2085314dd47a9631",
+        "nemesis.slice.evolution_session:SEED_DOMAIN": "38fb02934376f3d2",
         "nemesis.slice.pilot_session:APPROVED_DOMAIN": "496bf76b2c4507ad",
         "nemesis.slice.pilot_session:APPROVED_STATE": "da38c5e43da5f6a6",
         "nemesis.slice.pilot_session:EFFECT_BUDGET": "167ee1ab79e38d0a",
@@ -807,7 +847,7 @@ def discovered_constants(tree: Path | None = None) -> dict[str, str]:
     `EXCLUDED_CONCLUSIONS`, four security tables made of plain strings. The module digest covered
     them, so it was never a bypass; the claim that every dial was *named* was simply false.
 
-    So there is no rule now. Every module-level upper-case assignment is a dial, 499 of them,
+    So there is no rule now. Every module-level upper-case assignment is a dial, 539 of them,
     and the cost of including the genuine prose is nothing: rewording a message already moves
     that module's syntax digest, so no new failure mode is introduced by naming it too.
 
@@ -959,7 +999,7 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/calibration/harness.py": "1b251a700a9cf876",
         "nemesis/calibration/scoring.py": "b2e7a193a30d65a1",
         "nemesis/cli/__init__.py": "ad2e13b69c4fc1fd",
-        "nemesis/cli/main.py": "f757d824da49e6b6",
+        "nemesis/cli/main.py": "2bbf4c03a5971ffb",
         "nemesis/collaboration/__init__.py": "ca1145a798cbf210",
         "nemesis/collaboration/approvals.py": "9e5aef566b46d5d1",
         "nemesis/collaboration/base.py": "0f24972d696c4060",
@@ -995,7 +1035,7 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/core/evidence.py": "11f4c3c302e3bbd1",
         "nemesis/core/fusion.py": "b932562ceea3ae2c",
         "nemesis/core/identity.py": "aa1dbd3e0be4e2cb",
-        "nemesis/core/ids.py": "425d7cf23e07ab51",
+        "nemesis/core/ids.py": "e983abcbfd1713e4",
         "nemesis/core/proposition.py": "6362df2cbabfdc5e",
         "nemesis/core/provenance.py": "b241365918a5b072",
         "nemesis/core/relationships.py": "a43da87bbf3f6ba3",
@@ -1016,6 +1056,17 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/evidence/export.py": "726b9261d59a3875",
         "nemesis/evidence/standalone_verifier.py": "0cf95fadd64c06fe",
         "nemesis/evidence/vault.py": "a5ffab61b1e01ef1",
+        "nemesis/evolution/__init__.py": "ad2e13b69c4fc1fd",
+        "nemesis/evolution/controller.py": "4bb3f4c8aa77995c",
+        "nemesis/evolution/evaluator.py": "f19fea27a82a5480",
+        "nemesis/evolution/lineage.py": "5c1981fb431259bc",
+        "nemesis/evolution/memory.py": "6168c6aad501d365",
+        "nemesis/evolution/models.py": "daf84e22d63bcd40",
+        "nemesis/evolution/portfolio.py": "45aa04c2cbe23784",
+        "nemesis/evolution/ports.py": "42d59d03153949c7",
+        "nemesis/evolution/projection.py": "81e66920a70e00c1",
+        "nemesis/evolution/stagnation.py": "121e636d07bb5a7a",
+        "nemesis/evolution/supervisor.py": "bd4dfbc2d583bf45",
         "nemesis/graph/__init__.py": "ad2e13b69c4fc1fd",
         "nemesis/graph/enforcement.py": "bf461c98b7ae1ac3",
         "nemesis/graph/journal.py": "7239834f84fc2b78",
@@ -1025,9 +1076,9 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/pilot/anthropic_pilot.py": "653a3edd88f63dd4",
         "nemesis/pilot/challenger.py": "e32378cc74490f41",
         "nemesis/pilot/local_pilot.py": "844b5ec238222866",
-        "nemesis/pilot/mediator.py": "d463729c125f5eea",
+        "nemesis/pilot/mediator.py": "bb2951e6c46a1e32",
         "nemesis/pilot/model_seat.py": "0e1d14a5dd994e5f",
-        "nemesis/pilot/moves.py": "c674bdd89dc0c1b3",
+        "nemesis/pilot/moves.py": "cf2c7cc9c62e23ba",
         "nemesis/pilot/openai_pilot.py": "a0ff06cac4fc63f6",
         "nemesis/pilot/pilot.py": "16f58b14f6431694",
         "nemesis/pilot/providers/__init__.py": "08fb22ea1c5b5387",
@@ -1075,6 +1126,7 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/sandbox/process.py": "70c60d3fcda3d564",
         "nemesis/sandbox/seal.py": "e007ab5044298ce4",
         "nemesis/slice/__init__.py": "af4908b211f76e8b",
+        "nemesis/slice/evolution_session.py": "72ccdbc99f23da29",
         "nemesis/slice/pilot_session.py": "c6bc5d8ca8372f3e",
         "nemesis/slice/scenario.py": "39f31e92de895843",
         "nemesis/ui/__init__.py": "bb9576acc61aeb78",

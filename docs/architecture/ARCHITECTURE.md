@@ -68,6 +68,15 @@ made, see [`docs/adr/`](../adr/). For what the adversary is assumed to do, see
   instruction and never an authorization. The arrow into the AUTHORIZATION GATEWAY
   that a reader expects here does not exist: `import-linter` forbids it, and the
   contract was verified to break on a probe rather than merely to pass.
+
+  EVOLUTION sits ABOVE the pilot seam and drives it, and holds strictly less than
+  the plane below it: no engine, no graph writer, no vault, no capability, no
+  signing key, no effects registry. It composes what an untrusted model is told —
+  a bounded projection of its own operational memory — and every investigative
+  action it causes is a pilot proposing one of four verbs that the mediator then
+  rules on. The arrow from EVOLUTION to EFFECTS, to the GRAPH, or to the PURSUIT
+  ENGINE does not exist: `import-linter` forbids all three, and that contract was
+  also verified to break on a probe.
 ```
 
 The arrows that *do not* exist are as load-bearing as the ones that do. Effects has no
@@ -90,6 +99,7 @@ compromise of one must not become a compromise of the other.
 | Graph, claims | Data | Revisable; poisoning is expected and must leave a trace. |
 | Pursuit, disrupt, authz | Control | Decides what happens next. |
 | Collaboration | **Outward** | Talks to humans on a backend NEMESIS does not control. A compromise learns what was published and nothing else: no authorization, no evidence, no platform handle. |
+| Evolution | Control, **strictly weaker than the pilot seam** | Decides what to ask next across hundreds of moves. A compromise chooses worse questions and wastes budget: it holds no capability, no writer and no connector, so it cannot cause an action a pilot could not have proposed and a mediator would not have ruled on. |
 | Core | — | Pure. No I/O, no internal dependencies. |
 
 The collection plane holds hostile content and the effects plane holds outward reach. If
@@ -198,6 +208,7 @@ reviewer's attention. Every row below was re-checked against the code on that da
 | `audit/` | — | `IMPLEMENTED` — hash-chained, denials recorded, single-writer enforced |
 | `calibration/` | — | `IMPLEMENTED` (structural) — coherence laws that need no ground truth. **Not** empirical: no confidence figure has been scored against a resolved case, and no corpus exists |
 | `collaboration/` | — | `IMPLEMENTED` (local provider) / **unwired on the wire** (Buzz) — projects established findings into human channels and reads replies back as intents that authorize nothing. Default provider is a local directory and reaches no network. The Buzz seat implements the relay's wire format and ships no transport and no signer (ADR-0010). |
+| `evolution/` | 12 | `IMPLEMENTED` (single lineage) / `PROPOSED` (model-backed supervision, concurrent multi-model islands) — an AVO-inspired long-horizon research loop **above** the pilot seam: hash-chained lineage that keeps what it rejected, a gated three-tier evaluator that reads nothing a model wrote, deterministic plateau detection, and a supervisor whose whole vocabulary does nothing. Three scoring terms are computed and currently inert because nothing in the engine moves the state they read (ADR-0011). |
 | `ui/` | — | `IMPLEMENTED` — the analyst view, uncertainty visible by default, filtered to DELIVERABLE-class material |
 | `cli/` | — | `IMPLEMENTED` — `demo`, `pilot`, `verify`, `view`, `corpus`, `calibrate`, `providers`, `pilot-preview`, `pilotbench` |
 | `slice/` | — | `IMPLEMENTED` — the end-to-end reference scenario and the pilot session it drives |
@@ -233,6 +244,17 @@ registry — validates each move, and carries out only the permitted part. Autho
 is contained by the *absence of a verb*; acting outside the envelope is refused by the
 capability the mediator routes to; a belief is minted only as `HYPOTHESIS`/`MODEL_ASSERTION`.
 The session is replayable though the pilot is not.
+
+**A long-horizon loop is not a second driver.** `nemesis.evolution` (plane 12, ADR-0011) runs many
+bounded pilot sessions over one investigation and remembers what did not work — but it drives the
+*same* seam, through the same four verbs, and it holds none of the handles the mediator holds. What
+it adds is a bounded `ResearchContext` on the briefing: the directions this trajectory has already
+spent, the questions still open, the current strategic directive. A pilot on move three hundred is
+therefore not rediscovering what a pilot on move four already ruled out. Nothing in that loop can
+run a connector, write the graph, seal evidence, mint authority or spend an envelope, and two
+`import-linter` contracts — both verified to break on a probe — say so structurally rather than by
+convention. A supervisor may recommend a change of posture from a closed vocabulary in which no
+member does anything.
 
 **The pivot selection policy is not an LLM either.** `PursuitPolicy` is a deterministic rule
 policy, because invariant 11 requires replayability: the same state must yield the same

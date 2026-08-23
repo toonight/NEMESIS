@@ -1453,3 +1453,182 @@ def calibrate(
             "These do not depend on the generator's assumptions.",
         )
         raise typer.Exit(code=1)
+
+
+@app.command()
+def evolution(
+    workspace: Annotated[
+        Path | None,
+        typer.Option(help="Directory for the evidence vault, the audit trail and the trajectory."),
+    ] = None,
+) -> None:
+    """Run a long-horizon evolution loop and show what the memory bought.
+
+    `pilot` shows one autonomous session and the limiter holding. This shows what changes when the
+    same limiter is driven for many sessions by something that *remembers*: the trajectory records
+    which directions returned nothing, the next briefing carries it, and the pilot stops paying for
+    a question that is already spent. The pilot is `SIMULATED` — a script, not a model — and it is
+    deliberately hijacked once, to show that the loop above the seam does not make the seam looser.
+    """
+    from nemesis.evolution.lineage import LineageEventKind, verify_lineage_chain
+    from nemesis.slice.evolution_session import DEAD_DIRECTION, run_evolution_demonstration
+
+    console = Console()
+    demonstration = asyncio.run(run_evolution_demonstration(workspace=workspace))
+    _render_evolution(console, demonstration)
+
+    if not verify_lineage_chain(demonstration.entries):
+        console.print(Text("the trajectory does not reconstruct", style="bold red"))
+        raise typer.Exit(code=1)
+
+    quarantined = sum(
+        1 for entry in demonstration.entries if entry.kind is LineageEventKind.HINT_QUARANTINED
+    )
+    console.print()
+    console.print(
+        Panel(
+            Text(
+                "The run is bounded, the trajectory reconstructs, and nothing above the pilot seam "
+                "widened it. The loop recorded that "
+                f"{DEAD_DIRECTION.value} returns nothing, carried that into the next briefing, and "
+                "the pilot changed direction without anything having refused it — which is the "
+                f"whole point. {quarantined} suggestion(s) from the channel read as instructions "
+                "rather than research and were kept, classified and never shown to the pilot. The "
+                "hijacked effect request was refused by the capability, exactly as it is with no "
+                "evolution loop above it.",
+                style="dim",
+            ),
+            title="what this demonstrates",
+            border_style="green",
+        )
+    )
+
+
+def _render_evolution(console: Console, demonstration: object) -> None:
+    """Print one long-horizon run.
+
+    A module-level function taking ``console`` first, so a test can render into a string buffer and
+    assert on what an operator would actually see — the same seam :func:`render` provides for the
+    scenario.
+    """
+    from nemesis.evolution.lineage import LineageEventKind
+    from nemesis.slice.evolution_session import EvolutionDemonstration
+
+    assert isinstance(demonstration, EvolutionDemonstration)
+    state = demonstration.state
+
+    console.print()
+    console.print(
+        Panel(
+            Text(
+                "A long-horizon run: many bounded pilot sessions over one investigation, with a "
+                "trajectory that remembers what did not work. The pilot is SIMULATED — a script, "
+                "not a model. No human intervenes anywhere below.",
+                style="dim",
+            ),
+            title="EVOLUTION RUN (SIMULATED)",
+            border_style="cyan",
+        )
+    )
+
+    _heading(console, "THE RUN")
+    _field(console, "run", state.run_id)
+    _field(console, "investigation", state.investigation.investigation_id)
+    _field(console, "steps taken", str(state.step_index))
+    _field(console, "checkpoints promoted", str(len(demonstration.promoted)), style="green")
+    _field(console, "candidates rejected", str(demonstration.rejected), style="yellow")
+    _field(console, "plateaus detected", str(demonstration.plateaus))
+    _field(
+        console,
+        "stop reason",
+        state.stop_reason.value if state.stop_reason else "still running",
+    )
+
+    _heading(console, "STEPS, AND WHAT EACH ONE BOUGHT")
+    table = _table("#", "verdict", "origins", "robust", "entities", "redundant", "directive")
+    for outcome in demonstration.outcomes:
+        score = outcome.evaluation.score
+        promoted = outcome.promoted
+        table.add_row(
+            Text(str(outcome.checkpoint.step_index)),
+            Text(
+                "promoted" if promoted else outcome.evaluation.status.value,
+                style="green" if promoted else "yellow",
+            ),
+            Text(f"+{score.independent_origin_gain}"),
+            Text(f"+{score.origin_floor_gain}"),
+            Text(f"+{score.useful_entities_discovered}"),
+            Text(
+                str(score.redundant_pivots),
+                style="red" if score.redundant_pivots else "dim",
+            ),
+            Text(
+                outcome.directive.directive.directive.value if outcome.directive else "—",
+                style="dim",
+            ),
+        )
+    console.print(table)
+    console.print(
+        Text(
+            "    robust = origins surviving removal of the most load-bearing plantable cluster. "
+            "It is the column to read first.",
+            style="dim",
+        )
+    )
+
+    _heading(console, "WHAT THE TRAJECTORY REMEMBERED")
+    memory = state.memory
+    _field(console, "exhausted directions", ", ".join(memory.exhausted_pivot_families) or "none")
+    _bullets(
+        console,
+        (
+            f"{result.pivot_family} on {_elide(result.target_ref, 24)} "
+            f"({result.occurrences} attempt(s)): {_elide(result.reason, 60)}"
+            for result in memory.failed_directions
+        ),
+        marker="x",
+        style="dim",
+    )
+    _field(console, "hints received", str(len(memory.untrusted_hints)))
+    for entry in memory.untrusted_hints:
+        _bullets(
+            console,
+            [
+                _elide(entry.content, 84)
+                if entry.projectable
+                else f"[quarantined: {', '.join(entry.imperative)}] {_elide(entry.content, 50)}"
+            ],
+            marker="-" if entry.projectable else "!",
+            style="dim" if entry.projectable else "red",
+        )
+
+    _heading(console, "WHAT THE LOOP COULD NOT DO")
+    status = demonstration.envelope.status()
+    _field(console, "envelope", status.render())
+    _field(console, "forbidden operations", ", ".join(status.forbidden_operations), style="red")
+    _field(console, "effects refused", str(demonstration.refused_effects), style="red")
+    _field(
+        console,
+        "anything left the platform",
+        str(demonstration.any_effect_left_the_platform()),
+        style="green",
+    )
+    _field(console, "spend ledger intact", str(demonstration.envelope.verify_chain()))
+    _field(
+        console,
+        "trajectory entries",
+        f"{len(demonstration.entries)} (rejections kept)",
+    )
+    _field(
+        console,
+        "hints quarantined",
+        str(
+            sum(
+                1
+                for entry in demonstration.entries
+                if entry.kind is LineageEventKind.HINT_QUARANTINED
+            )
+        ),
+        style="yellow",
+    )
+    _field(console, "workspace", str(demonstration.workspace))
