@@ -266,7 +266,9 @@ def _outbox(tmp_path: Path, **kwargs: object) -> Outbox:
 def _enqueue(
     outbox: Outbox, event: CollaborationEvent, *, now: datetime = T0, provider: str = "scripted"
 ) -> OutboxRecord:
-    return outbox.enqueue(event, channel_key=CHANNEL_KEY, provider=provider, now=now)
+    return outbox.enqueue(
+        event, channel_key=CHANNEL_KEY, channel_backend_id=CHANNEL_KEY, provider=provider, now=now
+    )
 
 
 # --- 1. The queue is durable, and it is durable before anything is sent --------------
@@ -312,7 +314,9 @@ def test_an_enqueued_record_is_found_by_a_new_outbox_over_the_same_path(
     """
     path = tmp_path / "outbox.jsonl"
     event = _event("evil")
-    Outbox(path).enqueue(event, channel_key=CHANNEL_KEY, provider="scripted", now=T0)
+    Outbox(path).enqueue(
+        event, channel_key=CHANNEL_KEY, channel_backend_id=CHANNEL_KEY, provider="scripted", now=T0
+    )
 
     reopened = Outbox(path)
     (record,) = reopened.records()
@@ -327,8 +331,12 @@ def test_enqueueing_is_idempotent_across_processes_too(tmp_path: Path) -> None:
     """The crash-and-retry case, which is the one the idempotence exists for."""
     path = tmp_path / "outbox.jsonl"
     event = _event("evil")
-    Outbox(path).enqueue(event, channel_key=CHANNEL_KEY, provider="scripted", now=T0)
-    Outbox(path).enqueue(event, channel_key=CHANNEL_KEY, provider="scripted", now=T0)
+    Outbox(path).enqueue(
+        event, channel_key=CHANNEL_KEY, channel_backend_id=CHANNEL_KEY, provider="scripted", now=T0
+    )
+    Outbox(path).enqueue(
+        event, channel_key=CHANNEL_KEY, channel_backend_id=CHANNEL_KEY, provider="scripted", now=T0
+    )
 
     assert len(Outbox(path).records()) == 1
 
@@ -845,7 +853,13 @@ def test_a_corrupted_line_refuses_the_whole_queue_rather_than_skipping_it(
     """
     path = tmp_path / "outbox.jsonl"
     outbox = Outbox(path)
-    outbox.enqueue(_event("evil"), channel_key=CHANNEL_KEY, provider="scripted", now=T0)
+    outbox.enqueue(
+        _event("evil"),
+        channel_key=CHANNEL_KEY,
+        channel_backend_id=CHANNEL_KEY,
+        provider="scripted",
+        now=T0,
+    )
     path.write_text(
         path.read_text(encoding="utf-8") + '{"not":"an outbox record"}\n', encoding="utf-8"
     )
@@ -859,7 +873,13 @@ def test_a_corrupted_line_also_stops_the_publication_loop(tmp_path: Path) -> Non
     """``due()`` must refuse too. A read path that raises and a work path that quietly
     returns nothing would leave the corruption invisible to the only caller that runs."""
     path = tmp_path / "outbox.jsonl"
-    Outbox(path).enqueue(_event("evil"), channel_key=CHANNEL_KEY, provider="scripted", now=T0)
+    Outbox(path).enqueue(
+        _event("evil"),
+        channel_key=CHANNEL_KEY,
+        channel_backend_id=CHANNEL_KEY,
+        provider="scripted",
+        now=T0,
+    )
     path.write_text(path.read_text(encoding="utf-8") + "not json at all\n", encoding="utf-8")
 
     with pytest.raises(OutboxWriteError, match=re.escape(f"{path}:2")):

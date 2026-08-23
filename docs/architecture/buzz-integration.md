@@ -91,7 +91,7 @@ deliberate probe import, not merely to pass.
 | **the signature** | BIP-340 Schnorr over secp256k1 | **not shipped** — `EventSigner` Protocol |
 | `Approval`, `AuthorizationCapability` | *nothing* — deliberately | `IMPLEMENTED` in `nemesis.authz`, never published as authority |
 | `EvidenceObject` | *nothing* — a `Reference` is published, never the artifact | `IMPLEMENTED` |
-| `AppendOnlyAuditTrail` | *nothing* — Buzz's `audit_log` is not a substitute | `IMPLEMENTED` in `nemesis.audit` |
+| `AppendOnlyAuditTrail` | *nothing* — Buzz's `audit_log` is not a substitute | `IMPLEMENTED` in `nemesis.audit`; every publication is recorded there via `CollaborationPublisher` |
 
 Two rows in that table are the whole architecture. Buzz carries the conversation. It carries no
 authority, no evidence and no audit record.
@@ -239,6 +239,12 @@ acknowledgement resolves to one copy.
 nothing is lost, nothing raises, the circuit opens, and the same events deliver on recovery without
 duplicates.
 
+`CollaborationPublisher.drain()` is the retry loop, and it lives in `src/` rather than in a test
+because it is also the only place that can record what each attempt did. It reaches the right
+channel because the outbox record carries the backend handle — an earlier version rebuilt the
+destination from the channel key alone, which the local provider reads as a filesystem path, so
+every retry published to a path that did not exist and was abandoned as a permanent rejection.
+
 ---
 
 ## What is not built, and will not be silently built
@@ -248,6 +254,7 @@ duplicates.
 | Buzz transport (WebSocket or HTTP bridge) | **not shipped** — `BuzzTransport` Protocol, `UnwiredBuzzTransport` raises with the reason |
 | BIP-340 Schnorr signer | **not shipped** — `EventSigner` Protocol, `UnwiredEventSigner` raises with the reason |
 | Signature *verification* of inbound events | **not shipped** — same curve dependency. `InboundSignal.author_verified` is `False` and says so; the event id **is** recomputed, which catches content and tag modification |
+| Auditing every publication | `IMPLEMENTED` — `CollaborationPublisher` writes through the write-only `PublicationRecorder` port; the plane still cannot import `nemesis.audit` |
 | Publishing evidence content into a channel | **refused by construction** — the envelope has no field for it |
 | Approval decided in a channel | **refused by construction** — no verb, no import path |
 | ACP adapter | `PROPOSED` and argued against in ADR-0010 |
@@ -288,6 +295,7 @@ would be a new provider implementation, not a new architecture.
 | `src/nemesis/collaboration/base.py` | new |
 | `src/nemesis/collaboration/approvals.py` | new |
 | `src/nemesis/collaboration/outbox.py` | new |
+| `src/nemesis/collaboration/publisher.py` | new |
 | `src/nemesis/collaboration/identities.py` | new |
 | `src/nemesis/collaboration/demonstration.py` | new |
 | `src/nemesis/collaboration/providers/local.py` | new |
@@ -300,6 +308,7 @@ would be a new provider implementation, not a new architecture.
 | `src/nemesis/cli/main.py` | modified — `collaborate`, `collab-providers` |
 | `.importlinter` | modified — 5 contracts extended, 1 added, layer inserted |
 | `tests/invariants/test_collaboration_boundary.py` | new |
+| `tests/invariants/test_collaboration_audit.py` | new |
 | `tests/planes/test_collaboration.py` | new |
 | `tests/planes/test_buzz_wire.py` | new |
 | `tests/planes/test_collaboration_outbox.py` | new |

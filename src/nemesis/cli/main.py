@@ -35,6 +35,8 @@ with the same prominence as what they do.
 from __future__ import annotations
 
 import asyncio
+import tempfile
+from collections import Counter
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Annotated, Final
@@ -801,8 +803,19 @@ def collaborate(
     refuses to do at the end.
     """
     console = Console()
-    result = asyncio.run(run_collaboration_demonstration(workspace=workspace))
-    _render_collaboration(console, result)
+    root = (
+        Path(workspace)
+        if workspace is not None
+        else Path(tempfile.mkdtemp(prefix="nemesis-collab-"))
+    )
+    # A real hash-chained trail, not a collector. The plane cannot import `nemesis.audit`,
+    # so the CLI — which can import everything — supplies it through the write-only
+    # `PublicationRecorder` port. That is the whole shape of the fix for G4: the record is
+    # the caller's to provide and the plane's to write.
+    trail = AppendOnlyAuditTrail(root / "audit.jsonl")
+    result = asyncio.run(run_collaboration_demonstration(workspace=root, recorder=trail))
+    verification = asyncio.run(_verify_chain(trail))
+    _render_collaboration(console, result, trail_path=trail.path, verification=verification)
 
 
 @app.command(name="collab-providers")
@@ -824,7 +837,17 @@ def collab_providers() -> None:
     )
 
 
-def _render_collaboration(console: Console, result: CollaborationDemonstration) -> None:
+async def _verify_chain(trail: AppendOnlyAuditTrail) -> bool:
+    return await trail.verify_chain()
+
+
+def _render_collaboration(
+    console: Console,
+    result: CollaborationDemonstration,
+    *,
+    trail_path: Path,
+    verification: bool,
+) -> None:
     console.print(
         Panel(
             Text.from_markup(
@@ -883,6 +906,24 @@ def _render_collaboration(console: Console, result: CollaborationDemonstration) 
             Text(_excerpt(intake.excerpt), style="dim"),
         )
     console.print(replies)
+
+    audit = Table(title="What the audit trail recorded", box=box.SIMPLE_HEAVY)
+    audit.add_column("action", style="bold")
+    audit.add_column("count", justify="right")
+    for action, count in sorted(Counter(e.action for e in result.audit_entries).items()):
+        audit.add_row(action, str(count))
+    audit.add_row(
+        Text("chain verifies", style="bold"),
+        Text("yes", style="bold green") if verification else Text("NO", style="bold red"),
+    )
+    console.print(audit)
+    console.print(
+        Text(
+            f"  {len(result.publication_entries)} publication entries for "
+            f"{len(result.receipts)} publications, at {trail_path}",
+            style="dim",
+        )
+    )
 
     console.print(
         Panel(
