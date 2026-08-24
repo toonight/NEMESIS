@@ -1154,6 +1154,30 @@ def pilot_preview(
 
 
 @app.command()
+def loopbench(
+    moves: Annotated[
+        int, typer.Option("--moves-per-segment", help="Moves per evolution step.")
+    ] = 6,
+) -> None:
+    """Measure what the Evolution loop's machinery does, against the loop without it.
+
+    Both arms get the same world, the same pilot, the same total move allowance and the same
+    pursuit budget over one investigation, swept across four run lengths. Two scripted pilots
+    run through both: one that ignores the research context and one that reads it. Nothing here
+    involves a model, and the report says what it cannot tell you before it says anything else.
+    """
+    from nemesis.slice.loopbench import compare, render, run_loopbench
+
+    console = Console()
+    results = asyncio.run(run_loopbench(moves_per_segment=moves))
+    console.print(Text(render(results), style=""))
+    console.print()
+    console.print(Text("PAIRED DIFFERENCES, per run length and pilot", style="bold"))
+    for line in compare(results):
+        console.print(Text(f"  {line}", style="dim"))
+
+
+@app.command()
 def pilotbench(
     providers_csv: Annotated[
         str | None,
