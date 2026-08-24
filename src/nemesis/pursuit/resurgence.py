@@ -126,10 +126,20 @@ BELIEF_CEILING: Final[dict[ResurgenceSignalKind, float]] = {
 
 **These are invented numbers and nothing in this repository validates them.** They are ordered
 by how expensive the signal is to stage — the principle the persona-linkage table already uses
-and defends — and the *ordering* is the defensible part. A reviewer cutting one thing from this
-module should cut the numbers and keep the collapse: the correlation grouping, the
-zero-for-uncounted-populations rule and the robustness margin are structural and do not depend
-on any ceiling being right.
+and defends.
+
+**This docstring used to add that the ordering was the defensible part and the magnitudes were
+not. That was an assertion, and measuring it did not support it.**
+:mod:`nemesis.calibration.ceilings` perturbs the table and counts the verdicts that move: a
+uniform scaling to 0.6, which preserves the ordering perfectly, moved one probe verdict, while
+flattening every ceiling to the mean — which destroys the ordering entirely — moved none. On
+that probe set the magnitudes are doing at least as much work as the order.
+
+What survives unchanged is that the *structural* controls do not depend on any ceiling being
+right: the correlation grouping, the zero-for-uncounted-populations rule, the robustness margin
+and the single-origin veto hold whatever these numbers are. A reviewer cutting one thing should
+still keep those. What they should no longer be told is that the numbers beside them are
+harmless.
 
 No confidence figure this system produces has been validated against outcomes. See
 ``docs/calibration/PROTOCOL.md``.
