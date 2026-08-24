@@ -65,6 +65,15 @@ class ResurgenceSignalKind(StrEnum):
     still not certainty: an adversary who lost a key, or one framing a competitor with a stolen
     one, produces the same observation."""
 
+    SHARED_EXFILTRATION_ENDPOINT = "shared_exfiltration_endpoint"
+    """The new operation delivers its takings to where the old one did.
+
+    Ranked just below key control and above a republished fingerprint, and the argument is the
+    fixture's own: an exfiltration endpoint has to *work for the operator*, which makes it
+    expensive to fake compared with a comment. Copying a drop address to have somebody else
+    blamed means sending your victims' credentials to the party you are framing — a cost a
+    framer does not usually accept, and one a lazy imitator gains nothing from."""
+
     SHARED_PUBLISHED_FINGERPRINT = "shared_published_fingerprint"
     """A public fingerprint the operator republishes — a PGP key on a new persona's profile.
 
@@ -97,6 +106,7 @@ class SuccessionGroup(StrEnum):
     """
 
     KEY_CONTROL = "key_control"
+    EXFILTRATION = "exfiltration"
     SELF_PRESENTATION = "self_presentation"
     TOOLING = "tooling"
     FINANCIAL_LEDGER = "financial_ledger"
@@ -105,6 +115,7 @@ class SuccessionGroup(StrEnum):
 
 BELIEF_CEILING: Final[dict[ResurgenceSignalKind, float]] = {
     ResurgenceSignalKind.SHARED_PRIVATE_KEY: 0.90,
+    ResurgenceSignalKind.SHARED_EXFILTRATION_ENDPOINT: 0.75,
     ResurgenceSignalKind.SHARED_PUBLISHED_FINGERPRINT: 0.70,
     ResurgenceSignalKind.SHARED_TOOLING_ARTIFACT: 0.60,
     ResurgenceSignalKind.SHARED_FINANCIAL_ENDPOINT: 0.50,
@@ -126,6 +137,7 @@ No confidence figure this system produces has been validated against outcomes. S
 
 CORRELATION_GROUP_OF: Final[dict[ResurgenceSignalKind, SuccessionGroup]] = {
     ResurgenceSignalKind.SHARED_PRIVATE_KEY: SuccessionGroup.KEY_CONTROL,
+    ResurgenceSignalKind.SHARED_EXFILTRATION_ENDPOINT: SuccessionGroup.EXFILTRATION,
     ResurgenceSignalKind.SHARED_PUBLISHED_FINGERPRINT: SuccessionGroup.SELF_PRESENTATION,
     ResurgenceSignalKind.SHARED_TOOLING_ARTIFACT: SuccessionGroup.TOOLING,
     ResurgenceSignalKind.SHARED_FINANCIAL_ENDPOINT: SuccessionGroup.FINANCIAL_LEDGER,

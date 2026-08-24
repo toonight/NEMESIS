@@ -402,6 +402,9 @@ def test_the_ceilings_are_ordered_by_how_hard_the_signal_is_to_stage() -> None:
     outrank one they would have to steal a private key to produce."""
     order = [
         ResurgenceSignalKind.SHARED_PRIVATE_KEY,
+        # An exfiltration endpoint has to work for the operator: copying it to frame somebody
+        # means sending your victims' credentials to the party you are framing.
+        ResurgenceSignalKind.SHARED_EXFILTRATION_ENDPOINT,
         ResurgenceSignalKind.SHARED_PUBLISHED_FINGERPRINT,
         ResurgenceSignalKind.SHARED_TOOLING_ARTIFACT,
         ResurgenceSignalKind.SHARED_FINANCIAL_ENDPOINT,

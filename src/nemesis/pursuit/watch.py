@@ -92,6 +92,14 @@ BRIDGE_RULES: Final[tuple[BridgeRule, ...]] = (
         globally_unique=True,
     ),
     BridgeRule(
+        kind=ResurgenceSignalKind.SHARED_EXFILTRATION_ENDPOINT,
+        bridge_types=frozenset({EntityType.EMAIL_ADDRESS, EntityType.MESSAGING_ACCOUNT}),
+        relations=frozenset({RelationType.COMMUNICATES_WITH}),
+        # Not globally unique: a drop address is a string, and nothing about it identifies by
+        # construction. Its weight comes from a stated count or from nowhere.
+        globally_unique=False,
+    ),
+    BridgeRule(
         kind=ResurgenceSignalKind.SHARED_PUBLISHED_FINGERPRINT,
         bridge_types=frozenset({EntityType.PGP_KEY}),
         relations=frozenset({RelationType.SIGNED_BY}),
@@ -145,6 +153,16 @@ family, a wallet cluster, a registrar — is shared by an unknown number of part
 population, and therefore contributes nothing until somebody counts it against a named corpus.
 """
 
+
+SelectivityResolver = Callable[[tuple[ClaimId, ...]], Coroutine[Any, Any, PivotSelectivity | None]]
+"""How a caller supplies a count a connector stated but the edge could not carry.
+
+``Relationship`` refuses a selectivity on a direct observation — correctly, since nothing was
+inferred from a shared attribute — so a gateway that captured a kit and also measured how rare
+its build path is loses the measurement on the way to the graph. This hook reads it back off
+the claim, which is where the connector wrote it.
+:func:`nemesis.evidence.lineage.resolve_selectivity` binds a claim store into this shape.
+"""
 
 ProvenanceResolver = Callable[
     [tuple[ClaimId, ...]], Coroutine[Any, Any, Sequence[SourceDescriptor]]
@@ -238,6 +256,7 @@ async def assemble_resurgence_signals(
     prior_entity_ids: Sequence[str],
     observed_at: datetime,
     provenance_of: ProvenanceResolver = _unresolved_provenance,
+    selectivity_of: SelectivityResolver | None = None,
 ) -> tuple[ResurgenceSignal, ...]:
     """Walk out from a known cluster and return what the graph offers as continuity.
 
@@ -313,6 +332,8 @@ async def assemble_resurgence_signals(
                 # and wrote down is the opposite of that. Where no connector said, the answer
                 # stays "uncounted", which weighs zero.
                 stated = edge.selectivity
+                if stated is None and selectivity_of is not None:
+                    stated = await selectivity_of(cited)
                 measured = stated is not None and stated.population_size is not None
                 # When a connector measured, its measurement wins over this module's rule.
                 # `globally_unique` in BRIDGE_RULES is an assumption about a *kind* of
@@ -463,6 +484,7 @@ async def watch_for_resurgence(
     candidate_population: int,
     now: datetime,
     provenance_of: ProvenanceResolver = _unresolved_provenance,
+    selectivity_of: SelectivityResolver | None = None,
     engine: ResurgenceEngine | None = None,
 ) -> WatchReport:
     """Ask, for a case sitting in resurgence watch, whether the adversary has come back.
@@ -497,6 +519,7 @@ async def watch_for_resurgence(
         prior_entity_ids=[branch.focus_entity_id for branch in investigation.branches],
         observed_at=now,
         provenance_of=provenance_of,
+        selectivity_of=selectivity_of,
     )
     scorer = engine or ResurgenceEngine()
     grouped = signals_by_candidate(signals)

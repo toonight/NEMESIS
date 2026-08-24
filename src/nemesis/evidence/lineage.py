@@ -37,6 +37,7 @@ from nemesis.core.claims import Claim
 from nemesis.core.evidence import EvidenceObject
 from nemesis.core.ids import ClaimId
 from nemesis.core.provenance import SourceClass, SourceDescriptor, SourceReliability
+from nemesis.core.relationships import PivotSelectivity
 from nemesis.ports.storage import ClaimStore
 
 
@@ -217,11 +218,64 @@ def resolve_sources(
     return hook
 
 
+async def resolve_stated_selectivity(
+    claims: ClaimStore, claim_ids: Sequence[ClaimId]
+) -> PivotSelectivity | None:
+    """The count a connector wrote down, when one of them did.
+
+    Separate from the edge because the edge legitimately drops it: ``Relationship`` refuses a
+    selectivity on a ``DIRECT_OBSERVATION``, on the grounds that nothing was inferred from a
+    shared attribute — which is true of the *edge* and says nothing about whether the connector
+    measured the attribute's rarity. A gateway that captured a kit observed it directly and can
+    still report that three kits in its corpus carry that build path.
+
+    So the count is read from the claim, which is where the connector wrote it, rather than
+    from the edge, which is where a validator about a different concern removed it.
+
+    Only a count with a stated denominator is returned. ``PivotSelectivity`` refuses the other
+    kind anyway, and a number with no corpus behind it cannot be interpreted or challenged.
+    """
+    for claim_id in dict.fromkeys(claim_ids):
+        claim = await claims.get(claim_id)
+        if claim is None or claim.is_model_derived:
+            continue
+        qualifiers = claim.statement.qualifiers
+        attribute = qualifiers.get("shared_attribute")
+        raw = qualifiers.get("population_size")
+        corpus = qualifiers.get("population_measured_against")
+        if attribute is None or raw is None or corpus is None:
+            continue
+        try:
+            population = int(raw)
+        except ValueError:
+            continue
+        return PivotSelectivity(
+            attribute=attribute,
+            population_size=population,
+            population_measured_against=corpus,
+            is_globally_unique=qualifiers.get("globally_unique") == "true",
+        )
+    return None
+
+
+def resolve_selectivity(
+    claims: ClaimStore,
+) -> Callable[[tuple[ClaimId, ...]], Coroutine[Any, Any, PivotSelectivity | None]]:
+    """Bind a claim store into the hook the resurgence walk takes."""
+
+    async def hook(claim_ids: tuple[ClaimId, ...]) -> PivotSelectivity | None:
+        return await resolve_stated_selectivity(claims, claim_ids)
+
+    return hook
+
+
 __all__ = [
     "MAX_DERIVATION_DEPTH",
     "UNRESOLVED_SOURCE",
     "EvidenceLineage",
     "EvidenceReader",
     "resolve_lineage",
+    "resolve_selectivity",
     "resolve_sources",
+    "resolve_stated_selectivity",
 ]

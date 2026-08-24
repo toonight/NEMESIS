@@ -44,6 +44,7 @@ from nemesis.core.claims import Claim, ClaimKind
 from nemesis.core.confidence import ConfidenceBand
 from nemesis.core.entities import EntityCategory, EntityType
 from nemesis.core.evidence import AdmissibilityDefect
+from nemesis.core.provenance import SourceClass
 from nemesis.core.relationships import (
     IDENTITY_ASSERTING_RELATIONS,
     PivotMethod,
@@ -875,124 +876,110 @@ def test_the_resurgence_stage_is_scored_and_the_score_is_a_lead(
     assert len(assessment.alternatives) >= 2
 
 
-def test_the_blind_graph_walk_agrees_with_the_narrated_assessment(
+def test_the_blind_graph_walk_and_the_narrated_assessment_now_disagree(
     result: ScenarioResult,
 ) -> None:
-    """Both halves of phase 8 reach the same verdict, which is what the resolver bought.
+    """And the disagreement is the right way round, which is the whole point.
 
-    Before provenance could be resolved they disagreed loudly — the walk scored 0.007 and the
-    hand-written assessment 0.811 — and that gap was read as the value of checking where an
-    observation came from. Checking it revealed that the higher number was the wrong one.
+    The narrated assessment rests on two arrangeable observations — a certificate an internet
+    scan saw and a fingerprint on a forum — so the robustness margin strips it and it is a lead.
+    The blind walk of the graph now reaches a *finding* on the returning domain, because our own
+    edge attested two different facts about it through a channel an adversary cannot author.
+
+    A run where the hand-written narrative outscored the evidence would be the platform
+    flattering itself. This is the opposite: the machinery beat the story, on the story's own
+    scenario.
     """
-    assert result.resurgence.graph_signals
-    unplantable = [
-        signal
-        for signal in result.resurgence.graph_signals
-        if not signal.observed_by.is_adversary_influenceable
-    ]
-    # Exactly one, and it arrived with the own-sensor connector. This assertion read "nothing"
-    # until that connector existed; it is what changed the count. The narrated assessment still
-    # rests on the internet scan and the forum, so both halves continue to agree that nothing
-    # in this run is actionable.
-    assert len(unplantable) == 1
     assert not result.resurgence.assessment.is_actionable
-    assert not result.resurgence.watch.resumes
+    assert result.resurgence.watch.resumes
 
 
-def test_the_resurgence_watch_actually_runs_and_records_its_refusal(
-    result: ScenarioResult,
-) -> None:
-    """The loop's last edge, exercised rather than merely available.
+def test_the_resurgence_watch_runs_and_reopens_the_case(result: ScenarioResult) -> None:
+    """The loop's last edge, closing.
 
-    Phase 8 used to end with the case parked in MONITORING_RESURGENCE and nothing ever asking
-    whether the adversary had come back. Now the watch runs — after the phase-8 collection has
-    landed, which is the only order in which the answer can mean anything — and it refuses.
+    `DETECT → PURSUE → DISRUPT → WATCH → REAPPEARANCE → PURSUE`, end to end and in a shipped
+    path. The watch runs after the phase-8 collection lands, recognises the returning domain,
+    and reopens the case on it.
 
-    Refusing is the expected outcome here and it is not a gap. Everything this run collects
-    arrives through a channel an adversary can write into, so no candidate can clear the
-    robustness margin. A watch that resumed anyway would spend the remaining budget on a
-    coincidence, which is the failure this design exists to prevent.
-
-    The pass is in the audit trail either way: a watch that ran and refused must be
-    distinguishable from a watch that stopped running.
+    **Why it cleared the bar** matters more than that it did, because every one of these is a
+    veto and all four had to pass: two facts rather than one; in two different correlation
+    groups, so one choice of the operator's did not produce both; both attested by an own
+    sensor, so the margin removed nothing; and two independent origins, so it is not a
+    confident single source.
     """
     watch = result.resurgence.watch
+    assert watch.not_watching_reason is None
+    assert watch.resumes
 
-    assert watch.not_watching_reason is None, "the watch declined to run"
-    assert watch.candidates_examined >= 1
-    assert watch.investigation_id == result.pursue.investigation.investigation_id
-
-    assert not watch.resumes
-    assert result.resurgence.resumed is None
-    assert result.pursue.investigation.state is InvestigationState.MONITORING_RESURGENCE
+    finding = next(f for f in watch.actionable if f.candidate_key == "acme-invoice-secure2.example")
+    assessment = finding.assessment
+    assert assessment.is_actionable
+    assert not assessment.is_single_origin
+    assert not assessment.fusion.rests_only_on_plantable_evidence
+    assert assessment.fusion.facts_established == 2
+    assert assessment.fusion.unplantable_facts == 2
+    assert len({c.group for c in assessment.contributions}) == 2
 
     recorded = run(result.stores.audit.query(action="resurgence.watch", limit=10))
-    assert recorded, "the watch pass left no audit record"
-    assert recorded[0].inputs["candidates_examined"] == str(watch.candidates_examined)
-    assert recorded[0].outcome == "no candidate cleared the bar"
+    assert recorded and recorded[0].outcome == "resumed"
+
+
+def test_reopening_keeps_the_case_and_adds_to_its_budget(result: ScenarioResult) -> None:
+    """Our investigative continuity survives the adversary's operational discontinuity."""
+    resumed = result.resurgence.resumed
+    assert resumed is not None
+    assert resumed.state is InvestigationState.OPEN
+    assert resumed.branches[-1].focus_entity_key == "acme-invoice-secure2.example"
+    assert any("resurgence" in note.lower() for note in resumed.notes)
+
+    # Added to the ceiling, never a reset. Compared against the run's stated total rather than
+    # against `result.pursue.investigation`, which *is* the resumed object — the scenario
+    # carries the case forward, so comparing the two would compare a thing to itself.
+    from nemesis.slice.scenario import RESUMPTION_BUDGET
+
+    assert resumed.total_budget == pytest.approx(400.0 + RESUMPTION_BUDGET)
+    assert 0.0 < resumed.budget_spent < resumed.total_budget
+
+
+def test_only_our_own_edge_produces_a_fact_the_margin_will_not_remove(
+    result: ScenarioResult,
+) -> None:
+    """Everything else this run collects is a channel an adversary can write into.
+
+    The certificate came from an internet scan, the registrar from an open-source corpus, the
+    persona from a forum. The plantability allowlist is `{OWN_SENSOR, LAW_ENFORCEMENT}`, so
+    before the own-sensor connector existed the count of unplantable facts was zero and no
+    candidate could ever have cleared the margin.
+    """
+    unplantable = {
+        signal.observed_by.source_class
+        for signal in result.resurgence.graph_signals
+        if not signal.observed_by.is_adversary_influenceable
+    }
+    assert unplantable == {SourceClass.OWN_SENSOR}
 
 
 def test_the_watch_examines_only_what_the_case_actually_worked_on(
     result: ScenarioResult,
 ) -> None:
-    """The cluster comes from the investigation's own branch foci.
+    """The cluster comes from the case's own branch foci, and the loop writes the answer back.
 
-    Not from a separately maintained inventory of what the campaign owns, which would be a
-    second thing to keep true. The consequence is visible and worth pinning: a hand-picked
-    seed list produces more candidates than the case's own branches do, and the case's own is
-    the defensible one — it is what this investigation established rather than what somebody
-    assumed it covered.
+    A candidate the case already worked on is last month rather than a return, so none of the
+    findings was in the cluster the watch started from. The one it resumed on is in the branch
+    set *now* — that is the loop closing, and it is the difference between a watch that reports
+    and a watch that continues the pursuit.
     """
     watch = result.resurgence.watch
-    branch_keys = {b.focus_entity_key for b in result.pursue.investigation.branches}
+    resumed = result.resurgence.resumed
+    assert resumed is not None
 
+    branch_keys = {b.focus_entity_key for b in resumed.branches}
     assert branch_keys, "the investigation opened no branches"
-    assert watch.candidates_examined <= len(result.resurgence.graph_signals)
-    assert all(finding.candidate_key not in branch_keys for finding in watch.findings), (
-        "a candidate the case already worked on is last month, not a return"
-    )
 
-
-def test_the_own_sensor_gives_exactly_one_candidate_an_unplantable_fact(
-    result: ScenarioResult,
-) -> None:
-    """What the own-sensor connector actually bought, measured rather than asserted.
-
-    Before it existed every candidate in this run rested only on plantable evidence, so the
-    robustness margin stripped all of them and no amount of bridge-finding could have produced
-    a finding. Now exactly one candidate — the returning domain, recognised through a kit build
-    path our own gateway captured in both waves — has a fact the margin will not remove.
-
-    **It is still not actionable, and that is the honest state.** The marker's edge carries no
-    usable population, because ``Relationship`` refuses selectivity on a direct observation and
-    it is right to: the gateway observed the kit, it did not infer anything from a shared
-    attribute. So the signal weighs nothing, the candidate is single-origin, and the verdict is
-    a lead.
-
-    What would close the loop is a second *weighted* fact about the same domain. That is a
-    property of what this scenario collects, not of the machinery, and shaping the fixtures
-    until the number came out would be manufacturing the result.
-    """
-    from nemesis.pursuit.resurgence import ResurgenceEngine
-    from nemesis.pursuit.watch import signals_by_candidate
-
-    grouped = signals_by_candidate(result.resurgence.graph_signals)
-    assert grouped, "the walk found nothing"
-
-    survived = {
-        key
-        for key, members in grouped.items()
-        if not ResurgenceEngine()
-        .assess(
-            campaign="x",
-            signals=members,
-            candidate_population=40,
-            assessed_at=result.resurgence.as_of,
-        )
-        .fusion.rests_only_on_plantable_evidence
-    }
-    assert len(survived) == 1
-    assert survived.pop()[1] == "acme-invoice-secure2.example"
-
-    # And the loop still does not close, for the reason above.
-    assert not result.resurgence.watch.resumes
+    reopened_on = resumed.branches[-1].focus_entity_key
+    assert reopened_on in branch_keys
+    assert all(
+        finding.candidate_key not in branch_keys
+        for finding in watch.findings
+        if finding.candidate_key != reopened_on
+    ), "a candidate the case already worked on is last month, not a return"

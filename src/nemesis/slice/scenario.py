@@ -181,7 +181,7 @@ from nemesis.disrupt.planner import DisruptionLever, DisruptionPlan, DisruptionP
 from nemesis.effects.isolation import IsolatedEffectsExecutor
 from nemesis.effects.registry import EffectsRegistry, default_registry
 from nemesis.evidence.anchoring import LocalHeadSigner
-from nemesis.evidence.lineage import resolve_sources
+from nemesis.evidence.lineage import resolve_selectivity, resolve_sources
 from nemesis.evidence.vault import (
     AnchorRecord,
     FileSystemEvidenceVault,
@@ -2854,6 +2854,10 @@ async def _resurgence(
             # provenance of everything this run collected, so the walk can say who observed
             # each fact instead of declining to guess.
             provenance_of=resolve_sources(context.claims, context.vault),
+            # The count the connector measured, read back off the claim: the edge could not
+            # carry it, because a direct observation is not an inference from a shared
+            # attribute and Relationship says so.
+            selectivity_of=resolve_selectivity(context.claims),
         ),
         assessment=_resurgence_assessment(as_of=as_of),
     )
@@ -3021,6 +3025,7 @@ async def run_glass_anvil_scenario_async(
         candidate_population=TRACKED_CAMPAIGNS,
         now=resurgence_as_of,
         provenance_of=resolve_sources(context.claims, context.vault),
+        selectivity_of=resolve_selectivity(context.claims),
     )
     resumed: Investigation | None = None
     if watch.resumes:

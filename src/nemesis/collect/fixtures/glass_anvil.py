@@ -141,6 +141,10 @@ PGP_FINGERPRINT: Final = "9f2c4e1ab7d3608f45e29c1a7d0b3e86f24c95d1"
 
 KIT_SHA256: Final = "5d41402abc4b2a76b9719d911017c592aab3238922bcc25a6f606eb525ffdc56"
 
+EXFIL_DROP_POPULATION: Final = 2
+EXFIL_DROP_CORPUS: Final = "SIMULATED credential-drop corpus, 2026-04 snapshot"
+"""How many distinct kits in the corpus mail to this drop, and where that was counted."""
+
 KIT_MARKER_POPULATION: Final = 3
 KIT_MARKER_CORPUS: Final = "SIMULATED phishing-kit corpus, 2026-04 snapshot"
 """How many distinct kits in the corpus carry this build path, and where that was counted.
@@ -1596,6 +1600,38 @@ def own_sensor_fixtures() -> FixtureTable:
             corpus=KIT_MARKER_CORPUS,
         )
 
+    def exfiltrated(domain: str, *, seen: datetime, note: str) -> ObservationRecord:
+        """What the egress side of the same edge saw: where the credentials went.
+
+        A second *observation*, not a second organisation. The gateway inspects inbound mail
+        and the WAF inspects egress; they are two sensors and one operator, and
+        ``provenance_cluster`` folds them together on purpose — so this corroborates nothing on
+        its own. What it does is attest a **different fact**, in a different correlation group,
+        which is what an assessment needs before it can be more than single-origin.
+        """
+        return _record(
+            artifact=_render(
+                "SIMULATED egress inspection record",
+                {
+                    "observed_at": seen.isoformat(),
+                    "form_action_host": domain,
+                    "credential_drop": EXFIL_ADDRESS,
+                    "drop_location": "kit/include/mailer.php",
+                    "action": "blocked",
+                },
+            ),
+            artifact_kind=ArtifactKind.LOG_RECORD,
+            subject=_ref(EntityType.DOMAIN, domain),
+            relation=RelationType.COMMUNICATES_WITH,
+            obj=_ref(EntityType.EMAIL_ADDRESS, EXFIL_ADDRESS),
+            prose=(f"Credentials submitted to {domain} were addressed to {EXFIL_ADDRESS}. {note}"),
+            extent=TemporalExtent.at(seen),
+            summary=f"Credential drop {EXFIL_ADDRESS} observed on ACME's egress.",
+            shared_attribute=f"credential drop {EXFIL_ADDRESS}",
+            population=EXFIL_DROP_POPULATION,
+            corpus=EXFIL_DROP_CORPUS,
+        )
+
     table[(PivotType.OWN_TELEMETRY, SEED_DOMAIN)] = FixtureAnswer(
         records=(
             captured(
@@ -1603,6 +1639,11 @@ def own_sensor_fixtures() -> FixtureTable:
                 message_id="<inv-2026-0847@acme-invoicing.example>",
                 seen=DETECTED_AT,
                 note="This is the message that opened the case.",
+            ),
+            exfiltrated(
+                SEED_DOMAIN,
+                seen=DETECTED_AT,
+                note="One user submitted before the block took effect.",
             ),
         )
     )
@@ -1616,6 +1657,11 @@ def own_sensor_fixtures() -> FixtureTable:
                     "Forty-five days after the disruption, aimed at the same accounts-payable "
                     "mailbox."
                 ),
+            ),
+            exfiltrated(
+                RESURGENCE_DOMAIN,
+                seen=RESURGENCE_AS_OF,
+                note="The same drop as the original wave, still collecting.",
             ),
         ),
         available_from=RESURGENCE_AS_OF,
