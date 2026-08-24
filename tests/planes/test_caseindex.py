@@ -403,3 +403,83 @@ def test_a_pilot_move_that_is_not_an_effect_is_not_remembered_as_one() -> None:
     memory = rebuild([opened(inv, seed="portal.example", at=T0), belief])
     assert memory.effects == ()
     assert memory.unreadable == 0
+
+
+def test_an_entity_we_ran_an_effect_against_has_a_case_history() -> None:
+    """The projection must not know we acted against something and not know we ever saw it.
+
+    Found by driving a live pilot from a seed the envelope did not approve: the run traversed to
+    the approved target, rehearsed against it, and the memory then answered
+    ``effects_against("initech-payments-secure.example") == ("simulated",)`` and
+    ``cases_for("domain", "initech-payments-secure.example") == ()``. Two answers from one
+    object, contradicting each other about whether the entity had ever been seen.
+
+    An appearance was keyed only on the entity a pivot was *run against*, so every entity that a
+    pivot merely *surfaced* was absent — including the one target the whole session existed to
+    act on. A recurrence check over that index is blind to precisely the assets an operator
+    rebuilds: the ones we took action against last time.
+
+    Only effect targets are repaired here, not every discovered entity. Discovery is a weaker
+    signal — a domain that shared an address once is a lead, and counting it as an appearance
+    would report recurrences for anything that was ever co-hosted with anything. Something we
+    aimed an effect at is not a lead, and the trail records it explicitly.
+    """
+    inv = new_id(IdPrefix.INVESTIGATION)
+    memory = rebuild(
+        [
+            opened(inv, seed="seed.example", at=T0),
+            pivoted(inv, entity="seed.example", at=T0),
+            AuditEvent(
+                audit_id=audit_id(),
+                occurred_at=T0 + timedelta(hours=1),
+                actor=new_id(IdPrefix.ACTOR),
+                actor_kind="agent",
+                action="pilot.move",
+                subject=inv,
+                outcome="accepted",
+                inputs={
+                    "move_kind": "request_effect",
+                    "operation": "simulation",
+                    "effect_outcome": "simulated",
+                    "target_natural_key": "target.example",
+                    "target_entity_type": "domain",
+                    "pilot": "claude-opus-5-current-conversation",
+                },
+            ),
+        ]
+    )
+    assert memory.effects_against("target.example") == ("simulated",)
+    assert memory.cases_for("domain", "target.example") == (inv,)
+
+
+def test_an_effect_target_whose_type_the_trail_omits_is_counted_not_guessed() -> None:
+    """A persona and a domain can spell the same string, so an untyped target is not an
+    appearance. Runs written before the type was recorded land in ``unreadable`` rather than
+    being filed under a type nobody observed — and the effect itself is still remembered, which
+    is the half the trail *can* support.
+    """
+    inv = new_id(IdPrefix.INVESTIGATION)
+    memory = rebuild(
+        [
+            opened(inv, seed="seed.example", at=T0),
+            AuditEvent(
+                audit_id=audit_id(),
+                occurred_at=T0 + timedelta(hours=1),
+                actor=new_id(IdPrefix.ACTOR),
+                actor_kind="agent",
+                action="pilot.move",
+                subject=inv,
+                outcome="accepted",
+                inputs={
+                    "move_kind": "request_effect",
+                    "operation": "simulation",
+                    "effect_outcome": "simulated",
+                    "target_natural_key": "target.example",
+                    "pilot": "legacy-run-without-a-recorded-type",
+                },
+            ),
+        ]
+    )
+    assert memory.effects_against("target.example") == ("simulated",)
+    assert memory.cases_for("domain", "target.example") == ()
+    assert memory.unreadable == 1

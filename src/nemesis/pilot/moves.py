@@ -108,6 +108,8 @@ class Ruling(BaseModel):
     reason: str
 
     effect_outcome: str | None = None
+    """The :class:`~nemesis.ports.effects.EffectOutcome` when the move was an effect request,
+    so a refusal names which control refused rather than only that one did."""
 
     authorization: AuthorizationDecision | None = None
     """What the effects plane decided about the capability, permitted or denied.
@@ -122,8 +124,15 @@ class Ruling(BaseModel):
     target_natural_key: str | None = None
     """The target as the graph names it, so an effect record can be joined to anything else
     about that entity. The entity id alone is a surrogate nothing else is keyed on."""
-    """The :class:`~nemesis.ports.effects.EffectOutcome` when the move was an effect request,
-    so a refusal names which control refused rather than only that one did."""
+
+    target_entity_type: str | None = None
+    """What kind of thing the target is, recorded alongside the key because the key alone does
+    not identify it: a persona and a domain can spell the same string, and the adversary memory
+    refuses to guess between them rather than file an appearance under a type nobody observed.
+
+    Without this the memory could answer "we rehearsed against this target" and "we have never
+    seen this entity" about the same run — which it did, on the first live pilot driven from a
+    seed the envelope had not approved."""
 
     external_contact_made: bool | None = None
     """What the Effects plane reported about reaching outside, carried up so a session can

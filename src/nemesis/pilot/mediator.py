@@ -1009,6 +1009,7 @@ class PilotMediator:
         if approved is not None:
             target_fingerprint = approved.fingerprint
             target_natural_key = approved.natural_key
+            target_entity_type = approved.entity_type
         else:
             # No approval names this entity. The request is routed anyway, with a fingerprint
             # computed from the entity's own current state, so the *envelope* refuses it for
@@ -1021,6 +1022,7 @@ class PilotMediator:
                 bound_attributes=observed,
             )
             target_natural_key = entity.natural_key
+            target_entity_type = entity.entity_type.value
 
         # Debit the autonomy budget BEFORE anything executes. A capability bounds what may be
         # done; at machine speed something must bound how often, or an autonomous pilot turns
@@ -1075,6 +1077,7 @@ class PilotMediator:
             external_contact_made=result.external_contact_made,
             authorization=result.authorization,
             target_natural_key=target_natural_key,
+            target_entity_type=target_entity_type,
         )
 
     # -- briefing -------------------------------------------------------------
@@ -1260,6 +1263,12 @@ class PilotMediator:
             inputs["target_entity"] = move.entity_id
             if ruling.target_natural_key:
                 inputs["target_natural_key"] = ruling.target_natural_key
+            if ruling.target_entity_type:
+                # Recorded next to the key because the adversary memory keys an appearance on
+                # the pair. An effect record carrying only the key is one the projection has to
+                # skip, and skipping it is how a target we acted against ends up with no case
+                # history at all.
+                inputs["target_entity_type"] = ruling.target_entity_type
         if isinstance(error, PilotError):
             # The vendor's own words, bounded, and only here. `PilotError` has no field for a
             # header, a request body or a response body, so there is nothing for a credential to

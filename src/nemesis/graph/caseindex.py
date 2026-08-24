@@ -13,8 +13,12 @@ arbitrarily or turn one real-world thing back into several. The relation between
 entity belongs on neither of them.
 
 **So the index is derived from the audit trail**, which already records it: an
-``investigation.start`` names the seed, and every ``pivot.execute`` names both the investigation
-and the entity it touched. That trail is append-only and hash-chained, so the projection
+``investigation.start`` names the seed, every ``pivot.execute`` names both the investigation and
+the entity it touched, and a ``pilot.move`` that requested an effect names the investigation and
+the target it was aimed at. Both kinds of event make an appearance, because an entity we ran an
+effect against is an entity we have met — a projection that knew we had acted against a target
+and not that we had ever seen it was contradicting itself. That trail is append-only and
+hash-chained, so the projection
 inherits durability and tamper-evidence from a mechanism that already had them, and this module
 adds no authoritative state. Deleting the index costs the time to replay the events and nothing
 else — which is the test of whether something is a projection or a second database wearing the
@@ -289,6 +293,31 @@ def rebuild(events: Iterable[AuditEvent]) -> AdversaryMemory:
             effects.append(
                 EffectAttempt(target=target, outcome=outcome, attempted_at=event.occurred_at)
             )
+            # An entity we aimed an effect at is an entity we have met, and the memory used to
+            # disagree with itself about that: `effects_against` named the target while
+            # `cases_for` said it had never been seen, because an appearance was keyed only on
+            # the entity a pivot ran *against*. A pilot that traverses to its approved target
+            # and rehearses there — the shape of every run seeded away from the target — left
+            # that target with no case history, so a recurrence check was blind to exactly the
+            # assets an operator rebuilds: the ones we acted on last time.
+            #
+            # Only effect targets, not everything a pivot surfaced. A domain that shared an
+            # address once is a lead, and counting leads as appearances would report a
+            # recurrence for anything ever co-hosted with anything.
+            target_type = event.inputs.get("target_entity_type")
+            if not target_type:
+                # Same rule as an untyped pivot: a persona and a domain can spell the same
+                # string, so a target whose type the trail omits is counted rather than filed
+                # under a type nobody observed. The effect above is still remembered — that
+                # half the trail does support.
+                unreadable += 1
+                continue
+            slot = appearances.setdefault(
+                (target_type, target, event.subject),
+                _Accumulator(first=event.occurred_at, last=event.occurred_at),
+            )
+            slot.first = min(slot.first, event.occurred_at)
+            slot.last = max(slot.last, event.occurred_at)
             continue
 
         natural_key = event.inputs.get("entity")
