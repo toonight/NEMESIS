@@ -141,8 +141,15 @@ and the single-origin veto hold whatever these numbers are. A reviewer cutting o
 still keep those. What they should no longer be told is that the numbers beside them are
 harmless.
 
-No confidence figure this system produces has been validated against outcomes. See
-``docs/calibration/PROTOCOL.md``.
+No confidence figure this system produces has been validated against outcomes, and as of
+2026-08-24 none will be: the controlled-operations experiment that was the only path to ground
+truth here was costed at ~283 operations for a ±10% answer and declined (ADR-0012).
+
+**So read every band this module produces as ordinal, not probabilistic.** *Likely* means this
+engine ranked something above what it calls *unlikely*. It does not mean 70%, and a consumer
+treating it as a probability is making a claim the project has explicitly declined to fund. See
+``docs/calibration/PROTOCOL.md`` and :mod:`nemesis.calibration.ceilings`, which measures how much
+these numbers are load-bearing rather than asserting that they are not.
 """
 
 CORRELATION_GROUP_OF: Final[dict[ResurgenceSignalKind, SuccessionGroup]] = {

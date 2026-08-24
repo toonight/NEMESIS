@@ -1048,7 +1048,7 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/calibration/generator.py": "bdd90080b2cfed7e",
         "nemesis/calibration/harness.py": "1b251a700a9cf876",
         "nemesis/calibration/scoring.py": "b2e7a193a30d65a1",
-        "nemesis/calibration/sizing.py": "5b7548dcf939d9d6",
+        "nemesis/calibration/sizing.py": "340861bb04cab7b6",
         "nemesis/cli/__init__.py": "ad2e13b69c4fc1fd",
         "nemesis/cli/main.py": "c8a84f0799800f84",
         "nemesis/collaboration/__init__.py": "ca1145a798cbf210",
