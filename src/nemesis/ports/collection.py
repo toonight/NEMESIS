@@ -61,6 +61,18 @@ class PivotType(StrEnum):
     WALLET_ACTIVITY = "wallet_activity"
     WALLET_CLUSTERING = "wallet_clustering"
     TRANSACTION_TRACE = "transaction_trace"
+    OWN_TELEMETRY = "own_telemetry"
+    """What our own sensors recorded about this entity.
+
+    Not a lookup and not a scan: infrastructure we operate, reporting traffic that was sent to
+    us. The distinction is load-bearing rather than cosmetic — an own sensor is one of the two
+    classes in the plantability allowlist, because an adversary can cause an observation in one
+    and cannot author the record. Everything else this platform collects through is a channel
+    they can write into.
+
+    It is also the only pivot here that involves no egress whatsoever, which is what keeps it
+    on the right side of invariant 15."""
+
     THREAT_INTEL_LOOKUP = "threat_intel_lookup"
     OSINT_SEARCH = "osint_search"
 

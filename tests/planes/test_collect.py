@@ -751,3 +751,53 @@ def test_a_malformed_fixture_costs_one_pivot_not_the_investigation() -> None:
     assert not result.succeeded
     assert result.error is not None
     assert "while sealing fixture records" in result.error
+
+
+def test_the_own_sensor_connector_is_the_only_unplantable_channel() -> None:
+    """One connector's source class sits in the plantability allowlist, and only one.
+
+    The allowlist is ``{OWN_SENSOR, LAW_ENFORCEMENT}`` and everything else is adversary-
+    writable by default. That is not a grading of trustworthiness: an adversary can *cause* an
+    observation at a sensor we operate and cannot *author* the record, while they can write
+    into a scan corpus, an open-source feed, a commercial feed or a forum at will.
+
+    Pinned as a property of the whole set because the number that matters is *how many*. Before
+    this connector existed it was zero, which meant no fact in a run could survive the
+    robustness margin however many bridges the graph contained.
+    """
+    from nemesis.collect.simulated import simulated_connectors
+    from nemesis.core.provenance import SourceClass
+
+    connectors = simulated_connectors()
+    unplantable = [c for c in connectors if not c.capabilities.source.is_adversary_influenceable]
+    assert len(unplantable) == 1
+    assert unplantable[0].capabilities.source.source_class is SourceClass.OWN_SENSOR
+    assert unplantable[0].capabilities.is_simulated, (
+        "the scenario is synthetic and the connector must keep saying so"
+    )
+
+
+def test_the_own_sensor_connector_makes_no_claim_about_a_remote_host() -> None:
+    """It reports what arrived, never what it went and looked at.
+
+    A victim's edge sensor does not observe a C2's certificate. A fixture that had it do so
+    would be manufacturing an unplantable fact out of a scan — the one move that would make
+    every downstream number in this platform meaningless, and the easiest one to make by
+    accident.
+
+    Enforced on the pivot vocabulary rather than the prose: the connector supports exactly
+    ``OWN_TELEMETRY``, and nothing that involves reaching out.
+    """
+    from nemesis.collect.simulated import SimulatedOwnSensorConnector
+    from nemesis.ports.collection import PivotType
+
+    capabilities = SimulatedOwnSensorConnector().capabilities
+    assert capabilities.supported_pivots == frozenset({PivotType.OWN_TELEMETRY})
+    reaching_out = {
+        PivotType.CERTIFICATE_REUSE,
+        PivotType.CERTIFICATE_HISTORY,
+        PivotType.SERVICE_FINGERPRINT,
+        PivotType.HOSTING_NEIGHBOURS,
+        PivotType.RESOLUTION_HISTORY,
+    }
+    assert not (capabilities.supported_pivots & reaching_out)

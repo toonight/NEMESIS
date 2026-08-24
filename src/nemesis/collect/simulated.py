@@ -40,6 +40,7 @@ from nemesis.collect.fixtures.glass_anvil import (
     dark_web_fixtures,
     malware_fixtures,
     network_fixtures,
+    own_sensor_fixtures,
     passive_dns_fixtures,
     rdap_fixtures,
 )
@@ -313,6 +314,45 @@ class SimulatedBlockchainConnector(SimulatedConnector):
         )
 
 
+class SimulatedOwnSensorConnector(SimulatedConnector):
+    """Our own edge, reporting traffic that was sent to us.
+
+    The only connector here whose source class sits in the plantability allowlist, and the
+    reason is a real difference rather than a grading: an adversary can *cause* an observation
+    at a sensor we operate and cannot *author* the record. Every other connector in this module
+    reads a channel they can write into.
+
+    ``is_simulated`` is true and says so in the identifier, exactly like its neighbours. The
+    scenario is synthetic; what is not synthetic is the provenance semantics, and an evidence
+    object sealed from this still carries ``AdmissibilityDefect.SIMULATED_COLLECTION`` — which
+    is the label that keeps a demonstration from reading as a case.
+
+    No egress. It answers from what arrived, which is what places the pivot on the right side
+    of invariant 15.
+    """
+
+    def __init__(
+        self, *, as_of: datetime = SCENARIO_PRESENT, fixtures: FixtureTable | None = None
+    ) -> None:
+        super().__init__(
+            capabilities=ConnectorCapabilities(
+                name="simulated-own-edge-telemetry",
+                version=CONNECTOR_VERSION,
+                source=_source(
+                    SourceClass.OWN_SENSOR,
+                    "SIMULATED ACME edge sensors",
+                    SourceReliability.COMPLETELY_RELIABLE,
+                ),
+                supported_pivots=frozenset({PivotType.OWN_TELEMETRY}),
+                supported_entity_types=frozenset({EntityType.DOMAIN}),
+                is_simulated=True,
+                cost_per_call=0.5,
+            ),
+            fixtures=own_sensor_fixtures() if fixtures is None else fixtures,
+            as_of=as_of,
+        )
+
+
 def simulated_connectors(
     *, as_of: datetime = SCENARIO_PRESENT
 ) -> tuple[IntelligenceConnector, ...]:
@@ -324,6 +364,7 @@ def simulated_connectors(
     exist when it claims to have collected it.
     """
     return (
+        SimulatedOwnSensorConnector(as_of=as_of),
         SimulatedPassiveDnsConnector(as_of=as_of),
         SimulatedCertificateConnector(as_of=as_of),
         SimulatedRdapConnector(as_of=as_of),

@@ -2668,6 +2668,22 @@ async def _resurgence(
             PERSONA_RESURGENT.lower(),
             "A new vendor persona appeared on NightPort; collect what it publishes.",
         ),
+        # Our own edge, on both sides of the gap. Everything above arrives through a channel an
+        # adversary can write into, so without these two the watch cannot reach a finding
+        # whatever it finds — the robustness margin removes every plantable fact and one of
+        # them is always the load-bearing one.
+        (
+            PivotType.OWN_TELEMETRY,
+            EntityType.DOMAIN,
+            SEED_DOMAIN,
+            "What our own gateway captured of the original wave.",
+        ),
+        (
+            PivotType.OWN_TELEMETRY,
+            EntityType.DOMAIN,
+            RESURGENCE_DOMAIN,
+            "Whether our own gateway has seen this new domain arrive too.",
+        ),
     )
 
     collections: list[DirectedCollection] = []
