@@ -305,6 +305,36 @@ async def assemble_resurgence_signals(
 
                 attribute = f"{bridge.entity_type.value}:{bridge.natural_key}"
                 cited = tuple(dict.fromkeys((*bridge_claims, *edge.supporting_claims)))
+                # A count the *connector* stated against a named corpus, if it stated one.
+                # This is not the rule above being relaxed: that rule forbids counting our own
+                # graph's neighbours, because what we happen to know is a lower bound on the
+                # world and a lower bound used as a population turns a coincidence into the
+                # strongest signal in the assessment. Reading a denominator somebody measured
+                # and wrote down is the opposite of that. Where no connector said, the answer
+                # stays "uncounted", which weighs zero.
+                stated = edge.selectivity
+                measured = stated is not None and stated.population_size is not None
+                # When a connector measured, its measurement wins over this module's rule.
+                # `globally_unique` in BRIDGE_RULES is an assumption about a *kind* of
+                # attribute; a stated count is an observation about this one. Where they
+                # disagree — a certificate the corpus says four hosts present, against a rule
+                # asserting a certificate identifies by construction — the count is the thing
+                # somebody actually checked, and PivotSelectivity refuses the combination
+                # outright rather than letting them coexist.
+                # Rebased onto the canonical bridge name rather than adopted whole. The
+                # connector counted the same underlying thing under its own wording ("TLS
+                # certificate SHA-256 fingerprint 3f8a…" against "tls_certificate:3f8a…"), and
+                # a signal's fact key is built from this string — two spellings of one bridge
+                # would fail to collapse and read as two corroborating facts. The count and its
+                # denominator carry over untouched; only the label is normalised.
+                selectivity = (
+                    stated.model_copy(update={"attribute": attribute})
+                    if measured and stated is not None
+                    else PivotSelectivity(
+                        attribute=attribute,
+                        is_globally_unique=rule.globally_unique,
+                    )
+                )
                 # One signal per attesting origin, all sharing an attribute and therefore a
                 # fact key. Two collectors who saw the same certificate are two accounts of one
                 # fact, and `establish_fact` is what works out whether they corroborate or
@@ -315,14 +345,7 @@ async def assemble_resurgence_signals(
                         ResurgenceSignal(
                             kind=rule.kind,
                             shared_attribute=attribute,
-                            selectivity=PivotSelectivity(
-                                attribute=attribute,
-                                # No population unless the attribute identifies by
-                                # construction. Counting this graph's neighbours would be
-                                # counting what we happen to know, which is not what the field
-                                # means.
-                                is_globally_unique=rule.globally_unique,
-                            ),
+                            selectivity=selectivity,
                             observed_by=observer,
                             new_entity_type=candidate.entity_type,
                             new_entity_key=candidate.natural_key,

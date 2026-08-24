@@ -885,10 +885,18 @@ def test_the_blind_graph_walk_agrees_with_the_narrated_assessment(
     observation came from. Checking it revealed that the higher number was the wrong one.
     """
     assert result.resurgence.graph_signals
-    assert all(
-        signal.observed_by.is_adversary_influenceable for signal in result.resurgence.graph_signals
-    ), "the reference run collects nothing through an unplantable channel"
+    unplantable = [
+        signal
+        for signal in result.resurgence.graph_signals
+        if not signal.observed_by.is_adversary_influenceable
+    ]
+    # Exactly one, and it arrived with the own-sensor connector. This assertion read "nothing"
+    # until that connector existed; it is what changed the count. The narrated assessment still
+    # rests on the internet scan and the forum, so both halves continue to agree that nothing
+    # in this run is actionable.
+    assert len(unplantable) == 1
     assert not result.resurgence.assessment.is_actionable
+    assert not result.resurgence.watch.resumes
 
 
 def test_the_resurgence_watch_actually_runs_and_records_its_refusal(
@@ -943,3 +951,48 @@ def test_the_watch_examines_only_what_the_case_actually_worked_on(
     assert all(finding.candidate_key not in branch_keys for finding in watch.findings), (
         "a candidate the case already worked on is last month, not a return"
     )
+
+
+def test_the_own_sensor_gives_exactly_one_candidate_an_unplantable_fact(
+    result: ScenarioResult,
+) -> None:
+    """What the own-sensor connector actually bought, measured rather than asserted.
+
+    Before it existed every candidate in this run rested only on plantable evidence, so the
+    robustness margin stripped all of them and no amount of bridge-finding could have produced
+    a finding. Now exactly one candidate — the returning domain, recognised through a kit build
+    path our own gateway captured in both waves — has a fact the margin will not remove.
+
+    **It is still not actionable, and that is the honest state.** The marker's edge carries no
+    usable population, because ``Relationship`` refuses selectivity on a direct observation and
+    it is right to: the gateway observed the kit, it did not infer anything from a shared
+    attribute. So the signal weighs nothing, the candidate is single-origin, and the verdict is
+    a lead.
+
+    What would close the loop is a second *weighted* fact about the same domain. That is a
+    property of what this scenario collects, not of the machinery, and shaping the fixtures
+    until the number came out would be manufacturing the result.
+    """
+    from nemesis.pursuit.resurgence import ResurgenceEngine
+    from nemesis.pursuit.watch import signals_by_candidate
+
+    grouped = signals_by_candidate(result.resurgence.graph_signals)
+    assert grouped, "the walk found nothing"
+
+    survived = {
+        key
+        for key, members in grouped.items()
+        if not ResurgenceEngine()
+        .assess(
+            campaign="x",
+            signals=members,
+            candidate_population=40,
+            assessed_at=result.resurgence.as_of,
+        )
+        .fusion.rests_only_on_plantable_evidence
+    }
+    assert len(survived) == 1
+    assert survived.pop()[1] == "acme-invoice-secure2.example"
+
+    # And the loop still does not close, for the reason above.
+    assert not result.resurgence.watch.resumes

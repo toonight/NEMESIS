@@ -141,6 +141,15 @@ PGP_FINGERPRINT: Final = "9f2c4e1ab7d3608f45e29c1a7d0b3e86f24c95d1"
 
 KIT_SHA256: Final = "5d41402abc4b2a76b9719d911017c592aab3238922bcc25a6f606eb525ffdc56"
 
+KIT_MARKER_POPULATION: Final = 3
+KIT_MARKER_CORPUS: Final = "SIMULATED phishing-kit corpus, 2026-04 snapshot"
+"""How many distinct kits in the corpus carry this build path, and where that was counted.
+
+A count with no stated denominator is not a count, which is why the two move together. Three
+is small enough to be informative and larger than the pair being linked — a marker shared by
+exactly the two things you are comparing is the shape of a planted one, and this is not
+claiming that."""
+
 EXFIL_ADDRESS: Final = "dropbox_ivan@mail.example"
 BUILD_PATH: Final = "/home/vpetrov/kits/acme/"
 TELEGRAM_CHANNEL: Final = "@glassanvil"
@@ -1526,5 +1535,89 @@ def blockchain_fixtures() -> FixtureTable:
                 ),
             ),
         )
+    )
+    return table
+
+
+# --- Our own edge, which is the only unplantable channel here ------------------
+
+
+def own_sensor_fixtures() -> FixtureTable:
+    """What ACME's own gateway captured, for the original wave and for the return.
+
+    **Why this fixture matters more than its size suggests.** Everything else this scenario
+    collects arrives through a channel an adversary can write into — an internet scan, an
+    open-source corpus, a commercial feed, a dark-web forum. The plantability allowlist holds
+    exactly ``{OWN_SENSOR, LAW_ENFORCEMENT}``, so before this existed no fact in the run could
+    survive the robustness margin, and the resurgence watch was structurally incapable of
+    reaching a finding however many bridges it found.
+
+    **What an own sensor can honestly say.** ACME operates the gateway; the gateway holds the
+    quarantined message. The kit's shipped files carry a leftover build path — an operational
+    mistake, and the classic one — so the gateway can report that the message it captured was
+    built from that tree. It is reporting the contents of an artifact in its own possession.
+
+    It is emphatically *not* reporting anything about a remote host. A victim's edge sensor
+    does not observe a C2's certificate, and a fixture that had it do so would be manufacturing
+    an unplantable fact out of a scan. The bridge here is the kit marker inside the two emails
+    and nothing else.
+
+    No egress: this is traffic that was sent to us, which is what keeps the pivot on the right
+    side of invariant 15.
+    """
+    table: dict[FixtureKey, FixtureAnswer] = {}
+    artifact_ref = _ref(EntityType.SOURCE_CODE_ARTIFACT, BUILD_PATH)
+
+    def captured(domain: str, *, message_id: str, seen: datetime, note: str) -> ObservationRecord:
+        return _record(
+            artifact=_render(
+                "SIMULATED email security gateway capture",
+                {
+                    "message_id": message_id,
+                    "received": seen.isoformat(),
+                    "link": f"{domain}/login",
+                    "kit_marker": BUILD_PATH,
+                    "marker_location": "sourceMappingURL comment in login.js",
+                    "verdict": "quarantined",
+                },
+            ),
+            artifact_kind=ArtifactKind.EMAIL_MESSAGE,
+            subject=_ref(EntityType.DOMAIN, domain),
+            relation=RelationType.BUILT_WITH,
+            obj=artifact_ref,
+            prose=(
+                f"The message linking to {domain} carried a kit whose login.js still names the "
+                f"build tree {BUILD_PATH}. {note}"
+            ),
+            extent=TemporalExtent.at(seen),
+            summary=f"Kit shipped from {BUILD_PATH}, captured at ACME's gateway.",
+            shared_attribute=f"kit build path {BUILD_PATH}",
+            population=KIT_MARKER_POPULATION,
+            corpus=KIT_MARKER_CORPUS,
+        )
+
+    table[(PivotType.OWN_TELEMETRY, SEED_DOMAIN)] = FixtureAnswer(
+        records=(
+            captured(
+                SEED_DOMAIN,
+                message_id="<inv-2026-0847@acme-invoicing.example>",
+                seen=DETECTED_AT,
+                note="This is the message that opened the case.",
+            ),
+        )
+    )
+    table[(PivotType.OWN_TELEMETRY, RESURGENCE_DOMAIN)] = FixtureAnswer(
+        records=(
+            captured(
+                RESURGENCE_DOMAIN,
+                message_id="<inv-2026-1193@acme-billing.example>",
+                seen=RESURGENCE_AS_OF,
+                note=(
+                    "Forty-five days after the disruption, aimed at the same accounts-payable "
+                    "mailbox."
+                ),
+            ),
+        ),
+        available_from=RESURGENCE_AS_OF,
     )
     return table
