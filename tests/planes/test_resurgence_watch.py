@@ -73,12 +73,14 @@ def observed_key(source: Entity, target: Entity) -> str:
     return f"{source.natural_key}->{target.natural_key}"
 
 
-def own_sensor(_claims: tuple[str, ...]) -> SourceDescriptor:
+async def own_sensor(_claims: tuple[str, ...]) -> tuple[SourceDescriptor, ...]:
     """A resolver standing in for one that would read the vault's provenance chain."""
-    return SourceDescriptor(
-        source_class=SourceClass.OWN_SENSOR,
-        identifier="nemesis-resurgence-watch",
-        reliability=SourceReliability.COMPLETELY_RELIABLE,
+    return (
+        SourceDescriptor(
+            source_class=SourceClass.OWN_SENSOR,
+            identifier="nemesis-resurgence-watch",
+            reliability=SourceReliability.COMPLETELY_RELIABLE,
+        ),
     )
 
 

@@ -834,37 +834,57 @@ def test_the_investigation_itself_is_on_disk_when_the_run_ends(
     assert len(claims.claims()) == len(result.stores.claims.claims())
 
 
-def test_the_resurgence_stage_is_scored_by_the_engine_not_only_narrated(
+def test_the_resurgence_stage_is_scored_and_the_score_is_a_lead(
     result: ScenarioResult,
 ) -> None:
-    """Phase 8's prose says the reconnection happened; the engine says how well supported it is.
+    """Phase 8's prose says the reconnection happened; the engine says what it is worth.
 
-    The two are produced side by side from the same two artifacts, so the day they disagree the
-    narrative is wrong. What the engine adds is the discipline every other conclusion here goes
-    through: a prior that falls with the size of the tracked corpus, collapse of signals from
-    one generating process, and the robustness margin.
+    **It is worth a lead, and that is the corrected answer.** An earlier version of this test
+    asserted VERY_LIKELY and actionable, because the assessment it checked named an OWN_SENSOR
+    as the observer of the certificate reuse. The platform never collected it that way:
+    ``CERTIFICATE_REUSE`` is served by the internet-scan connector, and the PGP fingerprint
+    comes off a dark-web forum. Both are channels an adversary can write into — putting a
+    certificate where a scanner will find it, or a fingerprint on a forum profile, is exactly
+    how you arrange to have somebody else blamed for your return.
 
-    Note the disclosure. The certificate is infrastructure and deliverable; the PGP fingerprint
-    names a persona, and persona linkage is an investigative lead under founder decision D1. The
-    assessment takes the classification of its most restricted part, so this finding cannot be
-    published as it stands — which is the wrapper being stopped from saying what its contents
-    may not.
+    So the robustness margin removes both facts and the finding does not stand. That is the
+    control working on the proposition it was built for rather than a regression: this
+    scenario's reconnection genuinely rests on two arrangeable observations, and a platform
+    reporting it as very likely would be reporting a number its own evidence cannot support.
+
+    What would move it is one fact from a channel an adversary cannot author into. The
+    allowlist is ``{OWN_SENSOR, LAW_ENFORCEMENT}``, and neither collected this.
     """
     from nemesis.core.confidence import ConfidenceBand
     from nemesis.core.disclosure import DisclosureClass
 
     assessment = result.resurgence.assessment
 
-    assert assessment.band is ConfidenceBand.VERY_LIKELY
-    assert assessment.is_actionable
-    assert not assessment.is_single_origin
+    assert assessment.band is ConfidenceBand.UNLIKELY
+    assert not assessment.is_actionable
+    assert assessment.fusion.rests_only_on_plantable_evidence
+    assert any("plant" in warning for warning in assessment.fusion.warnings)
 
-    # It survived the margin because the certificate came from our own sensor, which an
-    # adversary can cause an observation in but cannot author a record in.
-    assert not assessment.fusion.rests_only_on_plantable_evidence
-
+    # The PGP fingerprint names a persona, and persona linkage is an investigative lead under
+    # founder decision D1. The wrapper takes the classification of its most restricted part.
     assert assessment.disclosure is DisclosureClass.INTERNAL_LEAD
     assert assessment.rests_on_internal_material
 
     # A finding with no competing account on the page is an argument, not an assessment.
     assert len(assessment.alternatives) >= 2
+
+
+def test_the_blind_graph_walk_agrees_with_the_narrated_assessment(
+    result: ScenarioResult,
+) -> None:
+    """Both halves of phase 8 reach the same verdict, which is what the resolver bought.
+
+    Before provenance could be resolved they disagreed loudly — the walk scored 0.007 and the
+    hand-written assessment 0.811 — and that gap was read as the value of checking where an
+    observation came from. Checking it revealed that the higher number was the wrong one.
+    """
+    assert result.resurgence.graph_signals
+    assert all(
+        signal.observed_by.is_adversary_influenceable for signal in result.resurgence.graph_signals
+    ), "the reference run collects nothing through an unplantable channel"
+    assert not result.resurgence.assessment.is_actionable

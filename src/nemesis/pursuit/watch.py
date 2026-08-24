@@ -35,17 +35,18 @@ answer honestly.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Coroutine, Sequence
 from datetime import datetime
-from typing import Final
+from typing import Any, Final
 
 from pydantic import BaseModel, ConfigDict
 
 from nemesis.core.entities import Entity, EntityType
 from nemesis.core.ids import ClaimId
-from nemesis.core.provenance import SourceClass, SourceDescriptor, SourceReliability
+from nemesis.core.provenance import SourceDescriptor
 from nemesis.core.relationships import PivotSelectivity, Relationship, RelationType
 from nemesis.core.temporal import TemporalExtent
+from nemesis.evidence.lineage import UNRESOLVED_SOURCE
 from nemesis.ports.storage import GraphQuery, GraphStore
 from nemesis.pursuit.investigation import (
     Investigation,
@@ -145,23 +146,29 @@ population, and therefore contributes nothing until somebody counts it against a
 """
 
 
-def _unresolved_provenance(_claims: tuple[ClaimId, ...]) -> SourceDescriptor:
-    """The descriptor used when the caller cannot resolve provenance.
+ProvenanceResolver = Callable[
+    [tuple[ClaimId, ...]], Coroutine[Any, Any, Sequence[SourceDescriptor]]
+]
+"""How a caller tells the walk who observed a fact.
 
-    Deliberately the weakest honest answer: an open-source class, which the plantability
-    allowlist treats as adversary-writable, and a reliability of "cannot be judged". Both are
-    true of a fact whose origin nobody looked up, and both push the assessment toward a lead.
+Asynchronous because resolving it means reading the claim store and the vault, and returns
+*several* descriptors because one fact seen by two collectors is two attestations —
+:func:`~nemesis.core.fusion.establish_fact` is what decides whether they accumulate or fold
+together, and collapsing them here would make that decision in the wrong place.
 
-    The alternative — guessing at ``OWN_SENSOR`` because the observation is in *our* graph —
-    would mark every assembled fact unplantable and let the robustness margin pass anything.
-    Ownership of the record is not authorship of the fact; the same confusion the source
-    allowlist already refuses for honeypots.
+:func:`nemesis.evidence.lineage.resolve_sources` binds a store and a vault into this shape.
+"""
+
+
+async def _unresolved_provenance(_claims: tuple[ClaimId, ...]) -> Sequence[SourceDescriptor]:
+    """The default: a caller who cannot resolve provenance, saying so.
+
+    Deliberately the weakest honest answer — see :data:`~nemesis.evidence.lineage.
+    UNRESOLVED_SOURCE`. The alternative, guessing at ``OWN_SENSOR`` because the observation is
+    in *our* graph, would mark every assembled fact unplantable and let the robustness margin
+    pass anything. Holding the record is not having authored the observation.
     """
-    return SourceDescriptor(
-        source_class=SourceClass.OPEN_SOURCE,
-        identifier="graph-traversal (provenance not resolved)",
-        reliability=SourceReliability.CANNOT_BE_JUDGED,
-    )
+    return (UNRESOLVED_SOURCE,)
 
 
 def _rule_for(bridge: Entity, relation: RelationType) -> BridgeRule | None:
@@ -230,7 +237,7 @@ async def assemble_resurgence_signals(
     *,
     prior_entity_ids: Sequence[str],
     observed_at: datetime,
-    provenance_of: Callable[[tuple[ClaimId, ...]], SourceDescriptor] = _unresolved_provenance,
+    provenance_of: ProvenanceResolver = _unresolved_provenance,
 ) -> tuple[ResurgenceSignal, ...]:
     """Walk out from a known cluster and return what the graph offers as continuity.
 
@@ -298,25 +305,32 @@ async def assemble_resurgence_signals(
 
                 attribute = f"{bridge.entity_type.value}:{bridge.natural_key}"
                 cited = tuple(dict.fromkeys((*bridge_claims, *edge.supporting_claims)))
-                signals.append(
-                    ResurgenceSignal(
-                        kind=rule.kind,
-                        shared_attribute=attribute,
-                        selectivity=PivotSelectivity(
-                            attribute=attribute,
-                            # No population unless the attribute identifies by construction.
-                            # Counting this graph's neighbours would be counting what we happen
-                            # to know, which is not what the field means.
-                            is_globally_unique=rule.globally_unique,
-                        ),
-                        observed_by=provenance_of(cited),
-                        new_entity_type=candidate.entity_type,
-                        new_entity_key=candidate.natural_key,
-                        prior_entity_key=known.natural_key,
-                        extent=TemporalExtent.at(observed_at),
-                        supporting_claims=cited,
+                # One signal per attesting origin, all sharing an attribute and therefore a
+                # fact key. Two collectors who saw the same certificate are two accounts of one
+                # fact, and `establish_fact` is what works out whether they corroborate or
+                # merely repeat each other. Emitting one averaged signal would decide that here
+                # and with less information than the function built for it.
+                for observer in await provenance_of(cited):
+                    signals.append(
+                        ResurgenceSignal(
+                            kind=rule.kind,
+                            shared_attribute=attribute,
+                            selectivity=PivotSelectivity(
+                                attribute=attribute,
+                                # No population unless the attribute identifies by
+                                # construction. Counting this graph's neighbours would be
+                                # counting what we happen to know, which is not what the field
+                                # means.
+                                is_globally_unique=rule.globally_unique,
+                            ),
+                            observed_by=observer,
+                            new_entity_type=candidate.entity_type,
+                            new_entity_key=candidate.natural_key,
+                            prior_entity_key=known.natural_key,
+                            extent=TemporalExtent.at(observed_at),
+                            supporting_claims=cited,
+                        )
                     )
-                )
 
     return tuple(signals)
 
@@ -425,7 +439,7 @@ async def watch_for_resurgence(
     campaign: str,
     candidate_population: int,
     now: datetime,
-    provenance_of: Callable[[tuple[ClaimId, ...]], SourceDescriptor] = _unresolved_provenance,
+    provenance_of: ProvenanceResolver = _unresolved_provenance,
     engine: ResurgenceEngine | None = None,
 ) -> WatchReport:
     """Ask, for a case sitting in resurgence watch, whether the adversary has come back.
