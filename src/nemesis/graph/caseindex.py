@@ -49,8 +49,9 @@ from nemesis.ports.storage import AuditEvent
 PIVOT_ACTION = "pivot.execute"
 INVESTIGATION_ACTION = "investigation.start"
 EFFECT_ACTION = "effect.execute"
+PILOT_MOVE_ACTION = "pilot.move"
 
-READ_ACTIONS = frozenset({PIVOT_ACTION, INVESTIGATION_ACTION, EFFECT_ACTION})
+READ_ACTIONS = frozenset({PIVOT_ACTION, INVESTIGATION_ACTION, EFFECT_ACTION, PILOT_MOVE_ACTION})
 """The actions this projection interprets.
 
 Everything else is skipped in silence rather than counted as unreadable. The distinction
@@ -269,6 +270,27 @@ def rebuild(events: Iterable[AuditEvent]) -> AdversaryMemory:
             )
             continue
 
+        if event.action == PILOT_MOVE_ACTION:
+            # An effect the autonomous path requested. `record_effect`, which writes
+            # `effect.execute`, is called only from the demonstration scenario — so keying this
+            # index on that action alone made every effect a pilot ever asked for invisible to
+            # "what did we try last time". Found by reading a real Codex-driven run back through
+            # this projection, which is what a projection with a caller is for.
+            if event.inputs.get("move_kind") != "request_effect":
+                continue
+            target = event.inputs.get("target_natural_key")
+            outcome = event.inputs.get("effect_outcome")
+            if not target or not outcome:
+                # A pilot effect whose target or outcome the trail did not record. Counted, not
+                # guessed at: runs predating `target_natural_key` land here and a memory that
+                # silently dropped them would under-report what was tried.
+                unreadable += 1
+                continue
+            effects.append(
+                EffectAttempt(target=target, outcome=outcome, attempted_at=event.occurred_at)
+            )
+            continue
+
         natural_key = event.inputs.get("entity")
         entity_type = event.inputs.get("entity_type")
         if not natural_key or not entity_type:
@@ -329,6 +351,7 @@ async def rebuild_from(sink: object, *, limit: int = 100_000) -> AdversaryMemory
 
 
 __all__ = [
+    "PILOT_MOVE_ACTION",
     "READ_ACTIONS",
     "AdversaryMemory",
     "EffectAttempt",

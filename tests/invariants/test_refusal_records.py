@@ -203,3 +203,50 @@ def test_a_permitted_operation_still_records_a_faithful_decision() -> None:
     assert decision.permitted
     assert decision.capability_id == capability.capability_id
     assert decision.denial_reasons == ()
+
+
+@pytest.mark.anyio
+async def test_a_pilot_driven_effect_records_the_authorization_decision() -> None:
+    """Found in a real Codex-driven run, where the field was null.
+
+    ``AuditEvent.authorization_decision`` says of itself that it is "present for any action that
+    consulted a capability, permitted or denied" and that "denials are recorded with equal
+    weight — a pattern of denied attempts is a security signal". An effect requested by a pilot
+    is exactly such an action, and the mediator had the decision in hand from the effects plane
+    and dropped it.
+
+    So the one actor the whole platform exists to contain was the one whose capability checks
+    left no record. `record_effect`, which does carry the decision, is called only from the
+    demonstration scenario and never from the pilot path.
+    """
+    from nemesis.core.authorization import OperationClass
+    from nemesis.pilot.moves import Conclude, RequestEffect
+    from tests.invariants.test_pilot_containment import ScriptedPilot, _build, _hostile
+
+    h = await _build()
+    pilot = ScriptedPilot(
+        "gpt-5-cyber",
+        [
+            RequestEffect(
+                entity_id=h.approved.entity_id,
+                operation=OperationClass.SIMULATION,
+                rationale="rehearse",
+            ),
+            Conclude(summary=""),
+        ],
+    )
+    await h.mediator.drive(_hostile(pilot), h.seed)
+
+    effects = [
+        event
+        for event in h.audit.events
+        if event.action == "pilot.move" and event.inputs.get("move_kind") == "request_effect"
+    ]
+    assert effects, "the pilot requested no effect"
+    recorded = effects[0]
+    assert recorded.authorization_decision is not None, (
+        "an effect consulted a capability and the trail records no decision"
+    )
+    assert recorded.inputs.get("target_natural_key"), (
+        "without the target's natural key the record cannot be joined to anything"
+    )

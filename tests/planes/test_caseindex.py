@@ -347,3 +347,59 @@ def test_an_effect_outcome_is_reported_as_its_verdict_not_its_paragraph() -> Non
     )
     assert memory.effects_against("portal.example") == ("simulated",)
     assert memory.effects[0].outcome == composite, "the full line must survive on the record"
+
+
+def test_a_pilot_driven_effect_is_remembered_too() -> None:
+    """Found by reading a real Codex-driven run back through this projection.
+
+    ``record_effect``, which writes ``effect.execute``, is called only from the demonstration
+    scenario. A pilot's effect produces a ``pilot.move`` and nothing else — so keying this index
+    on ``effect.execute`` alone made every effect the autonomous path ever requested invisible
+    to "what did we try last time", which is the question the memory exists to answer.
+
+    My defect, from the day the index was written: I keyed on an action without checking who
+    writes it.
+    """
+    inv = new_id(IdPrefix.INVESTIGATION)
+    pilot_effect = AuditEvent(
+        audit_id=audit_id(),
+        occurred_at=T0 + timedelta(hours=1),
+        actor=new_id(IdPrefix.ACTOR),
+        actor_kind="agent",
+        action="pilot.move",
+        subject=inv,
+        outcome="accepted",
+        inputs={
+            "move_kind": "request_effect",
+            "operation": "simulation",
+            "effect_outcome": "simulated",
+            "target_natural_key": "portal.example",
+            "pilot": "codex-current-conversation",
+        },
+    )
+    memory = rebuild(
+        [
+            opened(inv, seed="portal.example", at=T0),
+            pivoted(inv, entity="portal.example", at=T0),
+            pilot_effect,
+        ]
+    )
+    assert memory.effects_against("portal.example") == ("simulated",)
+
+
+def test_a_pilot_move_that_is_not_an_effect_is_not_remembered_as_one() -> None:
+    """A pivot and a belief are moves too, and neither is something we tried against a target."""
+    inv = new_id(IdPrefix.INVESTIGATION)
+    belief = AuditEvent(
+        audit_id=audit_id(),
+        occurred_at=T0,
+        actor=new_id(IdPrefix.ACTOR),
+        actor_kind="agent",
+        action="pilot.move",
+        subject=inv,
+        outcome="accepted",
+        inputs={"move_kind": "record_belief", "pilot": "gpt-5-cyber"},
+    )
+    memory = rebuild([opened(inv, seed="portal.example", at=T0), belief])
+    assert memory.effects == ()
+    assert memory.unreadable == 0

@@ -43,7 +43,7 @@ from typing import Annotated, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
-from nemesis.core.authorization import OperationClass
+from nemesis.core.authorization import AuthorizationDecision, OperationClass
 from nemesis.ports.collection import PivotType
 
 
@@ -108,6 +108,20 @@ class Ruling(BaseModel):
     reason: str
 
     effect_outcome: str | None = None
+
+    authorization: AuthorizationDecision | None = None
+    """What the effects plane decided about the capability, permitted or denied.
+
+    Carried so the audit record can hold it. ``AuditEvent.authorization_decision`` says it is
+    "present for any action that consulted a capability, permitted or denied" and that a pattern
+    of denied attempts is a security signal — and until a real Codex-driven run was read back,
+    the one actor this platform exists to contain was the one whose capability checks left no
+    decision in the trail at all.
+    """
+
+    target_natural_key: str | None = None
+    """The target as the graph names it, so an effect record can be joined to anything else
+    about that entity. The entity id alone is a surrogate nothing else is keyed on."""
     """The :class:`~nemesis.ports.effects.EffectOutcome` when the move was an effect request,
     so a refusal names which control refused rather than only that one did."""
 
