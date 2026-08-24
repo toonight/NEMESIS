@@ -34,12 +34,14 @@ import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Final
 
 from nemesis.audit.trail import AppendOnlyAuditTrail
 from nemesis.authz.envelope import AutonomyEnvelope
 from nemesis.authz.gateway import RevocationRegistry
 from nemesis.authz.keys import CapabilitySigningKey
 from nemesis.authz.store import SqliteAuthorizationStore
+from nemesis.collect.fixtures.glass_anvil import CLUSTER_DOMAINS as _CLUSTER_DOMAINS
 from nemesis.collect.simulated import simulated_connectors
 from nemesis.core.authorization import (
     Approval,
@@ -263,11 +265,27 @@ def _signed_envelope(
     return unsigned.model_copy(update={"signature": signer.sign(unsigned.signing_payload())})
 
 
+SEEDABLE_DOMAINS: Final[tuple[str, ...]] = _CLUSTER_DOMAINS
+"""Domains a run may start from, every one of which has real fixture coverage.
+
+A seed with no fixtures behind it produces a run where every pivot returns nothing, which
+measures the absence of data rather than the pilot. These four are the GLASS ANVIL cluster and
+each answers both of the pivots a first move would reach for.
+
+Offered because varying the seed is how you find out whether a pilot *adapts* or replays a
+route. The four are genuinely different starting points — different registrar, different
+resolution history, different position in the cluster — while resolving to the same underlying
+operation, so a pilot that reconstructs the cluster from any of them has done something a pilot
+that only knows one entry point has not.
+"""
+
+
 async def run_pilot_demonstration(
     *,
     workspace: Path | None = None,
     challenger: MoveChallenger | None = None,
     challenge_policy: ChallengePolicy | None = None,
+    seed_domain: str = SEED_DOMAIN,
 ) -> PilotDemonstration:
     """Drive one autonomous session and return it, with the envelope it spent.
 
@@ -328,9 +346,15 @@ async def run_pilot_demonstration(
         challenger=challenger,
         challenge_policy=challenge_policy,
     )
+    if seed_domain not in SEEDABLE_DOMAINS:
+        raise ValueError(
+            f"{seed_domain!r} has no fixture coverage; a run seeded there would measure the "
+            f"absence of data rather than the pilot. Choose one of: "
+            f"{', '.join(SEEDABLE_DOMAINS)}"
+        )
     seed = IncidentSeed(
         entity_type=EntityType.DOMAIN,
-        entity_key=SEED_DOMAIN,
+        entity_key=seed_domain,
         observed_at=SCENARIO_NOW,
         detected_by="acme-waf (SIMULATED)",
     )

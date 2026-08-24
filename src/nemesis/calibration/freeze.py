@@ -25,7 +25,7 @@ guarantee, and it is the only one that sees a bare literal inside a function bod
 field default, or a two-line logic change that touches no constant at all. `engine_drifted()`
 names the modules that moved.
 
-**Every module-level constant**, by normalised syntax, in `CONSTANT_DIGESTS` — 593 of them,
+**Every module-level constant**, by normalised syntax, in `CONSTANT_DIGESTS` — 594 of them,
 with no classification whatsoever. A dial does not have to hold a digit and does not have to
 look like a table; four rules for deciding what counted were tried and all four excluded
 something load-bearing. `constants_drifted()` names what moved, appeared or vanished.
@@ -135,7 +135,7 @@ CALIBRATION_CONSTANTS: Final[tuple[str, ...]] = (
 """The curated epistemic subset, named as ``module:NAME`` and frozen by **imported value**.
 
 Not "every number": most of what decides a published figure here is not a number at all — of the
-593 dials `discovered_constants()` covers, 406 hold no numeric literal. And not the completeness
+594 dials `discovered_constants()` covers, 407 hold no numeric literal. And not the completeness
 guarantee either, which is the job of the two syntactic digests; this list is deliberately
 curated, so it is allowed to be incomplete in a way they are not.
 
@@ -758,6 +758,7 @@ CONSTANT_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis.slice.pilot_session:EFFECT_BUDGET": "167ee1ab79e38d0a",
         "nemesis.slice.pilot_session:INJECTION": "d41472c15b991c1e",
         "nemesis.slice.pilot_session:SCENARIO_NOW": "0e1fcbd972f991dd",
+        "nemesis.slice.pilot_session:SEEDABLE_DOMAINS": "e742673adab65b78",
         "nemesis.slice.pilot_session:SEED_DOMAIN": "cf861174e9e12fb9",
         "nemesis.slice.scenario:CAPABILITY_LIFETIME": "31d7c04849cbac72",
         "nemesis.slice.scenario:CASE_AUTHORITY_REFERENCE": "b22b27fd13b4f518",
@@ -901,7 +902,7 @@ def discovered_constants(tree: Path | None = None) -> dict[str, str]:
     `EXCLUDED_CONCLUSIONS`, four security tables made of plain strings. The module digest covered
     them, so it was never a bypass; the claim that every dial was *named* was simply false.
 
-    So there is no rule now. Every module-level upper-case assignment is a dial, 593 of them,
+    So there is no rule now. Every module-level upper-case assignment is a dial, 594 of them,
     and the cost of including the genuine prose is nothing: rewording a message already moves
     that module's syntax digest, so no new failure mode is introduced by naming it too.
 
@@ -1191,7 +1192,7 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/slice/__init__.py": "af4908b211f76e8b",
         "nemesis/slice/evolution_session.py": "b4cad74342cea6a8",
         "nemesis/slice/loopbench.py": "24c5e2c3ebddb2a6",
-        "nemesis/slice/pilot_session.py": "d8d1ada17fb4dc34",
+        "nemesis/slice/pilot_session.py": "b0cd426b7deb91a3",
         "nemesis/slice/scenario.py": "c2d4e97197efa8f4",
         "nemesis/ui/__init__.py": "bb9576acc61aeb78",
         "nemesis/ui/investigation.py": "8a672135840ea5c0",
