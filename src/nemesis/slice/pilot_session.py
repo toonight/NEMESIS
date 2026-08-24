@@ -56,6 +56,7 @@ from nemesis.core.temporal import TemporalExtent
 from nemesis.effects.registry import default_registry
 from nemesis.evidence.vault import FileSystemEvidenceVault
 from nemesis.graph.memory import InMemoryClaimStore, InMemoryGraphStore
+from nemesis.pilot.challenger import ChallengePolicy, MoveChallenger
 from nemesis.pilot.mediator import PilotMediator, PilotSession
 from nemesis.pilot.moves import (
     Briefing,
@@ -262,8 +263,21 @@ def _signed_envelope(
     return unsigned.model_copy(update={"signature": signer.sign(unsigned.signing_payload())})
 
 
-async def run_pilot_demonstration(*, workspace: Path | None = None) -> PilotDemonstration:
-    """Drive one autonomous session and return it, with the envelope it spent."""
+async def run_pilot_demonstration(
+    *,
+    workspace: Path | None = None,
+    challenger: MoveChallenger | None = None,
+    challenge_policy: ChallengePolicy | None = None,
+) -> PilotDemonstration:
+    """Drive one autonomous session and return it, with the envelope it spent.
+
+    ``challenger`` is optional and defaults to absent, which is the posture every containment
+    test in this repository is written against. A challenger worth having is a second model from
+    a different vendor — correlated reasoning failure is why it is configured separately from the
+    pilot rather than as a temperature setting — and this demonstration runs offline against
+    fixtures. The parameter is here so a deployment that has one can use it, which it could not
+    before: this entry point built its mediator without the argument at all.
+    """
     root = Path(workspace or tempfile.mkdtemp(prefix="nemesis-pilot-"))
     root.mkdir(parents=True, exist_ok=True)
 
@@ -311,6 +325,8 @@ async def run_pilot_demonstration(*, workspace: Path | None = None) -> PilotDemo
         claims=claims,
         audit=audit,
         max_moves=12,
+        challenger=challenger,
+        challenge_policy=challenge_policy,
     )
     seed = IncidentSeed(
         entity_type=EntityType.DOMAIN,

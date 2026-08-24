@@ -81,6 +81,7 @@ from nemesis.evolution.models import StopReason
 from nemesis.evolution.stagnation import StagnationDetector, StagnationPolicy
 from nemesis.evolution.supervisor import DeterministicSupervisor
 from nemesis.graph.memory import InMemoryClaimStore, InMemoryGraphStore
+from nemesis.pilot.challenger import ChallengePolicy, MoveChallenger
 from nemesis.pilot.mediator import PilotMediator, PilotSession
 from nemesis.pilot.moves import Briefing, Conclude, PilotMove, RunPivot
 from nemesis.ports.collection import PivotType
@@ -392,7 +393,13 @@ class _World:
     seed: IncidentSeed
 
 
-async def _build_world(*, root: Path, max_moves: int) -> _World:
+async def _build_world(
+    *,
+    root: Path,
+    max_moves: int,
+    challenger: MoveChallenger | None = None,
+    challenge_policy: ChallengePolicy | None = None,
+) -> _World:
     """The reference world the evolution demonstration uses, with the ceiling as a parameter."""
     root.mkdir(parents=True, exist_ok=True)
     graph = InMemoryGraphStore()
@@ -433,6 +440,8 @@ async def _build_world(*, root: Path, max_moves: int) -> _World:
         claims=claims,
         audit=audit,
         max_moves=max_moves,
+        challenger=challenger,
+        challenge_policy=challenge_policy,
     )
     seed = IncidentSeed(
         entity_type=EntityType.DOMAIN,
@@ -447,10 +456,26 @@ async def _build_world(*, root: Path, max_moves: int) -> _World:
 
 
 async def run_plain_arm(
-    make_pilot: Callable[[int], object], *, moves: int, budget: float, root: Path
+    make_pilot: Callable[[int], object],
+    *,
+    moves: int,
+    budget: float,
+    root: Path,
+    challenger: MoveChallenger | None = None,
+    challenge_policy: ChallengePolicy | None = None,
 ) -> LoopMeasurement:
-    """One uninterrupted `drive`. The conventional loop, given the same allowance."""
-    world = await _build_world(root=root, max_moves=moves)
+    """One uninterrupted `drive`. The conventional loop, given the same allowance.
+
+    A challenger, if one is supplied, is measured rather than hidden: a blocked move costs a
+    move and executes no pivot, exactly like any other refusal, so it lands in ``refused`` and
+    the arms stay comparable.
+    """
+    world = await _build_world(
+        root=root,
+        max_moves=moves,
+        challenger=challenger,
+        challenge_policy=challenge_policy,
+    )
     pilot = make_pilot(moves)
     session = await world.mediator.drive(pilot, world.seed, total_budget=budget)  # type: ignore[arg-type]
 
@@ -480,10 +505,17 @@ async def run_evolution_arm(
     moves_per_segment: int,
     budget: float,
     root: Path,
+    challenger: MoveChallenger | None = None,
+    challenge_policy: ChallengePolicy | None = None,
 ) -> LoopMeasurement:
     """The same total moves, cut into segments, with the machinery on."""
     moves = segments * moves_per_segment
-    world = await _build_world(root=root, max_moves=moves_per_segment)
+    world = await _build_world(
+        root=root,
+        max_moves=moves_per_segment,
+        challenger=challenger,
+        challenge_policy=challenge_policy,
+    )
     pilot = make_pilot(moves)
 
     controller = EvolutionController(
