@@ -37,12 +37,14 @@ LATER = NOW + timedelta(days=45)
 EXTENT = TemporalExtent.at(NOW)
 
 
-def resolved(_claims: tuple[str, ...]) -> SourceDescriptor:
+async def resolved(_claims: tuple[str, ...]) -> tuple[SourceDescriptor, ...]:
     """Stands in for a resolver that reads the vault's provenance chain."""
-    return SourceDescriptor(
-        source_class=SourceClass.OWN_SENSOR,
-        identifier="nemesis-resurgence-watch",
-        reliability=SourceReliability.COMPLETELY_RELIABLE,
+    return (
+        SourceDescriptor(
+            source_class=SourceClass.OWN_SENSOR,
+            identifier="nemesis-resurgence-watch",
+            reliability=SourceReliability.COMPLETELY_RELIABLE,
+        ),
     )
 
 

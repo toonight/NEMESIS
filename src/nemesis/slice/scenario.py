@@ -181,6 +181,7 @@ from nemesis.disrupt.planner import DisruptionLever, DisruptionPlan, DisruptionP
 from nemesis.effects.isolation import IsolatedEffectsExecutor
 from nemesis.effects.registry import EffectsRegistry, default_registry
 from nemesis.evidence.anchoring import LocalHeadSigner
+from nemesis.evidence.lineage import resolve_sources
 from nemesis.evidence.vault import (
     AnchorRecord,
     FileSystemEvidenceVault,
@@ -2801,6 +2802,10 @@ async def _resurgence(
                 if entity is not None
             ],
             observed_at=as_of,
+            # The real resolver, not the default that knows nothing: the vault holds the
+            # provenance of everything this run collected, so the walk can say who observed
+            # each fact instead of declining to guess.
+            provenance_of=resolve_sources(context.claims, context.vault),
         ),
         assessment=_resurgence_assessment(as_of=as_of),
     )
@@ -3070,9 +3075,18 @@ def _resurgence_assessment(*, as_of: datetime) -> ResurgenceAssessment:
                     is_globally_unique=True,
                 ),
                 observed_by=SourceDescriptor(
-                    source_class=SourceClass.OWN_SENSOR,
-                    identifier="nemesis-resurgence-watch",
-                    reliability=SourceReliability.COMPLETELY_RELIABLE,
+                    # The source the platform actually collected this through, not the one a
+                    # narrative would prefer. `CERTIFICATE_REUSE` is served by the internet-scan
+                    # connector, and an internet scan is a channel an adversary can write into:
+                    # putting a certificate somewhere a scanner will find it is cheap.
+                    #
+                    # An earlier version of this function asserted OWN_SENSOR here and reported
+                    # the phase at *very likely*, actionable. Nothing in the run supported that.
+                    # It was caught by resolving the graph's provenance for real and finding
+                    # internet_scan where the assessment claimed a sensor of ours.
+                    source_class=SourceClass.INTERNET_SCAN,
+                    identifier="passive-scan-fleet",
+                    reliability=SourceReliability.USUALLY_RELIABLE,
                 ),
                 new_entity_type=EntityType.IP_ADDRESS,
                 new_entity_key=RESURGENCE_IP,

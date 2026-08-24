@@ -25,7 +25,7 @@ guarantee, and it is the only one that sees a bare literal inside a function bod
 field default, or a two-line logic change that touches no constant at all. `engine_drifted()`
 names the modules that moved.
 
-**Every module-level constant**, by normalised syntax, in `CONSTANT_DIGESTS` — 571 of them,
+**Every module-level constant**, by normalised syntax, in `CONSTANT_DIGESTS` — 573 of them,
 with no classification whatsoever. A dial does not have to hold a digit and does not have to
 look like a table; four rules for deciding what counted were tried and all four excluded
 something load-bearing. `constants_drifted()` names what moved, appeared or vanished.
@@ -135,7 +135,7 @@ CALIBRATION_CONSTANTS: Final[tuple[str, ...]] = (
 """The curated epistemic subset, named as ``module:NAME`` and frozen by **imported value**.
 
 Not "every number": most of what decides a published figure here is not a number at all — of the
-571 dials `discovered_constants()` covers, 397 hold no numeric literal. And not the completeness
+573 dials `discovered_constants()` covers, 398 hold no numeric literal. And not the completeness
 guarantee either, which is the job of the two syntactic digests; this list is deliberately
 curated, so it is allowed to be incomplete in a way they are not.
 
@@ -523,6 +523,8 @@ CONSTANT_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis.evidence.export:SIGNED_SEAL": "5e85d41c2734fd55",
         "nemesis.evidence.export:UNSIGNED_SEAL": "5b2fff43ed0e15b5",
         "nemesis.evidence.export:VERIFIER_FILE": "ccf1e6b24996a44c",
+        "nemesis.evidence.lineage:MAX_DERIVATION_DEPTH": "4132a0bc86cdf2a5",
+        "nemesis.evidence.lineage:UNRESOLVED_SOURCE": "5369158fe8f973da",
         "nemesis.evidence.standalone_verifier:ANCHORS": "a8b22497da12d0e8",
         "nemesis.evidence.standalone_verifier:ARTIFACTS": "f748f6a6fb6abd7e",
         "nemesis.evidence.standalone_verifier:CHUNK": "545debdf3ca7e8ee",
@@ -879,7 +881,7 @@ def discovered_constants(tree: Path | None = None) -> dict[str, str]:
     `EXCLUDED_CONCLUSIONS`, four security tables made of plain strings. The module digest covered
     them, so it was never a bypass; the claim that every dial was *named* was simply false.
 
-    So there is no rule now. Every module-level upper-case assignment is a dial, 571 of them,
+    So there is no rule now. Every module-level upper-case assignment is a dial, 573 of them,
     and the cost of including the genuine prose is nothing: rewording a message already moves
     that module's syntax digest, so no new failure mode is introduced by naming it too.
 
@@ -1087,6 +1089,7 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/evidence/anchoring.py": "8b974a38aea73244",
         "nemesis/evidence/escalation.py": "a577b5bd2f866902",
         "nemesis/evidence/export.py": "726b9261d59a3875",
+        "nemesis/evidence/lineage.py": "5f7e4962dfec6716",
         "nemesis/evidence/standalone_verifier.py": "0cf95fadd64c06fe",
         "nemesis/evidence/vault.py": "a5ffab61b1e01ef1",
         "nemesis/evolution/__init__.py": "ad2e13b69c4fc1fd",
@@ -1155,7 +1158,7 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/pursuit/policy.py": "887190c023d6a10e",
         "nemesis/pursuit/resurgence.py": "fdb31c624ad6d06f",
         "nemesis/pursuit/standing.py": "c7bb4e8e3e802a94",
-        "nemesis/pursuit/watch.py": "b89b2175575ea2be",
+        "nemesis/pursuit/watch.py": "c6c6d0637586dbc3",
         "nemesis/resolve/__init__.py": "ad2e13b69c4fc1fd",
         "nemesis/resolve/engine.py": "4c4f9c2030905dbe",
         "nemesis/resolve/signals.py": "d061ffc01a1a2ed0",
@@ -1166,7 +1169,7 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/slice/evolution_session.py": "b4cad74342cea6a8",
         "nemesis/slice/loopbench.py": "24c5e2c3ebddb2a6",
         "nemesis/slice/pilot_session.py": "d8d1ada17fb4dc34",
-        "nemesis/slice/scenario.py": "dc1eb4a82e6d5821",
+        "nemesis/slice/scenario.py": "db0b59c2f0ba5fce",
         "nemesis/ui/__init__.py": "bb9576acc61aeb78",
         "nemesis/ui/investigation.py": "8a672135840ea5c0",
     }
