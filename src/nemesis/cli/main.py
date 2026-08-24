@@ -1613,12 +1613,25 @@ def calibrate(
     a synthetic generator, which do not. Exits non-zero only if a structural property fails:
     a poor conditional score is information, not a build break, because the generator's
     assumptions are ours rather than the world's.
+
+    Also reports how much the resurgence engine's belief ceilings are load-bearing. That is
+    not calibration either — there are no outcomes to calibrate against — but it does answer
+    a question the ceilings' own docstring raises and used to answer by assertion.
     """
     from nemesis.calibration import run_calibration
 
     console = Console()
     report = run_calibration(cases=cases, seed=seed)
     console.print(report.render(), highlight=False)
+
+    from nemesis.calibration.ceilings import (
+        measure_ceiling_sensitivity,
+        measure_floor_sensitivity,
+    )
+
+    console.print()
+    console.print(measure_ceiling_sensitivity().render(), highlight=False)
+    console.print(measure_floor_sensitivity().render(), highlight=False)
 
     if not report.properties_hold:
         failed = [item.name for item in report.properties if not item.holds]

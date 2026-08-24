@@ -14,9 +14,9 @@ it against synthetic cases. Milestone 3 `REQUIRES_EXTERNAL_DATA`, milestone 6 `P
 
 > **What `IMPLEMENTED` claims here, and what it does not.** It claims that the freeze is
 > mechanical and enforced by tests seen to fail without it, over three overlapping scopes:
-> a normalised syntax digest covering **167 modules** — every file in `src/nemesis`, so literals
+> a normalised syntax digest covering **168 modules** — every file in `src/nemesis`, so literals
 > in function bodies, class defaults and pure logic are all inside it; a derived digest of
-> **578 dials** with no list to be absent from; and **43 constants frozen by imported value**
+> **582 dials** with no list to be absent from; and **43 constants frozen by imported value**
 > for a named diagnostic. Plus golden vectors that run real inputs through the attribution and
 > resolution engines to their published bands. It claims nothing about whether the frozen values
 > are **right** — freezing a choice does not validate it — and nothing about milestones 2–6.
@@ -129,7 +129,7 @@ each is a dial, and each moves a number somebody is about to grade.
   the digest depend on CPython's per-process hash randomisation: five seeds gave five different
   digests. CI would have gone red at random, and an intermittently red tripwire teaches a reader
   that a red tripwire means nothing.
-- **A normalised syntax digest covering 167 modules** — every file in the tree — docstrings
+- **A normalised syntax digest covering 168 modules** — every file in the tree — docstrings
   stripped, one digest per module so a failure names which files moved. This covers what no value-based mechanism can: literals
   inside function bodies, dataclass field defaults, and pure logic changes that touch no
   constant at all. It was narrowed to fourteen hand-picked modules on the argument that hashing

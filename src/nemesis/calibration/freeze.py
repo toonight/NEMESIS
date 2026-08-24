@@ -25,7 +25,7 @@ guarantee, and it is the only one that sees a bare literal inside a function bod
 field default, or a two-line logic change that touches no constant at all. `engine_drifted()`
 names the modules that moved.
 
-**Every module-level constant**, by normalised syntax, in `CONSTANT_DIGESTS` — 578 of them,
+**Every module-level constant**, by normalised syntax, in `CONSTANT_DIGESTS` — 582 of them,
 with no classification whatsoever. A dial does not have to hold a digit and does not have to
 look like a table; four rules for deciding what counted were tried and all four excluded
 something load-bearing. `constants_drifted()` names what moved, appeared or vanished.
@@ -135,7 +135,7 @@ CALIBRATION_CONSTANTS: Final[tuple[str, ...]] = (
 """The curated epistemic subset, named as ``module:NAME`` and frozen by **imported value**.
 
 Not "every number": most of what decides a published figure here is not a number at all — of the
-578 dials `discovered_constants()` covers, 400 hold no numeric literal. And not the completeness
+582 dials `discovered_constants()` covers, 400 hold no numeric literal. And not the completeness
 guarantee either, which is the job of the two syntactic digests; this list is deliberately
 curated, so it is allowed to be incomplete in a way they are not.
 
@@ -226,6 +226,10 @@ CONSTANT_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis.authz.verification:SIGNATURE_SCHEME": "279ecd288193f512",
         "nemesis.authz.verification:_ED25519_SIGNATURE_BYTES": "6d2c75a7a1708b33",
         "nemesis.authz.verification:_KEY_ID_HEX_CHARS": "36e05c58cedda8b4",
+        "nemesis.calibration.ceilings:FLOOR_PERTURBATIONS": "cd72fd88fb803cd3",
+        "nemesis.calibration.ceilings:PERTURBATIONS": "451fc91a74e0c160",
+        "nemesis.calibration.ceilings:PROBE_AT": "071a2a8fe3ac0305",
+        "nemesis.calibration.ceilings:PROBE_POPULATION": "6f6123a2442ba456",
         "nemesis.calibration.coherence:TOLERANCE": "09d94cbf2f01ec5f",
         "nemesis.calibration.corpus:AMBIGUOUS_HAS_NO_TRUE_ANSWER": "318bb73adef364fb",
         "nemesis.calibration.corpus:_CATEGORY_OF": "8343f40ee4a1339e",
@@ -886,7 +890,7 @@ def discovered_constants(tree: Path | None = None) -> dict[str, str]:
     `EXCLUDED_CONCLUSIONS`, four security tables made of plain strings. The module digest covered
     them, so it was never a bypass; the claim that every dial was *named* was simply false.
 
-    So there is no rule now. Every module-level upper-case assignment is a dial, 578 of them,
+    So there is no rule now. Every module-level upper-case assignment is a dial, 582 of them,
     and the cost of including the genuine prose is nothing: rewording a message already moves
     that module's syntax digest, so no new failure mode is introduced by naming it too.
 
@@ -1032,13 +1036,14 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/authz/store.py": "9f0e1c3d3ef0b3e7",
         "nemesis/authz/verification.py": "b36a928a39b96e67",
         "nemesis/calibration/__init__.py": "d29b1b1babb51bc4",
+        "nemesis/calibration/ceilings.py": "0cce7a35135c334f",
         "nemesis/calibration/coherence.py": "452dc2ac53a23920",
         "nemesis/calibration/corpus.py": "d581d9cdef47bf9c",
         "nemesis/calibration/generator.py": "bdd90080b2cfed7e",
         "nemesis/calibration/harness.py": "1b251a700a9cf876",
         "nemesis/calibration/scoring.py": "b2e7a193a30d65a1",
         "nemesis/cli/__init__.py": "ad2e13b69c4fc1fd",
-        "nemesis/cli/main.py": "4dc4b12bede60e3d",
+        "nemesis/cli/main.py": "c6089252ad3ae392",
         "nemesis/collaboration/__init__.py": "ca1145a798cbf210",
         "nemesis/collaboration/approvals.py": "9e5aef566b46d5d1",
         "nemesis/collaboration/base.py": "0f24972d696c4060",
