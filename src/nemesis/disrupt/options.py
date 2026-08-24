@@ -396,8 +396,21 @@ class DisruptionOption(BaseModel):
 
     @property
     def is_executable_now(self) -> bool:
-        """Whether NEMESIS could carry this out today (still only via the authz gateway)."""
-        return self.implementation_status is ImplementationStatus.IMPLEMENTED
+        """Whether NEMESIS could carry this out today (still only via the authz gateway).
+
+        Ownership soundness is part of the answer, not a separate advisory. This property used
+        to consult ``implementation_status`` alone, so an option the same plan flagged "confirm
+        ownership first" still appeared in :attr:`DisruptionPlan.executable_now` — a list whose
+        name tells a reader these are the ones we could carry out. Nothing ever executed from
+        it, because execution goes through the authorization gateway and the standing gate in
+        :mod:`nemesis.effects.registry` refuses there; the defect was in what the plan *said*.
+        That is still the sentence this platform must never produce — malicious use presenting
+        itself as sufficient grounds to act — and a reviewer reading a ranked list is exactly
+        the reader it would have misled.
+        """
+        return self.implementation_status is ImplementationStatus.IMPLEMENTED and (
+            self.is_ownership_sound
+        )
 
     def render(self) -> str:
         """Plain text an analyst can read without the model behind it."""

@@ -962,6 +962,25 @@ class PilotMediator:
                 reason=f"no entity {move.entity_id!r} to act on in this investigation",
             )
 
+        # The same wall the pivot verb enforces, at the verb that can actually do something.
+        # `_apply_pivot` refuses any entity outside the deliverable class; this branch did not,
+        # so an entity the pilot was forbidden to *look at* was one it could still request an
+        # operation against. Nothing external broke, because target binding refused those
+        # requests for a different reason — which is precisely why an asymmetry between two
+        # branches of one seam survives review. A refusal that happens to be produced by
+        # another control is not this control working.
+        if disclosure_of_entity(entity.entity_type) is not DisclosureClass.DELIVERABLE:
+            return Ruling(
+                move_kind="request_effect",
+                status=RulingStatus.REFUSED_DISCLOSURE,
+                reason=(
+                    f"entity {move.entity_id!r} is internal-classified "
+                    f"({disclosure_of_entity(entity.entity_type).value}); the pilot works with "
+                    "deliverable-class material only and may not request an effect against an "
+                    "internal lead"
+                ),
+            )
+
         # The mediator observes the target's current state. The pilot does not get to report
         # it: a caller-supplied "this is what the target looks like now" is all it would take
         # to spend a stale approval against a target that has since changed hands.

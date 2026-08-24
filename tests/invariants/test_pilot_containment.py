@@ -1419,3 +1419,46 @@ def test_an_effect_that_ran_and_failed_still_reports_its_contact() -> None:
     # A refusal raised before the Effects plane has no contact report to give, and must not be
     # read as one — that direction would make every budget refusal look like a breach.
     assert not session(refused_before_the_plane).any_effect_left_the_platform()
+
+
+def test_the_effect_verb_refuses_an_internal_entity_as_the_pivot_verb_does() -> None:
+    """The two verbs disagreed about what the pilot may touch, and the weaker one acted.
+
+    ``_apply_pivot`` refuses any entity whose disclosure class is not DELIVERABLE — a persona,
+    an alias, a human-identity lead — so a pilot cannot surface an internal lead by naming its
+    id. ``_apply_effect`` had no such check, so an entity the pilot was forbidden to *look at*
+    was one it could still request an operation against. The preflight's scan for internal
+    material reads ``parameters``, which a request naming only an entity id never populates.
+
+    Found while building the standing gate, not by a failing behaviour: nothing external broke,
+    which is exactly why an asymmetry between two branches of the same seam survives review.
+    """
+
+    async def scenario() -> PilotSession:
+        h = await _build()
+        persona = Entity.create(
+            entity_id=new_id(IdPrefix.ENTITY),
+            entity_type=EntityType.PERSONA,
+            observed_form="quiet-anvil",
+            extent=EXTENT,
+            is_synthetic=True,
+        )
+        await h.graph.upsert_entity(persona)
+        pilot = ScriptedPilot(
+            "gpt-5-cyber",
+            [
+                RequestEffect(
+                    entity_id=persona.entity_id,
+                    operation=OperationClass.SIMULATION,
+                    rationale="rehearse against the persona",
+                ),
+                Conclude(summary=""),
+            ],
+        )
+        return await h.mediator.drive(_hostile(pilot), h.seed)
+
+    session = _run(scenario())
+    effect = next(r for r in session.rulings if r.move_kind == "request_effect")
+    assert effect.status is RulingStatus.REFUSED_DISCLOSURE
+    assert "internal" in effect.reason
+    assert session.any_effect_left_the_platform() is False
