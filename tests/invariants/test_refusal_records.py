@@ -250,3 +250,66 @@ async def test_a_pilot_driven_effect_records_the_authorization_decision() -> Non
     assert recorded.inputs.get("target_natural_key"), (
         "without the target's natural key the record cannot be joined to anything"
     )
+
+
+@pytest.mark.anyio
+async def test_the_session_close_stands_on_its_own() -> None:
+    """A close that omits what the session concluded is not a record of the session.
+
+    Found in two real Codex-driven runs: the pilot's summary was in the ``conclude`` move's
+    ruling and nowhere in ``pilot.session``, so anything reading closes — an auditor, a future
+    projection — saw a session end with no statement of what it ended *with*.
+
+    The tallies are here for the same reason. A projection that has to replay twelve moves to
+    learn a session accepted twelve and refused none is a projection that will be written
+    against the moves instead, and then two things count the same session differently.
+    """
+    from nemesis.core.authorization import OperationClass
+    from nemesis.pilot.moves import Conclude, RequestEffect
+    from tests.invariants.test_pilot_containment import ScriptedPilot, _build, _hostile
+
+    h = await _build()
+    pilot = ScriptedPilot(
+        "gpt-5-cyber",
+        [
+            RequestEffect(
+                entity_id=h.approved.entity_id,
+                operation=OperationClass.SIMULATION,
+                rationale="rehearse",
+            ),
+            Conclude(summary="Cluster reconstructed; registrar suspension rehearsed only."),
+        ],
+    )
+    await h.mediator.drive(_hostile(pilot), h.seed)
+
+    closes = [
+        event
+        for event in h.audit.events
+        if event.action == "pilot.session" and event.outcome != "opened"
+    ]
+    assert len(closes) == 1, "a session must close exactly once"
+    inputs = closes[0].inputs
+
+    assert "Cluster reconstructed" in inputs.get("summary", "")
+    assert inputs.get("moves") == "2"
+    assert inputs.get("accepted") == "2"
+    assert inputs.get("refused") == "0"
+    assert inputs.get("effects_requested") == "1"
+
+
+@pytest.mark.anyio
+async def test_a_session_that_never_concludes_records_an_empty_summary_not_a_missing_one() -> None:
+    """Absent and empty are different, and a reader should not have to guess which happened."""
+    from tests.invariants.test_pilot_containment import ScriptedPilot, _build, _hostile
+
+    h = await _build(max_moves=1)
+    pilot = ScriptedPilot("gpt-5-cyber", [])
+    await h.mediator.drive(_hostile(pilot), h.seed)
+
+    closes = [
+        event
+        for event in h.audit.events
+        if event.action == "pilot.session" and event.outcome != "opened"
+    ]
+    assert closes
+    assert "summary" in closes[0].inputs
