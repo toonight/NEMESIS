@@ -1,6 +1,8 @@
 # ADR-0012 — Controlled operations for ground truth (milestone 3)
 
-**Status: PROPOSED. This ADR does not implement milestone 3 and cannot.**
+**Status: DECLINED — not funded, 2026-08-24.** Kept rather than deleted: the sizing is the
+reason the decision could be made at all, and a future revisit needs the numbers and the risks
+that were on the table when it was taken. This ADR does not implement milestone 3 and cannot.
 Date: 2026-08-24.
 
 ## Context
@@ -104,10 +106,18 @@ engineer's to take.
 and been labelled; the apparatus for milestones 2, 4 and 5 already exists and has been waiting
 for a corpus rather than for code.
 
-**If it is not**, nothing breaks and one thing must change: the eight numbers stay unvalidated,
-and every figure downstream of them keeps saying so. What is no longer acceptable is the
-formulation this ADR withdrew — that the ordering carries the decision and the magnitudes are a
-footnote. They are not, and it is measured.
+**It was not funded**, on 2026-08-24, the same day the sizing was produced. Nothing breaks and
+one thing changes permanently: the eight numbers stay unvalidated, and every figure downstream
+of them keeps saying so — in `nemesis calibrate`, in the resurgence module's docstring, and in
+`PROJECT_STATE.md`. What is no longer acceptable is the formulation this ADR withdrew — that the
+ordering carries the decision and the magnitudes are a footnote. They are not, and it is
+measured.
+
+The practical consequence for a reader of any NEMESIS confidence figure: **the bands are ordinal,
+not probabilistic.** "Likely" means this engine ranked it above something it calls "unlikely",
+under a table nobody has checked against outcomes. It does not mean 70%. Nothing in the platform
+should be built on the assumption that it does, and a downstream consumer that treats these as
+calibrated probabilities is making a claim this project has explicitly declined to fund.
 
 **Either way**, the sizing is re-derivable rather than quoted: `nemesis calibrate` prints it, and
 it moves if the engine or the grid does.
