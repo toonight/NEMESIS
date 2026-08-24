@@ -1192,6 +1192,18 @@ def pilotbench(
         str | None, typer.Option(help="Model id, used for every provider named above.")
     ] = None,
     scenario: Annotated[str | None, typer.Option(help="Run one scenario only, by id.")] = None,
+    challenger_provider: Annotated[
+        str | None,
+        typer.Option(
+            "--challenger-provider",
+            help="Provider key for a second model that reviews each gated move. "
+            "Needs --challenger-model. A different vendor from the pilot, or it buys "
+            "correlated agreement rather than independent review.",
+        ),
+    ] = None,
+    challenger_model: Annotated[
+        str | None, typer.Option("--challenger-model", help="Model id for the challenger.")
+    ] = None,
 ) -> None:
     """Run the NEMESIS pilot benchmark and print it, caveats first.
 
@@ -1224,7 +1236,14 @@ def pilotbench(
             )
             raise typer.Exit(code=2)
         subjects = tuple(
-            _bench_subject(name.strip(), model) for name in providers_csv.split(",") if name.strip()
+            _bench_subject(
+                name.strip(),
+                model,
+                challenger_provider=challenger_provider,
+                challenger_model=challenger_model,
+            )
+            for name in providers_csv.split(",")
+            if name.strip()
         )
 
     report = run_pilotbench(subjects, scenarios=scenarios)
@@ -1240,13 +1259,46 @@ def pilotbench(
         raise typer.Exit(code=1)
 
 
-def _bench_subject(provider: str, model: str) -> BenchSubject:
-    """Build a benchmark subject for one provider, deferring construction to run time."""
-    from nemesis.pilot.providers.config import PilotConfig
+def _bench_subject(
+    provider: str,
+    model: str,
+    *,
+    challenger_provider: str | None = None,
+    challenger_model: str | None = None,
+) -> BenchSubject:
+    """Build a benchmark subject for one provider, deferring construction to run time.
+
+    The challenger half was missing: ``BenchSubject`` has carried the field since the challenger
+    existed and the runner reads it, but this factory built every subject without one, so the
+    only wired challenger path measured a configuration nobody could produce.
+
+    A challenger is refused unless *both* halves are named, rather than defaulting to the pilot's
+    provider. A deployment that meant to be challenged by a different model family and silently
+    got the same one has bought correlated agreement and called it independent confirmation —
+    which is the failure the whole separate-configuration design exists to avoid.
+    """
+    from nemesis.pilot.providers.challenger_seat import build_challenger
+    from nemesis.pilot.providers.config import ChallengerConfig, PilotConfig
     from nemesis.pilot.providers.registry import build_pilot
 
     config = PilotConfig(provider=provider, model=model)
-    return BenchSubject(build=lambda: build_pilot(config), provider=provider, model=model)
+    make_challenger = None
+    if challenger_provider is not None and challenger_model is not None:
+        challenger_config = ChallengerConfig(
+            pilot=PilotConfig(provider=challenger_provider, model=challenger_model)
+        )
+        make_challenger = lambda: build_challenger(challenger_config)  # noqa: E731
+    elif challenger_provider is not None or challenger_model is not None:
+        raise typer.BadParameter(
+            "a challenger needs both --challenger-provider and --challenger-model; naming one "
+            "half would silently seat the pilot's own model as its own reviewer"
+        )
+    return BenchSubject(
+        build=lambda: build_pilot(config),
+        provider=provider,
+        model=model,
+        challenger=make_challenger,
+    )
 
 
 @app.command()

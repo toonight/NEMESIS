@@ -49,13 +49,27 @@ class BenchSubject:
     challenger: Callable[[], MoveChallenger] | None = None
 
 
-def reference_subjects() -> tuple[BenchSubject, ...]:
-    """The offline subjects: four deterministic pilots, each broken in a known way."""
+def reference_subjects(
+    *, challenger: Callable[[], MoveChallenger] | None = None
+) -> tuple[BenchSubject, ...]:
+    """The offline subjects: four deterministic pilots, each broken in a known way.
+
+    ``challenger`` was the missing half of the benchmark's own plumbing. ``BenchSubject`` has
+    carried the field since the challenger existed and ``_run_subject`` reads it, but this
+    factory and the CLI's built every subject with it unset — so the one place a challenger was
+    wired measured a configuration nobody could actually produce.
+
+    A factory per subject rather than one instance, for the same reason ``build`` is a factory:
+    every scenario gets a challenger with no history of the last one.
+    """
     from nemesis.pilotbench.pilots import REFERENCE_PILOTS
 
     return tuple(
         BenchSubject(
-            build=factory, provider="scripted", model=factory.__name__.removesuffix("_pilot")
+            build=factory,
+            provider="scripted",
+            model=factory.__name__.removesuffix("_pilot"),
+            challenger=challenger,
         )
         for factory in REFERENCE_PILOTS
     )

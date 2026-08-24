@@ -70,6 +70,7 @@ from nemesis.evolution.lineage import FileLineageStore, LineageEntry, active_lin
 from nemesis.evolution.memory import MemoryEntry
 from nemesis.evolution.stagnation import StagnationDetector, StagnationPolicy
 from nemesis.graph.memory import InMemoryClaimStore, InMemoryGraphStore
+from nemesis.pilot.challenger import ChallengePolicy, MoveChallenger
 from nemesis.pilot.mediator import PilotMediator
 from nemesis.pilot.moves import Briefing, Conclude, PilotMove, RequestEffect, RunPivot
 from nemesis.ports.collection import PivotType
@@ -349,8 +350,21 @@ def _signed_envelope(
     return unsigned.model_copy(update={"signature": signer.sign(unsigned.signing_payload())})
 
 
-async def run_evolution_demonstration(*, workspace: Path | None = None) -> EvolutionDemonstration:
-    """Drive one long-horizon run and return it, with the trajectory it wrote."""
+async def run_evolution_demonstration(
+    *,
+    workspace: Path | None = None,
+    challenger: MoveChallenger | None = None,
+    challenge_policy: ChallengePolicy | None = None,
+) -> EvolutionDemonstration:
+    """Drive one long-horizon run and return it, with the trajectory it wrote.
+
+    ``challenger`` is optional and defaults to absent, which is the posture every containment
+    test in this repository is written against. A challenger worth having is a second model from
+    a different vendor — correlated reasoning failure is why it is configured separately from the
+    pilot rather than as a temperature setting — and this demonstration runs offline against
+    fixtures. The parameter is here so a deployment that has one can use it, which it could not
+    before: this entry point built its mediator without the argument at all.
+    """
     root = Path(workspace or tempfile.mkdtemp(prefix="nemesis-evolution-"))
     root.mkdir(parents=True, exist_ok=True)
 
@@ -394,6 +408,8 @@ async def run_evolution_demonstration(*, workspace: Path | None = None) -> Evolu
         claims=claims,
         audit=audit,
         max_moves=MOVES_PER_STEP,
+        challenger=challenger,
+        challenge_policy=challenge_policy,
     )
 
     seed = IncidentSeed(
