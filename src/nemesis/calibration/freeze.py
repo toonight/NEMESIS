@@ -25,7 +25,7 @@ guarantee, and it is the only one that sees a bare literal inside a function bod
 field default, or a two-line logic change that touches no constant at all. `engine_drifted()`
 names the modules that moved.
 
-**Every module-level constant**, by normalised syntax, in `CONSTANT_DIGESTS` — 592 of them,
+**Every module-level constant**, by normalised syntax, in `CONSTANT_DIGESTS` — 593 of them,
 with no classification whatsoever. A dial does not have to hold a digit and does not have to
 look like a table; four rules for deciding what counted were tried and all four excluded
 something load-bearing. `constants_drifted()` names what moved, appeared or vanished.
@@ -135,7 +135,7 @@ CALIBRATION_CONSTANTS: Final[tuple[str, ...]] = (
 """The curated epistemic subset, named as ``module:NAME`` and frozen by **imported value**.
 
 Not "every number": most of what decides a published figure here is not a number at all — of the
-592 dials `discovered_constants()` covers, 405 hold no numeric literal. And not the completeness
+593 dials `discovered_constants()` covers, 406 hold no numeric literal. And not the completeness
 guarantee either, which is the job of the two syntactic digests; this list is deliberately
 curated, so it is allowed to be incomplete in a way they are not.
 
@@ -582,8 +582,9 @@ CONSTANT_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis.evolution.supervisor:_SIGNAL_DIRECTIVE": "6e732b64d85c56c7",
         "nemesis.graph.caseindex:EFFECT_ACTION": "22e7d4619d57bf7e",
         "nemesis.graph.caseindex:INVESTIGATION_ACTION": "777be56f5f624adf",
+        "nemesis.graph.caseindex:PILOT_MOVE_ACTION": "39af612fd091afe6",
         "nemesis.graph.caseindex:PIVOT_ACTION": "5e8521272fc4094b",
-        "nemesis.graph.caseindex:READ_ACTIONS": "730c450c72ed59ba",
+        "nemesis.graph.caseindex:READ_ACTIONS": "66639036d497cfa7",
         "nemesis.graph.journal:CLAIM_JOURNAL": "f544ac14824b4e8a",
         "nemesis.graph.journal:GRAPH_JOURNAL": "343df7775bcd424a",
         "nemesis.graph.journal:OP_CLAIM": "4dbe5bff29a4a8f7",
@@ -900,7 +901,7 @@ def discovered_constants(tree: Path | None = None) -> dict[str, str]:
     `EXCLUDED_CONCLUSIONS`, four security tables made of plain strings. The module digest covered
     them, so it was never a bypass; the claim that every dial was *named* was simply false.
 
-    So there is no rule now. Every module-level upper-case assignment is a dial, 592 of them,
+    So there is no rule now. Every module-level upper-case assignment is a dial, 593 of them,
     and the cost of including the genuine prose is nothing: rewording a message already moves
     that module's syntax digest, so no new failure mode is introduced by naming it too.
 
@@ -1126,7 +1127,7 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/evolution/stagnation.py": "fa6209e49cc6ef6d",
         "nemesis/evolution/supervisor.py": "ecf698c67b3afa9f",
         "nemesis/graph/__init__.py": "ad2e13b69c4fc1fd",
-        "nemesis/graph/caseindex.py": "90b9e5b414151395",
+        "nemesis/graph/caseindex.py": "c94db52162e09fd4",
         "nemesis/graph/enforcement.py": "bf461c98b7ae1ac3",
         "nemesis/graph/journal.py": "7239834f84fc2b78",
         "nemesis/graph/memory.py": "8da90b3a3c8d674a",
@@ -1135,9 +1136,9 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/pilot/anthropic_pilot.py": "653a3edd88f63dd4",
         "nemesis/pilot/challenger.py": "e32378cc74490f41",
         "nemesis/pilot/local_pilot.py": "844b5ec238222866",
-        "nemesis/pilot/mediator.py": "3f811b5b11d74b6a",
+        "nemesis/pilot/mediator.py": "732f1431c54d512e",
         "nemesis/pilot/model_seat.py": "0e1d14a5dd994e5f",
-        "nemesis/pilot/moves.py": "cf2c7cc9c62e23ba",
+        "nemesis/pilot/moves.py": "8ee911ba3507ded9",
         "nemesis/pilot/openai_pilot.py": "a0ff06cac4fc63f6",
         "nemesis/pilot/pilot.py": "16f58b14f6431694",
         "nemesis/pilot/providers/__init__.py": "08fb22ea1c5b5387",

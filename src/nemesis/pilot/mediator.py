@@ -1054,6 +1054,8 @@ class PilotMediator:
             reason=result.detail,
             effect_outcome=result.outcome.value,
             external_contact_made=result.external_contact_made,
+            authorization=result.authorization,
+            target_natural_key=target_natural_key,
         )
 
     # -- briefing -------------------------------------------------------------
@@ -1237,6 +1239,8 @@ class PilotMediator:
         if isinstance(move, RequestEffect):
             inputs["operation"] = move.operation.value
             inputs["target_entity"] = move.entity_id
+            if ruling.target_natural_key:
+                inputs["target_natural_key"] = ruling.target_natural_key
         if isinstance(error, PilotError):
             # The vendor's own words, bounded, and only here. `PilotError` has no field for a
             # header, a request body or a response body, so there is nothing for a credential to
@@ -1259,6 +1263,10 @@ class PilotMediator:
                 subject=investigation.investigation_id,
                 outcome=ruling.status.value,
                 inputs=inputs,
+                # Present whenever a capability was consulted, which for an effect is always —
+                # including when it refused. A refusal nobody recorded is the pattern the field
+                # exists to make visible.
+                authorization_decision=ruling.authorization,
             )
         )
 
