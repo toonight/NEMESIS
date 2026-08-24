@@ -1155,7 +1155,7 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/pursuit/policy.py": "887190c023d6a10e",
         "nemesis/pursuit/resurgence.py": "fdb31c624ad6d06f",
         "nemesis/pursuit/standing.py": "c7bb4e8e3e802a94",
-        "nemesis/pursuit/watch.py": "8d94f9754f9d70e0",
+        "nemesis/pursuit/watch.py": "b89b2175575ea2be",
         "nemesis/resolve/__init__.py": "ad2e13b69c4fc1fd",
         "nemesis/resolve/engine.py": "4c4f9c2030905dbe",
         "nemesis/resolve/signals.py": "d061ffc01a1a2ed0",
