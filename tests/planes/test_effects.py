@@ -39,6 +39,7 @@ from nemesis.core.authorization import (
 )
 from nemesis.core.identity import Role
 from nemesis.core.ids import IdPrefix, new_id
+from nemesis.core.infrastructure import ROLE_ATTRIBUTE, InfrastructureRole
 from nemesis.effects.drafting import (
     DRAFT_BANNER,
     MAX_LISTED_EVIDENCE_IDS,
@@ -65,7 +66,16 @@ from nemesis.ports.effects import (
 
 # The GLASS ANVIL target, from docs/architecture/DEMO_SCENARIO.md §2.2.
 TARGET_KEY = "acme-invoice-portal.example"
-APPROVED_STATE = {"resolves_to": "198.51.100.23", "registrar": "BulletproofReg"}
+APPROVED_STATE = {
+    "resolves_to": "198.51.100.23",
+    "registrar": "BulletproofReg",
+    # Stated rather than assumed. Every operation outside the observe-and-preserve tier now
+    # requires the target's standing to be bound into the capability, because observing what
+    # a target was used for establishes neither who owns it nor who controls it. GLASS ANVIL's
+    # portal is the adversary's to operate, and these tests always meant that; before the
+    # classification existed they simply had no way to say so.
+    ROLE_ATTRIBUTE: InfrastructureRole.ACTOR_CONTROLLED.value,
+}
 
 ALICE = new_id(IdPrefix.ACTOR)
 BOB = new_id(IdPrefix.ACTOR)
