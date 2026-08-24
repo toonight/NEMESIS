@@ -949,6 +949,104 @@ def _excerpt(text: str, limit: int = 90) -> str:
 
 
 @app.command()
+def memory(
+    workspace: Annotated[
+        Path | None,
+        typer.Option(
+            help="A workspace a previous run wrote. Omitted, a fresh demo run is projected."
+        ),
+    ] = None,
+    entity: Annotated[
+        str | None,
+        typer.Option(help="Ask about one entity, as type:key — e.g. domain:evil.example."),
+    ] = None,
+) -> None:
+    """What the platform remembers about an adversary across cases.
+
+    A projection over the audit trail, rebuilt on every invocation and stored nowhere. No object
+    in the graph carries a case identifier — deliberately, since the same adversary appearing in
+    many cases is the point of the graph — so the relation between a case and an entity is
+    derived from the trail that already records it.
+
+    Read the recurrence count and nothing more into this. "Seen in three cases" is a fact about
+    our own filing, not evidence that the same operator is behind all three; establishing that
+    is the resurgence engine's job and it does not exist yet.
+    """
+    import asyncio
+
+    from nemesis.audit.trail import AppendOnlyAuditTrail
+    from nemesis.graph.caseindex import rebuild_from
+
+    console = Console()
+    if workspace is None:
+        console.print(Text("no workspace given; running the demo scenario first", style="dim"))
+        workspace = run_glass_anvil_scenario().stores.workspace
+
+    audit_path = workspace / "audit.jsonl"
+    if not audit_path.is_file():
+        console.print(Text(f"{workspace} has no audit trail to project", style="bold red"))
+        raise typer.Exit(code=2)
+
+    remembered = asyncio.run(rebuild_from(AppendOnlyAuditTrail(audit_path)))
+
+    _heading(console, "ADVERSARY MEMORY")
+    _field(console, "trail", audit_path)
+    _field(console, "investigations", len(remembered.investigations))
+    _field(console, "appearances", len(remembered.appearances))
+    _field(
+        console,
+        "unreadable events",
+        remembered.unreadable,
+        style="bold yellow" if remembered.unreadable else "",
+    )
+
+    if entity is not None:
+        entity_type, _, natural_key = entity.partition(":")
+        if not natural_key:
+            console.print(Text("--entity takes type:key", style="bold red"))
+            raise typer.Exit(code=2)
+        _heading(console, entity)
+        cases = remembered.cases_for(entity_type, natural_key)
+        _field(console, "cases", len(cases))
+        _field(console, "recurrence", remembered.is_recurrence(entity_type, natural_key))
+        for appearance in remembered.appearances_of(entity_type, natural_key):
+            console.print(
+                Text(
+                    f"  {appearance.investigation_id}  "
+                    f"{appearance.first_seen:%Y-%m-%d} -> {appearance.last_seen:%Y-%m-%d}  "
+                    f"pivots: {', '.join(appearance.pivots) or 'none'}",
+                    style="dim",
+                )
+            )
+        outcomes = remembered.effects_against(natural_key)
+        if outcomes:
+            _field(console, "effects attempted", ", ".join(outcomes))
+        return
+
+    _heading(console, "SEEN IN MORE THAN ONE CASE")
+    recurrences = remembered.recurrences()
+    if not recurrences:
+        console.print(
+            Text(
+                "  none — every entity in this trail belongs to a single investigation",
+                style="dim",
+            )
+        )
+    for entity_type, natural_key in recurrences:
+        cases = remembered.cases_for(entity_type, natural_key)
+        console.print(Text(f"  {entity_type}:{natural_key} — {len(cases)} cases", style="bold"))
+
+    console.print()
+    console.print(
+        Text(
+            "A recurrence here means this platform filed the same identifier under two cases. "
+            "It is not evidence that one operator is behind both.",
+            style="dim",
+        )
+    )
+
+
+@app.command()
 def verify(
     workspace: Annotated[
         Path | None,

@@ -560,6 +560,11 @@ class PursuitEngine:
             inputs={
                 "pivot": executed.candidate.pivot_type.value,
                 "entity": executed.candidate.entity_key,
+                # The type as well as the key, because a persona and a domain can spell the
+                # same string and the cross-case index keys on the pair. Without it the two
+                # merge, and a merged node is the second way an attribution engine deceives
+                # itself: three weak links become an apparent cluster.
+                "entity_type": executed.candidate.entity_type.value,
                 "connector": executed.connector,
                 "reason": executed.candidate.rationale,
                 "expected_gain": f"{executed.candidate.expected_information_gain:.2f}",
