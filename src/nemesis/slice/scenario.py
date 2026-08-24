@@ -206,6 +206,7 @@ from nemesis.pursuit.resurgence import (
     ResurgenceSignal,
     ResurgenceSignalKind,
 )
+from nemesis.pursuit.watch import assemble_resurgence_signals
 from nemesis.resolve.engine import (
     HumanIdentityRefusal,
     PersonaLinkageAssessment,
@@ -642,6 +643,17 @@ class ResurgenceStage(BaseModel):
     links: tuple[ResurgenceLink, ...]
     reconnected_by: tuple[str, ...]
     not_reconnected_by: tuple[str, ...]
+    graph_signals: tuple[ResurgenceSignal, ...]
+    """What a blind two-hop walk of the graph finds at this point, with no analyst input.
+
+    Carried beside :attr:`assessment` to make one limit visible rather than arguable. The
+    assessment is scored from signals whose provenance somebody established; these are what the
+    graph alone offers, and the graph carries no ``SourceDescriptor`` — provenance lives on the
+    evidence in the vault. So these arrive marked plantable and unjudgeable, the robustness
+    margin removes them, and a run built only on them would produce a lead rather than a
+    finding. The difference between the two numbers is the value of having checked where an
+    observation came from."""
+
     assessment: ResurgenceAssessment
     """The scored judgement, from the same two artifacts the narrative above reconnects on.
 
@@ -2778,6 +2790,18 @@ async def _resurgence(
             f"PGP fingerprint {PGP_FINGERPRINT}",
         ),
         not_reconnected_by=_NOT_RECONNECTED_BY,
+        graph_signals=await assemble_resurgence_signals(
+            context.graph,
+            prior_entity_ids=[
+                entity.entity_id
+                for entity in (
+                    await context.graph.find_entity(EntityType.IP_ADDRESS, CLUSTER_IP),
+                    await context.graph.find_entity(EntityType.DOMAIN, CLUSTER_DOMAINS[0]),
+                )
+                if entity is not None
+            ],
+            observed_at=as_of,
+        ),
         assessment=_resurgence_assessment(as_of=as_of),
     )
 
