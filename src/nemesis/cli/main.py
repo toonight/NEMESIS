@@ -1162,8 +1162,9 @@ def loopbench(
     """Measure what the Evolution loop's machinery does, against the loop without it.
 
     Both arms get the same world, the same pilot, the same total move allowance and the same
-    pursuit budget over one investigation, swept across four run lengths. Two scripted pilots
-    run through both: one that ignores the research context and one that reads it. Nothing here
+    pursuit budget over one investigation, swept across four run lengths. Three scripted pilots
+    run through both: one that ignores the research context, one that reads it, and one that
+    every third move pivots on an entity it invented and is refused for it. Nothing here
     involves a model, and the report says what it cannot tell you before it says anything else.
     """
     from nemesis.slice.loopbench import compare, render, run_loopbench
