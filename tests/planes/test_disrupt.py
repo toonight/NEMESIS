@@ -477,3 +477,50 @@ def test_the_glass_anvil_plan_carries_every_option_including_the_unexecutable_on
 
     rendered = DisruptionPlanner().plan([_lever("x")], now=NOW).render()
     assert "Disruption plan (1 option(s))" in rendered
+
+
+def test_a_weakly_owned_option_is_not_listed_as_executable() -> None:
+    """``is_executable_now`` consulted implementation status and nothing else.
+
+    So an option whose own plan flagged it "confirm ownership first" still appeared in
+    ``DisruptionPlan.executable_now`` — the list whose name says these are the ones we could
+    carry out. Nothing executed from it (execution goes through the authorization gateway, and
+    the standing gate now refuses there), so this was a latent defect in what the plan *says*
+    rather than a live one. It is still exactly the sentence the mission forbids: malicious use
+    alone presenting itself as sufficient grounds to act.
+    """
+    planner = DisruptionPlanner()
+    plan = planner.plan(
+        [
+            DisruptionLever(
+                key="thin",
+                operation=OperationClass.TAKEDOWN_REQUEST_DRAFT,
+                title="Draft a takedown for a target nobody corroborated",
+                description="One source said the domain is theirs.",
+                targets=(
+                    DisruptionTarget(
+                        entity_id=new_id(IdPrefix.ENTITY),
+                        entity_type=EntityType.DOMAIN,
+                        natural_key="maybe-theirs.example",
+                    ),
+                ),
+                unconstrained_impact=ImpactLevel.HIGH,
+                recovery=AdversaryRecovery(
+                    difficulty=RecoveryDifficulty.HARD,
+                    path="They would need a new registrar.",
+                ),
+                ownership=OwnershipEvidence(
+                    opinion=Opinion(belief=0.9, disbelief=0.05, uncertainty=0.05),
+                    independent_source_count=1,
+                    basis="a single vendor blog post",
+                ),
+            )
+        ]
+    )
+    option = plan.options[0]
+    assert option.ownership_evidence.is_weak
+    assert option.requires_ownership_confirmation
+    assert not option.is_ownership_sound
+    assert not option.is_executable_now
+    assert plan.executable_now == ()
+    assert plan.needs_ownership_confirmation == (option,)

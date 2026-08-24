@@ -34,6 +34,7 @@ from nemesis.core.authorization import (
 )
 from nemesis.core.identity import Role
 from nemesis.core.ids import IdPrefix, new_id
+from nemesis.core.infrastructure import ROLE_ATTRIBUTE, InfrastructureRole
 from nemesis.core.temporal import utcnow
 from nemesis.effects.registry import EffectsRegistry, default_registry
 from nemesis.ports.effects import EffectOutcome, EffectRequest
@@ -60,7 +61,12 @@ TARGET = TargetFingerprint.create(
     entity_id=new_id(IdPrefix.ENTITY),
     entity_type="domain",
     natural_key="victim.example",
-    bound_attributes={"resolves_to": "203.0.113.7"},
+    bound_attributes={
+        "resolves_to": "203.0.113.7",
+        # These tests are about forgery, not about standing; the target is bound as the
+        # adversary's so the standing gate passes and the signature checks stay the subject.
+        ROLE_ATTRIBUTE: InfrastructureRole.ACTOR_CONTROLLED.value,
+    },
 )
 
 

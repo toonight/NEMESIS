@@ -274,13 +274,17 @@ def _authorized_draft_request(
     from nemesis.authz.keys import CapabilitySigningKey
     from nemesis.core.authorization import LegalBasis, OperationClass, TargetFingerprint
     from nemesis.core.ids import IdPrefix, new_id
+    from nemesis.core.infrastructure import ROLE_ATTRIBUTE, InfrastructureRole
     from nemesis.core.temporal import utcnow
 
     target = TargetFingerprint.create(
         entity_id=new_id(IdPrefix.ENTITY),
         entity_type="domain",
         natural_key="acme-invoice-portal.example",
-        bound_attributes={"resolves_to": "198.51.100.23"},
+        bound_attributes={
+            "resolves_to": "198.51.100.23",
+            ROLE_ATTRIBUTE: InfrastructureRole.ACTOR_CONTROLLED.value,
+        },
     )
     identities, _ = hardware_backed_issuer()
     actors = verifier_over(identities)

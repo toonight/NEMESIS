@@ -40,6 +40,13 @@ from nemesis.core.authorization import (
     TargetFingerprint,
 )
 from nemesis.core.disclosure import scan_for_internal_material
+from nemesis.core.infrastructure import (
+    OBSERVE_AND_PRESERVE_OPERATIONS,
+    ROLE_ATTRIBUTE,
+    InfrastructureRole,
+    eligible_roles,
+    is_role_eligible,
+)
 from nemesis.core.temporal import utcnow
 from nemesis.ports.authorization import CapabilityVerifier, RevocationOracle, TrustAnchor
 from nemesis.ports.effects import EffectOutcome, EffectRequest, EffectResult, EffectsAdapter
@@ -380,6 +387,63 @@ def preflight(
                 "legitimate owner since"
             ),
         )
+
+    # Whose target is this? Checked after target binding, so the role read here is both the
+    # one an approver signed and — because it is a bound attribute — the one just re-observed
+    # from the graph. Read off `approved`, which comes from the capability reconstructed from
+    # the signed bytes, never off the object that arrived.
+    #
+    # This is the mission's central rule made deterministic: observing an adversary use a
+    # piece of infrastructure establishes nothing about whose it is, so malicious use alone
+    # never authorizes disruption. The judgement itself is made where the evidence lives; what
+    # happens here is the verification of a signed fact, because this plane is forbidden from
+    # importing the planes that could compute one, and that prohibition is what makes
+    # "attribution is not authorization" true rather than merely stated.
+    bound_role = approved.bound_attributes.get(ROLE_ATTRIBUTE)
+    role_required = operation not in OBSERVE_AND_PRESERVE_OPERATIONS
+    if bound_role is None:
+        if role_required:
+            return Preflight(
+                decision=decision,
+                approved_target=approved,
+                refusal=EffectOutcome.REFUSED_UNAUTHORIZED,
+                detail=(
+                    f"no {ROLE_ATTRIBUTE} is bound into this capability, and "
+                    f"{operation.value} may not run against a target whose standing nobody "
+                    "established. Observing what a target was used for establishes neither "
+                    "who owns it nor who controls it; approving an operation without saying "
+                    "which of those was found is how a victim's host becomes a takedown "
+                    "target. Bind the classification at approval"
+                ),
+            )
+    else:
+        try:
+            role = InfrastructureRole(bound_role)
+        except ValueError:
+            return Preflight(
+                decision=decision,
+                approved_target=approved,
+                refusal=EffectOutcome.REFUSED_UNAUTHORIZED,
+                detail=(
+                    f"the bound {ROLE_ATTRIBUTE} {sanitize(bound_role, limit=64)!r} is not a "
+                    "classification this platform recognises; an unrecognised standing is not "
+                    "a permissive one"
+                ),
+            )
+        if not is_role_eligible(operation, role):
+            permitted = sorted(r.value for r in eligible_roles(operation))
+            return Preflight(
+                decision=decision,
+                approved_target=approved,
+                refusal=EffectOutcome.REFUSED_UNAUTHORIZED,
+                detail=(
+                    f"the target is classified {role.value} and {operation.value} may run "
+                    f"only against {', '.join(permitted) or 'no target'}. Malicious use is "
+                    "not ownership: this target is somebody else's, shared with somebody "
+                    "else, or unclassified, and acting against it would harm a party who is "
+                    "not the adversary"
+                ),
+            )
 
     uncleared = tuple(
         condition
