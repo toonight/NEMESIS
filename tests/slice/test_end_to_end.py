@@ -49,6 +49,7 @@ from nemesis.core.relationships import (
     PivotMethod,
     RelationType,
 )
+from nemesis.pursuit.investigation import InvestigationState
 from nemesis.slice.scenario import STAGE_NAMES, ScenarioResult, run_glass_anvil_scenario
 
 pytestmark = pytest.mark.slice
@@ -888,3 +889,57 @@ def test_the_blind_graph_walk_agrees_with_the_narrated_assessment(
         signal.observed_by.is_adversary_influenceable for signal in result.resurgence.graph_signals
     ), "the reference run collects nothing through an unplantable channel"
     assert not result.resurgence.assessment.is_actionable
+
+
+def test_the_resurgence_watch_actually_runs_and_records_its_refusal(
+    result: ScenarioResult,
+) -> None:
+    """The loop's last edge, exercised rather than merely available.
+
+    Phase 8 used to end with the case parked in MONITORING_RESURGENCE and nothing ever asking
+    whether the adversary had come back. Now the watch runs — after the phase-8 collection has
+    landed, which is the only order in which the answer can mean anything — and it refuses.
+
+    Refusing is the expected outcome here and it is not a gap. Everything this run collects
+    arrives through a channel an adversary can write into, so no candidate can clear the
+    robustness margin. A watch that resumed anyway would spend the remaining budget on a
+    coincidence, which is the failure this design exists to prevent.
+
+    The pass is in the audit trail either way: a watch that ran and refused must be
+    distinguishable from a watch that stopped running.
+    """
+    watch = result.resurgence.watch
+
+    assert watch.not_watching_reason is None, "the watch declined to run"
+    assert watch.candidates_examined >= 1
+    assert watch.investigation_id == result.pursue.investigation.investigation_id
+
+    assert not watch.resumes
+    assert result.resurgence.resumed is None
+    assert result.pursue.investigation.state is InvestigationState.MONITORING_RESURGENCE
+
+    recorded = run(result.stores.audit.query(action="resurgence.watch", limit=10))
+    assert recorded, "the watch pass left no audit record"
+    assert recorded[0].inputs["candidates_examined"] == str(watch.candidates_examined)
+    assert recorded[0].outcome == "no candidate cleared the bar"
+
+
+def test_the_watch_examines_only_what_the_case_actually_worked_on(
+    result: ScenarioResult,
+) -> None:
+    """The cluster comes from the investigation's own branch foci.
+
+    Not from a separately maintained inventory of what the campaign owns, which would be a
+    second thing to keep true. The consequence is visible and worth pinning: a hand-picked
+    seed list produces more candidates than the case's own branches do, and the case's own is
+    the defensible one — it is what this investigation established rather than what somebody
+    assumed it covered.
+    """
+    watch = result.resurgence.watch
+    branch_keys = {b.focus_entity_key for b in result.pursue.investigation.branches}
+
+    assert branch_keys, "the investigation opened no branches"
+    assert watch.candidates_examined <= len(result.resurgence.graph_signals)
+    assert all(finding.candidate_key not in branch_keys for finding in watch.findings), (
+        "a candidate the case already worked on is last month, not a return"
+    )

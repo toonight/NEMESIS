@@ -192,7 +192,7 @@ from nemesis.ports.authorization import TrustAnchor
 from nemesis.ports.collection import IntelligenceConnector, PivotRequest, PivotResult, PivotType
 from nemesis.ports.effects import EffectRequest, EffectResult
 from nemesis.ports.isolation import IsolationReport
-from nemesis.ports.storage import GraphQuery, Subgraph
+from nemesis.ports.storage import AuditEvent, GraphQuery, Subgraph
 from nemesis.pursuit.engine import (
     ConnectorRegistry,
     PursuitEngine,
@@ -207,7 +207,12 @@ from nemesis.pursuit.resurgence import (
     ResurgenceSignal,
     ResurgenceSignalKind,
 )
-from nemesis.pursuit.watch import assemble_resurgence_signals
+from nemesis.pursuit.watch import (
+    WatchReport,
+    assemble_resurgence_signals,
+    resume_pursuit,
+    watch_for_resurgence,
+)
 from nemesis.resolve.engine import (
     HumanIdentityRefusal,
     PersonaLinkageAssessment,
@@ -256,6 +261,12 @@ CAPABILITY_LIFETIME: Final = timedelta(hours=4)
 CASE_AUTHORITY_REFERENCE: Final = "SIMULATED-CASE-GLASS-ANVIL-2026-0042"
 
 RESURGENCE_RULE: Final = "resurgence.shared-artifact-reconnection"
+
+RESUMPTION_BUDGET: Final = 25.0
+"""What reopening a case on a recognised return is allowed to cost.
+
+Added to the ceiling, never a reset — a case that reopens with a fresh allowance every time
+is a tap an adversary controls, since returning is cheap for them."""
 
 TRACKED_CAMPAIGNS: Final = 40
 """How many campaigns the resurgence assessment compares this cluster against.
@@ -644,6 +655,18 @@ class ResurgenceStage(BaseModel):
     links: tuple[ResurgenceLink, ...]
     reconnected_by: tuple[str, ...]
     not_reconnected_by: tuple[str, ...]
+    watch: WatchReport
+    """The watch pass itself: what it examined and whether it justified resuming.
+
+    Phase 8 previously ended with the case parked in ``MONITORING_RESURGENCE`` and nothing ever
+    asking whether the adversary had come back. This is that question being asked, on the graph
+    as it stands *after* the phase-8 collection landed — which is the only order in which the
+    answer means anything."""
+
+    resumed: Investigation | None
+    """The reopened case, when the watch found something worth reopening on. ``None`` here is
+    the expected outcome for this run and is not a failure: see the watch report's own verdict."""
+
     graph_signals: tuple[ResurgenceSignal, ...]
     """What a blind two-hop walk of the graph finds at this point, with no analyst input.
 
@@ -2791,6 +2814,15 @@ async def _resurgence(
             f"PGP fingerprint {PGP_FINGERPRINT}",
         ),
         not_reconnected_by=_NOT_RECONNECTED_BY,
+        # Filled in by the caller once the watch has run over the graph this stage just
+        # enriched; a stage cannot watch for a return using only what it collected itself.
+        watch=WatchReport(
+            investigation_id="",
+            campaign="",
+            checked_at=as_of,
+            not_watching_reason="the watch pass runs after this stage",
+        ),
+        resumed=None,
         graph_signals=await assemble_resurgence_signals(
             context.graph,
             prior_entity_ids=[
@@ -2963,6 +2995,37 @@ async def run_glass_anvil_scenario_async(
         historical_key_claim=persona_key_claim,
     )
 
+    # The loop's last edge, and it runs *after* the phase-8 collection has landed: asking
+    # whether the adversary came back before collecting what they came back with would answer
+    # the question against a graph that could not contain the answer.
+    watch = await watch_for_resurgence(
+        context.graph,
+        watching,
+        campaign=SCENARIO_SUBJECT,
+        candidate_population=TRACKED_CAMPAIGNS,
+        now=resurgence_as_of,
+        provenance_of=resolve_sources(context.claims, context.vault),
+    )
+    resumed: Investigation | None = None
+    if watch.resumes:
+        finding = watch.actionable[0]
+        candidate = await context.graph.find_entity(finding.candidate_type, finding.candidate_key)
+        if candidate is not None:
+            resumed = resume_pursuit(
+                watching,
+                candidate_entity_id=candidate.entity_id,
+                candidate_key=candidate.natural_key,
+                reason=(
+                    f"resurgence watch scored {finding.assessment.band.value} on "
+                    f"{finding.candidate_key}"
+                ),
+                now=resurgence_as_of,
+                additional_budget=RESUMPTION_BUDGET,
+            )
+            watching = resumed
+    await _record_watch(context, watch=watch, resumed=resumed is not None)
+    resurgence = resurgence.model_copy(update={"watch": watch, "resumed": resumed})
+
     return ScenarioResult(
         detect=detect,
         pursue=pursue.model_copy(update={"investigation": watching}),
@@ -3113,4 +3176,31 @@ def _resurgence_assessment(*, as_of: datetime) -> ResurgenceAssessment:
         ),
         candidate_population=TRACKED_CAMPAIGNS,
         assessed_at=as_of,
+    )
+
+
+async def _record_watch(context: _Context, *, watch: WatchReport, resumed: bool) -> None:
+    """Put the watch pass in the audit trail, whether or not it found anything.
+
+    A pass that examined six candidates and resumed on none is a decision, and invariant 11
+    wants decisions replayable rather than merely believed. Recording only the passes that
+    found something would leave the trail unable to distinguish a watch that ran and refused
+    from a watch that stopped running.
+    """
+    await context.audit.record(
+        AuditEvent(
+            audit_id=new_id(IdPrefix.AUDIT),
+            occurred_at=watch.checked_at,
+            actor="nemesis.pursuit.watch",
+            actor_kind="rule",
+            action="resurgence.watch",
+            subject=watch.investigation_id,
+            outcome="resumed" if resumed else "no candidate cleared the bar",
+            inputs={
+                "campaign": watch.campaign,
+                "candidates_examined": str(watch.candidates_examined),
+                "actionable": str(len(watch.actionable)),
+                "not_watching_reason": watch.not_watching_reason or "",
+            },
+        )
     )
