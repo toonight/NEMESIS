@@ -6,9 +6,9 @@ This is the part of it that needs no funding, no registrar and no third party: a
 127.0.0.1, where the operations are ours and the linkage is known because this module minted it.
 
 **What is genuinely real here, and it is more than a fixture.** The keypairs are real, the X.509
-certificates are real, and a fingerprint is the SHA-256 of the DER bytes an observer actually
-received over a TLS handshake rather than a string somebody typed. The kits are real files whose
-hashes are computed from their real contents. When two operations share a key, they share it
+certificates are real, and every fingerprint is computed from serialised DER — the SPKI parsed
+back out of those bytes rather than read off the object this module minted. The kits are real
+bytes whose hashes come from their real contents. When two operations share a key, they share it
 because one key object was used twice, and that is the ground truth — not a label attached
 beside the evidence, but the reason the evidence looks the way it does.
 
@@ -23,18 +23,16 @@ and naming patterns exactly where they were.
 So: real controlled operations, real ground truth, over a **narrow slice** of the signal
 vocabulary. Reported that way, per kind, with the untouched kinds named rather than omitted.
 
-**Containment.** Everything binds to ``127.0.0.1`` and :func:`_require_loopback` refuses any
-other address. Nothing here reaches a network this process does not own, nothing is registered
-anywhere, and no third party is contacted — which is what keeps a module that runs TLS servers
-on the right side of invariant 15.
+**Containment.** This module opens no socket at all. An earlier version served each certificate
+over loopback TLS so the fingerprint came off a wire; ``scripts/check_prohibited.py`` refused it,
+because only the collection plane may hold network capability and a control with an exemption for
+its author is not a control. Nothing here reaches any network, nothing is registered anywhere and
+no third party is contacted.
 """
 
 from __future__ import annotations
 
 import hashlib
-import socket
-import ssl
-import threading
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -57,9 +55,6 @@ from nemesis.pursuit.resurgence import (
     ResurgenceSignalKind,
 )
 
-LOOPBACK: Final = "127.0.0.1"
-"""The only address anything here may bind or connect to."""
-
 EXERCISED_KINDS: Final[frozenset[ResurgenceSignalKind]] = frozenset(
     {
         ResurgenceSignalKind.SHARED_PRIVATE_KEY,
@@ -79,22 +74,6 @@ UNTOUCHED_KINDS: Final[frozenset[ResurgenceSignalKind]] = (
 )
 """Named rather than omitted. A report that silently covered three of seven kinds would read as
 covering the vocabulary."""
-
-
-def _require_loopback(host: str) -> str:
-    """Refuse any address that is not the loopback interface.
-
-    A guard rather than a convention, because this module opens sockets and the difference
-    between a bench and a probe of somebody else's infrastructure is exactly one hostname. The
-    repository's hard prohibition is on code paths that connect to infrastructure not owned by
-    us; this is the line that keeps this file on the right side of it.
-    """
-    if host != LOOPBACK:
-        raise ValueError(
-            f"the local bench binds and connects to {LOOPBACK} only, never {host!r}: "
-            "a range that can be pointed elsewhere is not a range, it is a scanner"
-        )
-    return host
 
 
 @dataclass(frozen=True)
@@ -207,13 +186,11 @@ def run_operation(
     operator: str = "",
     planted_from: str | None = None,
 ) -> Operation:
-    """Mint a certificate and a kit, serve the certificate over loopback TLS, and observe it.
+    """Mint a certificate and a kit, and take the certificate as an observer would hold it.
 
-    The handshake is the point. Without it the fingerprint would be something this module
-    computed and asserted; with it, it is what a client actually received from a server that
-    actually held the private key. That is the difference between an own-sensor observation and
-    a claim that one happened, and this whole module exists to make the OWN_SENSOR provenance
-    downstream something earned rather than stamped on.
+    Serialised to DER and, for the SPKI, parsed back out of those bytes — so no fingerprint here
+    is read off in-memory state. See :func:`_as_an_observer_would_see_it` for what this used to
+    do and why it no longer does.
     """
     key = span.key(key_id)
     subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, name)])
@@ -238,7 +215,7 @@ def run_operation(
         f"const DROP = '{drop}';\n"
     ).encode()
 
-    observed_der = _observe_over_loopback(span, name=name, key=key, certificate=certificate)
+    observed_der = _as_an_observer_would_see_it(certificate)
 
     operation = Operation(
         name=name,
@@ -255,63 +232,24 @@ def run_operation(
     return operation
 
 
-def _observe_over_loopback(
-    span: Range,
-    *,
-    name: str,
-    key: ec.EllipticCurvePrivateKey,
-    certificate: x509.Certificate,
-) -> bytes:
-    """Serve on 127.0.0.1, connect to it, and return the DER the client actually received."""
-    host = _require_loopback(LOOPBACK)
-    directory = span.workspace / "tls"
-    directory.mkdir(parents=True, exist_ok=True)
-    cert_path = directory / f"{hashlib.sha256(name.encode()).hexdigest()[:16]}.pem"
-    key_path = cert_path.with_suffix(".key")
-    cert_path.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
-    key_path.write_bytes(
-        key.private_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.PKCS8,
-            encryption_algorithm=serialization.NoEncryption(),
-        )
-    )
+def _as_an_observer_would_see_it(certificate: x509.Certificate) -> bytes:
+    """Serialise to DER and hand back the bytes, which is what any observer of it would hold.
 
-    server_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    server_context.load_cert_chain(certfile=str(cert_path), keyfile=str(key_path))
+    **This used to be a real TLS handshake on 127.0.0.1**, and the argument for it was that a
+    fingerprint taken off the wire is an observation while one read off the object we minted is
+    an assertion. That argument was fine and the design was not: ``scripts/check_prohibited.py``
+    refuses a network import outside the collection plane, and it is right to. Its own rationale
+    is that the danger is not somebody writing an obvious scanner but a well-intentioned module
+    quietly growing a real socket during development — which is precisely what this was. A
+    plane-separation control with an exemption for the author's convenience is not a control.
 
-    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    listener.bind((host, 0))
-    listener.listen(1)
-    port = listener.getsockname()[1]
-
-    def serve() -> None:
-        try:
-            raw, _ = listener.accept()
-            with server_context.wrap_socket(raw, server_side=True) as tls:
-                tls.recv(1)
-        except OSError:
-            # The client hung up mid-handshake. The observation is the client's business and a
-            # server-side error here must not take the bench down with it.
-            pass
-
-    thread = threading.Thread(target=serve, daemon=True)
-    thread.start()
-    try:
-        client_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-        client_context.check_hostname = False
-        client_context.verify_mode = ssl.CERT_NONE
-        with (
-            socket.create_connection((host, port), timeout=5) as raw,
-            client_context.wrap_socket(raw) as tls,
-        ):
-            observed = tls.getpeercert(binary_form=True)
-        if observed is None:  # pragma: no cover - a handshake that produced no peer cert
-            raise RuntimeError("the loopback handshake produced no certificate to observe")
-        return observed
-    finally:
-        thread.join(timeout=5)
-        listener.close()
+    What is lost is real and is not papered over: the provenance below is no longer *earned* by
+    an observation crossing a wire. What survives is the round trip through DER — every
+    fingerprint here is computed from serialised bytes and, for the SPKI, parsed back out of
+    them, so nothing is read off in-memory state. That is meaningfully stronger than a fixture
+    and meaningfully weaker than a handshake, and the docstrings say so in both directions.
+    """
+    return certificate.public_bytes(serialization.Encoding.DER)
 
 
 # -- turning observations into signals ---------------------------------------------
@@ -321,9 +259,13 @@ BENCH_SENSOR: Final = SourceDescriptor(
     identifier="nemesis-local-bench (SIMULATED range)",
     reliability=SourceReliability.COMPLETELY_RELIABLE,
 )
-"""``OWN_SENSOR`` and it is earned rather than asserted: the observation is a TLS handshake this
-process performed against a server this process ran. An adversary can cause an observation here
-and cannot author the record, which is exactly what the class means."""
+"""``OWN_SENSOR``, and the label is weaker than it was.
+
+An earlier version earned it: the observation was a TLS handshake this process performed against
+a server this process ran. That required a socket outside the collection plane and was removed.
+What remains is a certificate this module minted and serialised, so the class is asserted rather
+than demonstrated — accurate for a bench whose whole point is that we own both ends, and not the
+same thing as an observation crossing a boundary. Read the bench's results with that discount."""
 
 
 def signals_between(left: Operation, right: Operation) -> tuple[ResurgenceSignal, ...]:
@@ -567,7 +509,6 @@ def run_local_bench(
 __all__ = [
     "BENCH_SENSOR",
     "EXERCISED_KINDS",
-    "LOOPBACK",
     "UNTOUCHED_KINDS",
     "BenchResult",
     "Operation",

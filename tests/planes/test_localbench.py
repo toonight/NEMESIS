@@ -17,10 +17,8 @@ import pytest
 
 from nemesis.calibration.localbench import (
     EXERCISED_KINDS,
-    LOOPBACK,
     UNTOUCHED_KINDS,
     BenchResult,
-    _require_loopback,
     open_range,
     run_local_bench,
     run_operation,
@@ -38,23 +36,39 @@ def bench(operations: int = 12) -> BenchResult:
 # -- containment, first --------------------------------------------------------------
 
 
-def test_nothing_may_be_pointed_anywhere_but_loopback() -> None:
-    """The line between a bench and a probe of somebody else's infrastructure."""
-    assert _require_loopback(LOOPBACK) == LOOPBACK
-    elsewhere_addresses = ("0.0.0.0", "example.com", "8.8.8.8", "::1")  # noqa: S104
-    for elsewhere in elsewhere_addresses:
-        with pytest.raises(ValueError, match="never"):
-            _require_loopback(elsewhere)
+def test_the_bench_holds_no_network_capability() -> None:
+    """It opened a loopback TLS socket once, and `check_prohibited.py` was right to refuse it.
+
+    Only the collection plane may import a network client. The scanner's own rationale is that
+    the danger is not an obvious port scanner but a well-intentioned module quietly growing a
+    real socket during development — which is exactly what this was, guarded by a
+    `_require_loopback` function that a coarse scanner cannot and should not trust.
+
+    Asserted on the module's imports rather than on its behaviour, because that is the property
+    the control checks and the one a future edit would break.
+    """
+    import ast
+
+    from nemesis.calibration import localbench
+
+    tree = ast.parse(Path(localbench.__file__).read_text())
+    imported: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported |= {alias.name.split(".")[0] for alias in node.names}
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imported.add(node.module.split(".")[0])
+    assert not imported & {"socket", "ssl", "http", "urllib", "httpx", "requests", "asyncio"}
 
 
 # -- the artifacts are real ----------------------------------------------------------
 
 
-def test_the_fingerprint_comes_off_the_handshake_not_off_the_object_we_minted() -> None:
-    """What separates this from a fixture.
+def test_the_fingerprint_comes_off_serialised_bytes_not_off_the_object_we_minted() -> None:
+    """What separates this from a fixture, after the handshake had to go.
 
-    The certificate DER is what a client actually received from a server that actually held the
-    private key, and the SPKI is parsed back out of it.
+    Weaker than it was — the DER no longer crosses a wire — and still not a fixture: every
+    fingerprint is computed from serialised bytes, and the SPKI is parsed back out of them.
     """
     with tempfile.TemporaryDirectory() as workspace:
         span = open_range(Path(workspace))
