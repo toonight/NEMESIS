@@ -1632,6 +1632,11 @@ def calibrate(
     console.print()
     console.print(measure_ceiling_sensitivity().render(), highlight=False)
     console.print(measure_floor_sensitivity().render(), highlight=False)
+
+    from nemesis.calibration.sizing import size_milestone_three
+
+    console.print()
+    console.print(size_milestone_three().render(), highlight=False)
     console.print(
         Text(
             "  Both studies run the swept grid: every signal kind against every other, over "
