@@ -221,6 +221,104 @@ def probe_cases() -> tuple[ProbeCase, ...]:
     )
 
 
+# ---------------------------------------------------------------------------
+# A swept probe set, because "chosen by the author" is the criticism that matters
+# ---------------------------------------------------------------------------
+
+SWEPT_POPULATIONS: Final[tuple[int | None, ...]] = (None, 2, 3, 8, 40, 41_698)
+"""Uncounted, then a spread from "shared with one other" to a bulletproof registrar's book.
+
+``None`` is in the grid rather than excluded from it: an uncounted population is the most
+common real state and it is the one that weighs nothing, so a sweep that dropped it would only
+ever measure the cases somebody had already done the work on.
+"""
+
+SWEPT_PAIR_POPULATIONS: Final[tuple[int, ...]] = (2, 4, 40)
+"""Populations for the two-signal cases: selective, middling, and near-noise.
+
+Swept rather than fixed after the first run of the grid returned **0 of 231 cases actionable**
+at baseline. A sweep that lands entirely on one side of the decision boundary cannot report
+anything about a threshold, and it reported perfect stability for three of five perturbations
+while doing so — the exact failure the ``movable`` denominator exists to expose, arriving in
+the sweep it was added to protect.
+"""
+
+SWEPT_PLANTABILITY: Final[tuple[tuple[bool, bool], ...]] = (
+    (False, False),
+    (True, False),
+    (True, True),
+)
+"""All plantable, mixed, all unplantable — for the two-signal cases."""
+
+
+def swept_cases() -> tuple[ProbeCase, ...]:
+    """Every combination on a stated grid, rather than the cases an author found interesting.
+
+    The hand-picked set that came before this found something real, and the honest objection to
+    it was never its size: it was that the cases were chosen by the person whose claim was under
+    test, near the boundaries where a claim about thresholds is most likely to break. A grid
+    removes that. What it does not remove is that the *grid* is also mine — the kinds, the
+    populations and the plantability splits below are choices, and a different grid could give a
+    different figure.
+
+    Singles are swept over every kind and population; pairs are swept over every ordered pair of
+    kinds with a fixed mid-range population, so that same-group and cross-group pairs are both
+    covered without the product exploding. Three-signal cases are left out deliberately: they
+    add a great many cases that sit far above every threshold, and a sweep whose bulk cannot
+    move inflates a stability figure without informing it.
+    """
+    kinds = tuple(ResurgenceSignalKind)
+    cases: list[ProbeCase] = []
+
+    for kind in kinds:
+        for population in SWEPT_POPULATIONS:
+            for unplantable in (False, True):
+                cases.append(
+                    ProbeCase(
+                        name=f"single {kind.value} pop={population} unplantable={unplantable}",
+                        signals=(
+                            _signal(
+                                kind,
+                                attribute=f"a:{kind.value}",
+                                unplantable=unplantable,
+                                population=population,
+                            ),
+                        ),
+                        spans="one signal — always caught by the single-origin veto",
+                    )
+                )
+
+    for first in kinds:
+        for second in kinds:
+            for left, right in SWEPT_PLANTABILITY:
+                for population in SWEPT_PAIR_POPULATIONS:
+                    cases.append(
+                        ProbeCase(
+                            name=(
+                                f"pair {first.value}+{second.value} {left}/{right} pop={population}"
+                            ),
+                            signals=(
+                                _signal(
+                                    first,
+                                    attribute=f"a:{first.value}",
+                                    unplantable=left,
+                                    population=population,
+                                ),
+                                _signal(
+                                    second,
+                                    attribute=f"b:{second.value}",
+                                    unplantable=right,
+                                    population=population,
+                                ),
+                            ),
+                            spans=(
+                                "two signals — same group collapses, different groups accumulate"
+                            ),
+                        )
+                    )
+    return tuple(cases)
+
+
 def _scaled(factor: float) -> dict[ResurgenceSignalKind, float]:
     """Every ceiling multiplied, order preserved, clamped into the unit interval."""
     return {kind: min(0.99, max(0.01, value * factor)) for kind, value in BELIEF_CEILING.items()}
@@ -261,13 +359,25 @@ class PerturbationResult:
     preserves_order: bool
     verdicts_changed: int
     cases: int
+    movable: int
+    """How many cases in the set moved under *any* perturbation.
+
+    Reported beside every figure because it is the denominator that means something. A grid
+    sweep is mostly cases sitting far above or far below every threshold, and they survive
+    everything — counting them into a stability rate measures how much padding the set has
+    rather than how load-bearing the numbers are.
+    """
 
     @property
     def stable(self) -> bool:
         return self.verdicts_changed == 0
 
     def render(self) -> str:
-        mark = "stable" if self.stable else f"{self.verdicts_changed}/{self.cases} MOVED"
+        if self.stable:
+            mark = "stable"
+        else:
+            share = self.verdicts_changed / self.movable if self.movable else 0.0
+            mark = f"{self.verdicts_changed}/{self.movable} movable MOVED ({share:.0%})"
         kind = "order kept " if self.preserves_order else "ORDER BROKEN"
         return f"  [{kind}] {self.name:24} {mark}"
 
@@ -282,6 +392,8 @@ class CeilingSensitivity:
 
     baseline: tuple[tuple[str, bool], ...]
     results: tuple[PerturbationResult, ...]
+    movable: int = 0
+    """Cases any perturbation moved. Zero makes every other figure here meaningless."""
 
     @property
     def order_preserving_moves(self) -> int:
@@ -307,6 +419,8 @@ class CeilingSensitivity:
             "",
             f"  baseline: {sum(1 for _, a in self.baseline if a)}/{len(self.baseline)} "
             "probe cases actionable",
+            f"  {self.movable} of {len(self.baseline)} cases move under any perturbation; "
+            "the rest sit far from every threshold and are not evidence either way",
         ]
         lines.extend(result.render() for result in self.results)
         lines.append("")
@@ -317,10 +431,22 @@ class CeilingSensitivity:
                 "load-bearing; the exact ceilings are not."
             )
         elif self.order_preserving_moves:
+            gentlest = min(
+                (r for r in self.results if r.preserves_order and not r.stable),
+                key=lambda r: r.verdicts_changed,
+                default=None,
+            )
+            detail = (
+                f" The gentlest order-preserving change that moves anything is "
+                f"'{gentlest.name}', at {gentlest.verdicts_changed}/{gentlest.movable} "
+                "movable cases."
+                if gentlest is not None
+                else ""
+            )
             lines.append(
-                "  The standing claim does NOT hold: a verdict moved under a change that kept "
-                "the ordering. The magnitudes are doing work, and their being unvalidated is a "
-                "liability rather than a footnote."
+                "  The standing claim does NOT hold: verdicts moved under changes that kept "
+                "the ordering intact. The magnitudes are doing work, and their being "
+                "unvalidated is a liability rather than a footnote." + detail
             )
         else:
             lines.append(
@@ -366,25 +492,36 @@ def measure_ceiling_sensitivity(
     a sensitivity probe that left the shipped ceilings altered would be the worst possible
     bug in a module about not trusting them.
     """
-    probes = tuple(cases) if cases is not None else probe_cases()
+    probes = tuple(cases) if cases is not None else swept_cases()
     baseline = _verdicts(probes, None)
-    results = []
-    for name, order, table in PERTURBATIONS:
-        perturbed = _verdicts(probes, table)
-        moved = sum(
-            1
-            for (_, before), (_, after) in zip(baseline, perturbed, strict=True)
-            if before != after
+
+    perturbed_runs = [
+        (name, order, _verdicts(probes, table)) for name, order, table in PERTURBATIONS
+    ]
+    moved_anywhere = {
+        index
+        for _, _, perturbed in perturbed_runs
+        for index, ((_, before), (_, after)) in enumerate(zip(baseline, perturbed, strict=True))
+        if before != after
+    }
+
+    results = [
+        PerturbationResult(
+            name=name,
+            preserves_order=order == "order preserved",
+            verdicts_changed=sum(
+                1
+                for (_, before), (_, after) in zip(baseline, perturbed, strict=True)
+                if before != after
+            ),
+            cases=len(probes),
+            movable=len(moved_anywhere),
         )
-        results.append(
-            PerturbationResult(
-                name=name,
-                preserves_order=order == "order preserved",
-                verdicts_changed=moved,
-                cases=len(probes),
-            )
-        )
-    return CeilingSensitivity(baseline=baseline, results=tuple(results))
+        for name, order, perturbed in perturbed_runs
+    ]
+    return CeilingSensitivity(
+        baseline=baseline, results=tuple(results), movable=len(moved_anywhere)
+    )
 
 
 FLOOR_PERTURBATIONS: Final[tuple[float, ...]] = (0.45, 0.50, 0.60, 0.65)
@@ -448,7 +585,7 @@ def measure_floor_sensitivity(cases: Sequence[ProbeCase] | None = None) -> Floor
     unvalidated numbers and a reader needs to know which one a verdict turned on; one figure
     covering both would hide exactly what the first run of this module found.
     """
-    probes = tuple(cases) if cases is not None else probe_cases()
+    probes = tuple(cases) if cases is not None else swept_cases()
     engine = ResurgenceEngine()
     assessments = [
         engine.assess(
