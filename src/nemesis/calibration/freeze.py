@@ -25,7 +25,7 @@ guarantee, and it is the only one that sees a bare literal inside a function bod
 field default, or a two-line logic change that touches no constant at all. `engine_drifted()`
 names the modules that moved.
 
-**Every module-level constant**, by normalised syntax, in `CONSTANT_DIGESTS` — 554 of them,
+**Every module-level constant**, by normalised syntax, in `CONSTANT_DIGESTS` — 559 of them,
 with no classification whatsoever. A dial does not have to hold a digit and does not have to
 look like a table; four rules for deciding what counted were tried and all four excluded
 something load-bearing. `constants_drifted()` names what moved, appeared or vanished.
@@ -135,7 +135,7 @@ CALIBRATION_CONSTANTS: Final[tuple[str, ...]] = (
 """The curated epistemic subset, named as ``module:NAME`` and frozen by **imported value**.
 
 Not "every number": most of what decides a published figure here is not a number at all — of the
-554 dials `discovered_constants()` covers, 386 hold no numeric literal. And not the completeness
+559 dials `discovered_constants()` covers, 391 hold no numeric literal. And not the completeness
 guarantee either, which is the job of the two syntactic digests; this list is deliberately
 curated, so it is allowed to be incomplete in a way they are not.
 
@@ -442,13 +442,18 @@ CONSTANT_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis.core.ids:_CONTENT_ID": "9bf45a5df060160e",
         "nemesis.core.ids:_UUID7_ID": "7ca68ac7a934426d",
         "nemesis.core.infrastructure:ACTOR_HELD_ROLES": "3fb3b4972f59e5f7",
+        "nemesis.core.infrastructure:ADMISSIBLE_OWNERSHIP_DERIVATIONS": "0b868447da743ab5",
+        "nemesis.core.infrastructure:ADVERSARY_ENTITY_TYPES": "68b69361d816b6ed",
+        "nemesis.core.infrastructure:CONTROL_RELATIONS": "94f5249ff6fba075",
         "nemesis.core.infrastructure:DISRUPTIVE_OPERATIONS": "dea03c4daee6b69a",
         "nemesis.core.infrastructure:ESTABLISHED_ROLES": "02c2c77627d02473",
         "nemesis.core.infrastructure:FACET_CONFIDENCE_FLOOR": "e22671d892a6c86a",
         "nemesis.core.infrastructure:OBSERVE_AND_PRESERVE_OPERATIONS": "330bb51bd14c9e28",
+        "nemesis.core.infrastructure:OWNERSHIP_PREDICATE": "2d855b79ae8da93c",
         "nemesis.core.infrastructure:REQUIRED_FACETS": "20ded346e4094608",
         "nemesis.core.infrastructure:ROLE_ATTRIBUTE": "78b92f26b6d9d2ad",
         "nemesis.core.infrastructure:THIRD_PARTY_ENGAGEMENT_OPERATIONS": "2f47e5da8cc7bf3b",
+        "nemesis.core.infrastructure:USE_RELATIONS": "8100a59b3ba57fe6",
         "nemesis.core.proposition:ROBUSTNESS_MARGIN": "1045edd14c14ee07",
         "nemesis.core.provenance:UNPLANTABLE_SOURCE_CLASSES": "c6a425a5d8f50fce",
         "nemesis.core.relationships:IDENTITY_ASSERTING_RELATIONS": "c77e4f0929e92e79",
@@ -862,7 +867,7 @@ def discovered_constants(tree: Path | None = None) -> dict[str, str]:
     `EXCLUDED_CONCLUSIONS`, four security tables made of plain strings. The module digest covered
     them, so it was never a bypass; the claim that every dial was *named* was simply false.
 
-    So there is no rule now. Every module-level upper-case assignment is a dial, 554 of them,
+    So there is no rule now. Every module-level upper-case assignment is a dial, 559 of them,
     and the cost of including the genuine prose is nothing: rewording a message already moves
     that module's syntax digest, so no new failure mode is introduced by naming it too.
 
@@ -1051,7 +1056,7 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/core/fusion.py": "b932562ceea3ae2c",
         "nemesis/core/identity.py": "aa1dbd3e0be4e2cb",
         "nemesis/core/ids.py": "e983abcbfd1713e4",
-        "nemesis/core/infrastructure.py": "4a294cd678f35ea1",
+        "nemesis/core/infrastructure.py": "ed93db910e04d1b7",
         "nemesis/core/proposition.py": "6362df2cbabfdc5e",
         "nemesis/core/provenance.py": "b241365918a5b072",
         "nemesis/core/relationships.py": "a43da87bbf3f6ba3",
@@ -1131,10 +1136,11 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/ports/isolation.py": "3304b03d616feaea",
         "nemesis/ports/storage.py": "66a510c423666609",
         "nemesis/pursuit/__init__.py": "ad2e13b69c4fc1fd",
-        "nemesis/pursuit/engine.py": "9436ef99a9a9c8cf",
+        "nemesis/pursuit/engine.py": "e4d18e25cd22902f",
         "nemesis/pursuit/investigation.py": "69e3d2c8b22a5960",
         "nemesis/pursuit/materialize.py": "338409bef36aabc7",
         "nemesis/pursuit/policy.py": "887190c023d6a10e",
+        "nemesis/pursuit/standing.py": "c7bb4e8e3e802a94",
         "nemesis/resolve/__init__.py": "ad2e13b69c4fc1fd",
         "nemesis/resolve/engine.py": "4c4f9c2030905dbe",
         "nemesis/resolve/signals.py": "d061ffc01a1a2ed0",
