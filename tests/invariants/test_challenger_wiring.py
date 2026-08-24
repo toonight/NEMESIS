@@ -173,3 +173,33 @@ def test_the_reference_bench_subjects_can_carry_a_challenger() -> None:
 
     plain = reference_subjects()
     assert all(subject.challenger is None for subject in plain)
+
+
+# -- varying the seed, so an adaptation experiment is runnable at all ----------------
+
+
+@pytest.mark.anyio
+async def test_every_offered_seed_actually_produces_an_investigation() -> None:
+    """A seed with no fixtures behind it measures the absence of data, not the pilot.
+
+    Added so that "run it from a different seed to see whether the pilot adapts" is an
+    experiment somebody can run rather than a suggestion. Each of the four is a genuinely
+    different entry point into the same operation — different registrar, different resolution
+    history, different position in the cluster.
+    """
+    from nemesis.slice.pilot_session import SEEDABLE_DOMAINS, run_pilot_demonstration
+
+    assert len(SEEDABLE_DOMAINS) >= 2
+    for seed in SEEDABLE_DOMAINS:
+        with tempfile.TemporaryDirectory() as workspace:
+            result = await run_pilot_demonstration(workspace=Path(workspace), seed_domain=seed)
+        assert result.session.investigation.seed.entity_key == seed
+        assert result.session.rulings, f"seed {seed} produced no moves"
+
+
+@pytest.mark.anyio
+async def test_a_seed_with_no_fixtures_is_refused_rather_than_run_empty() -> None:
+    from nemesis.slice.pilot_session import run_pilot_demonstration
+
+    with pytest.raises(ValueError, match="fixture coverage"):
+        await run_pilot_demonstration(seed_domain="nowhere.example")
