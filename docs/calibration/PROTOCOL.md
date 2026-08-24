@@ -16,7 +16,7 @@ it against synthetic cases. Milestone 3 `REQUIRES_EXTERNAL_DATA`, milestone 6 `P
 > mechanical and enforced by tests seen to fail without it, over three overlapping scopes:
 > a normalised syntax digest covering **167 modules** — every file in `src/nemesis`, so literals
 > in function bodies, class defaults and pure logic are all inside it; a derived digest of
-> **573 dials** with no list to be absent from; and **43 constants frozen by imported value**
+> **574 dials** with no list to be absent from; and **43 constants frozen by imported value**
 > for a named diagnostic. Plus golden vectors that run real inputs through the attribution and
 > resolution engines to their published bands. It claims nothing about whether the frozen values
 > are **right** — freezing a choice does not validate it — and nothing about milestones 2–6.
