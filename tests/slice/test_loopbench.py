@@ -19,10 +19,41 @@ reads as a result. `_cross_product` walking a diagonal instead of the full (enti
 the defect that was found by reading the first run's numbers rather than by reading the code, and it
 capped the distinct pivots either arm could possibly reach — the benchmark's own denominator.
 `CyclingPilot` must ignore the research context and `MemoryAwarePilot` must read it, because two
-archetypes that quietly behave the same measure nothing at all. `_exhausted_families` parses prose
-the loop composed rather than a structured list, so it matches by containment; a stricter parser
-would read every line as "not a match" the day the wording changed, and the aware pilot would look
-memory-blind for a reason nobody would find.
+archetypes that quietly behave the same measure nothing at all. `ConjuringPilot` must keep naming an
+entity no briefing offered, and must keep doing it on only some of its moves: a variant that quietly
+stopped conjuring would put the `ref` column back to zero, and one that conjured on every move would
+execute nothing and so measure neither loop. `_exhausted_families` parses prose the loop composed
+rather than a structured list, so it matches by containment; a stricter parser would read every line
+as "not a match" the day the wording changed, and the aware pilot would look memory-blind for a
+reason nobody would find.
+
+`LoopMeasurement` says every one of its fields is counted from the mediator's rulings and not from
+what a pilot proposed. That stayed prose for as long as both shipped archetypes only ever named an
+entity the briefing had surfaced: `refused` was 0 in every cell the benchmark had ever printed, so
+the sentence had never once been exercised and the `ref` column was decoration. The two halves of it
+are checked separately here, because a suite that ran them together could pass on the wrong one —
+that the refusal is the *unknown-entity* ruling and not the vocabulary check firing, which would pin
+a different control on a different code path; and that such a move costs a move, executes no pivot
+and spends no budget.
+
+Counting them correctly is not the same as printing them, and both halves above stop at
+`LoopMeasurement`. So the `ref` and `ok` columns are read back out of the rendered row as well:
+a table that printed a literal 0 there would be exactly as green under every other assertion in
+this file, and a literal 0 in that column is the state the third archetype exists to end.
+
+The magnitudes are pinned rather than bounded away from zero, and the evolution arm is why.
+"Some refused and some accepted" is satisfied by any division of the moves at all, so an arm that
+swapped its two counters, or reported one refusal out of sixteen, read as correct — and that arm
+sums its counters across segments, where a segment counted into the wrong column shows up nowhere
+else on the table.
+
+`redundancy_rate` gets a test of its own because its docstring claimed the opposite of what the
+run does: that a refused pilot "divides by fewer executed pivots and scores better", inviting a
+reader to discount the number. Dividing the same repeats by fewer executed pivots *raises* the
+rate, and there is nothing to discount — the refusals shorten the walk, and a refused run is
+exactly as redundant as a clean run that executed as many pivots. That identity is asserted here
+against a real clean run, because a claim that was wrong in prose for a release is not one to
+restate in prose.
 
 The rest guards the report. `compare` pairs the arms on the moves they were *given*, never on the
 moves they took: pairing on the latter let a run that stopped early be graded against whichever
@@ -43,18 +74,22 @@ from pathlib import Path
 
 import pytest
 
+from nemesis.pilot.mediator import DEFAULT_MAX_CONSECUTIVE_MALFORMED, PilotSession
 from nemesis.pilot.moves import (
     Briefing,
     Conclude,
     EntityView,
     EnvelopeView,
     ResearchContext,
+    RulingStatus,
     RunPivot,
 )
 from nemesis.slice.evolution_session import APPROVED_DOMAIN
 from nemesis.slice.loopbench import (
     CAVEATS,
+    DEFAULT_BUDGET,
     PIVOT_CYCLE,
+    ConjuringPilot,
     CyclingPilot,
     LoopMeasurement,
     MemoryAwarePilot,
@@ -64,9 +99,20 @@ from nemesis.slice.loopbench import (
     compare,
     render,
     run_loopbench,
+    run_plain_arm,
 )
 
 pytestmark = pytest.mark.slice
+
+_REFUSED_RUN_MOVES = 2 * DEFAULT_MAX_CONSECUTIVE_MALFORMED
+"""The ceiling for the runs below in which every single move is refused.
+
+Derived from the mediator's malformed tolerance rather than written as a number, because the
+property being measured is a comparison against it: an unknown-entity refusal is ruled inside
+``_apply``, after ``_validate`` has already accepted the move as well-formed, so it never touches
+the malformed streak. A run of this length that ends at its ceiling could not have ended at the
+streak guard; a run of three could not tell the two apart, and would pass either way.
+"""
 
 
 # --- fixtures ----------------------------------------------------------------
@@ -113,16 +159,23 @@ def _measurement(
     distinct: int,
     repeats: int,
     evidence: int = 0,
+    refused: int = 0,
 ) -> LoopMeasurement:
     """A measurement assembled directly, so the reporting functions can be tested on inputs a
-    real run would take minutes to produce and could not produce on demand."""
+    real run would take minutes to produce and could not produce on demand.
+
+    ``refused`` defaults to 0 because most callers here are testing the report rather than the
+    accounting, but it has to be expressible: a helper that could only build refusal-free
+    measurements would make every property asserted through it a property of the case that was
+    already true before the third archetype existed.
+    """
     return LoopMeasurement(
         arm=arm,
         pilot=pilot,
         allowance=allowance,
         moves=moves,
-        accepted=moves,
-        refused=0,
+        accepted=moves - refused,
+        refused=refused,
         distinct_pivots=distinct,
         repeated_pivots=repeats,
         entities_discovered=5,
@@ -149,6 +202,80 @@ def long_run(tmp_path_factory: pytest.TempPathFactory) -> tuple[LoopMeasurement,
     """
     workspace: Path = tmp_path_factory.mktemp("loopbench-long")
     return asyncio.run(run_loopbench(lengths=(8,), moves_per_segment=6, workspace=workspace))
+
+
+class _AlwaysConjuringPilot(ConjuringPilot):
+    """The shipped archetype with its cadence turned all the way up: every move invents an entity.
+
+    A subclass rather than a second scripted policy, so the id being invented and the body that
+    proposes it are the ones that ship. A hand-written stand-in would keep every assertion below
+    green on the day :class:`ConjuringPilot` stopped conjuring, which is the one day they exist to
+    fail.
+
+    Pure where the sweep's archetype is deliberately mixed, and that is the point: a run with no
+    accepted turn in it leaves no second explanation for anything the refusal accounting reports.
+    """
+
+    CONJURE_EVERY = 1
+
+
+@pytest.fixture(scope="module")
+def refused_session(tmp_path_factory: pytest.TempPathFactory) -> PilotSession:
+    """One drive in which the mediator refused every move, kept as the transcript itself.
+
+    Driven straight through ``_build_world`` and ``mediator.drive`` rather than through an arm,
+    because the arms hand back counts and the questions here are about the rulings those counts
+    were derived from: which refusal fired, and how many turns a streak of them cost.
+    """
+    workspace: Path = tmp_path_factory.mktemp("loopbench-refused")
+
+    async def driven() -> PilotSession:
+        world = await _build_world(root=workspace / "world", max_moves=_REFUSED_RUN_MOVES)
+        return await world.mediator.drive(
+            _AlwaysConjuringPilot(_REFUSED_RUN_MOVES), world.seed, total_budget=DEFAULT_BUDGET
+        )
+
+    return asyncio.run(driven())
+
+
+@pytest.fixture(scope="module")
+def refused_measurement(tmp_path_factory: pytest.TempPathFactory) -> LoopMeasurement:
+    """The same pilot, same ceiling and same budget, counted the way the benchmark counts.
+
+    The session fixture above says what the mediator ruled; this one says what the table would
+    print about it. Both are needed because the gap being closed is precisely that the second was
+    never checked against the first.
+    """
+    workspace: Path = tmp_path_factory.mktemp("loopbench-refused-arm")
+    return asyncio.run(
+        run_plain_arm(
+            _AlwaysConjuringPilot,
+            moves=_REFUSED_RUN_MOVES,
+            budget=DEFAULT_BUDGET,
+            root=workspace / "plain",
+        )
+    )
+
+
+@pytest.fixture(scope="module")
+def equal_work_control(
+    long_run: tuple[LoopMeasurement, ...], tmp_path_factory: pytest.TempPathFactory
+) -> LoopMeasurement:
+    """A never-refused run handed exactly as many moves as the refused run executed pivots.
+
+    The control the table cannot print. ``compare`` pairs rows on the allowance, which is right
+    for one pilot across two arms and wrong for one arm across two pilots: a refused pilot given
+    48 moves does the work of a clean pilot given 32, so the row printed beside it is not the run
+    it should be read against. Derived from the refused run's own executed count rather than
+    written as a number, because the point is the equality and a literal would survive the day
+    the fixture world changes what it answers.
+    """
+    refused = _by_arm(long_run)[("plain", "conjuring")]
+    executed = refused.distinct_pivots + refused.repeated_pivots
+    workspace: Path = tmp_path_factory.mktemp("loopbench-equal-work")
+    return asyncio.run(
+        run_plain_arm(CyclingPilot, moves=executed, budget=DEFAULT_BUDGET, root=workspace / "plain")
+    )
 
 
 def _by_arm(results: tuple[LoopMeasurement, ...]) -> dict[tuple[str, str], LoopMeasurement]:
@@ -231,19 +358,72 @@ def test_the_memory_aware_pilot_concludes_when_every_direction_is_exhausted() ->
     assert "exhausted" in move.summary
 
 
-def test_both_pilots_conclude_rather_than_fail_on_a_briefing_with_no_entities() -> None:
+def test_the_conjuring_pilot_proposes_a_family_the_briefing_calls_exhausted() -> None:
+    """It is a cycling variant so that refusals are the only thing that differs between the two,
+    and that only holds while it stays as blind to the memory as the control is.
+
+    If it started reading ``exhausted_directions``, whatever its row shows and the control's does
+    not would be the memory and the refusals mixed together, with no way to separate them — and
+    the row is in the sweep to be read against the control's.
+    """
+    spent = PIVOT_CYCLE[0]
+    briefing = _briefing(entities=1, exhausted=(f"the {spent.value} family returned nothing",))
+
+    move = asyncio.run(ConjuringPilot(4).propose(briefing))
+
+    assert isinstance(move, RunPivot)
+    assert move.pivot_type is spent, "the conjuring pilot read the context it must ignore"
+
+
+def test_only_the_conjuring_pilot_invents_an_entity_and_only_on_every_third_move() -> None:
+    """The differential that keeps the third archetype from collapsing into the first.
+
+    Both halves matter and neither is enough alone. A conjuring pilot that stopped inventing ids
+    would leave ``refused`` at 0 and the ``ref`` column decorative again, which is the state this
+    archetype was added to end. A cycling pilot that started inventing them would refuse the
+    control arm's moves too, and the benchmark's validity check — the blind pilot reaching the
+    same pivots in both arms — would be comparing two damaged runs rather than two clean ones.
+
+    Pinning the *cadence* rather than only the fact is what separates the mixed archetype from a
+    pilot refused on every move: the latter executes nothing, and a run that executed nothing
+    measures neither loop.
+    """
+    briefing = _briefing(entities=3)
+    offered = {view.entity_id for view in briefing.entities}
+    conjuring, cycling = ConjuringPilot(6), CyclingPilot(6)
+
+    invented: list[int] = []
+    for move_number in range(1, 7):
+        conjured = asyncio.run(conjuring.propose(briefing))
+        cycled = asyncio.run(cycling.propose(briefing))
+        assert isinstance(conjured, RunPivot) and isinstance(cycled, RunPivot)
+        assert cycled.entity_id in offered, "the control pilot named an entity nobody showed it"
+        if conjured.entity_id not in offered:
+            invented.append(move_number)
+
+    assert invented == [3, 6], invented
+
+
+def test_every_pilot_concludes_rather_than_failing_on_a_briefing_with_no_entities() -> None:
     """``_cross_product`` divides by the entity count, so an empty briefing is a ZeroDivisionError
     one guard away. A pilot that raises is recorded by the mediator as a refused move and a halted
-    session, which would show up in the table as the machinery having stopped the run."""
+    session, which would show up in the table as the machinery having stopped the run.
+
+    Asserted of the conjuring archetype too, and there it is worse than a wrong number: that pilot
+    is the one whose row is *expected* to carry refusals, so a raised exception would be counted
+    into the very column this benchmark now reports and read as the thing it was measuring.
+    """
     empty = _briefing(entities=0)
 
     assert isinstance(asyncio.run(CyclingPilot(4).propose(empty)), Conclude)
     assert isinstance(asyncio.run(MemoryAwarePilot(4).propose(empty)), Conclude)
+    assert isinstance(asyncio.run(ConjuringPilot(4).propose(empty)), Conclude)
 
 
 def test_a_pilot_out_of_moves_concludes_instead_of_proposing() -> None:
     assert isinstance(asyncio.run(CyclingPilot(0).propose(_briefing(entities=1))), Conclude)
     assert isinstance(asyncio.run(MemoryAwarePilot(0).propose(_briefing(entities=1))), Conclude)
+    assert isinstance(asyncio.run(ConjuringPilot(0).propose(_briefing(entities=1))), Conclude)
 
 
 def test_the_exhausted_families_are_matched_by_containment_not_by_equality() -> None:
@@ -295,6 +475,27 @@ def test_the_redundancy_rate_is_zero_rather_than_undefined_when_nothing_executed
     assert measurement.redundancy_rate == 0.0
 
 
+def test_a_refused_move_leaves_the_redundancy_rate_alone_rather_than_diluting_it() -> None:
+    """The denominator is the pivots that ran, and adding the refusals to it is the plausible
+    wrong answer — the moves are what the row's first column reports, so a reader summing the
+    columns would arrive at exactly it.
+
+    It is the wrong answer because a refused move executed nothing, so counting it as a
+    non-repeat credits the pilot with tidiness for work no connector ever did — the same
+    accounting error, in the opposite direction, that ``_count`` avoids by refusing to put a
+    refused pivot into ``seen``. Asserted as *identity between two measurements* rather than
+    against a literal, because the property is that the refusals make no difference at all.
+    """
+    clean = _measurement("plain", "cycling", allowance=32, moves=32, distinct=30, repeats=2)
+    refused = _measurement(
+        "plain", "conjuring", allowance=48, moves=48, distinct=30, repeats=2, refused=16
+    )
+
+    assert refused.refused == 16, "the refused measurement was built without any refusals in it"
+    assert refused.redundancy_rate == clean.redundancy_rate
+    assert refused.redundancy_rate == pytest.approx(2 / 32)
+
+
 # --- the world both arms start from ------------------------------------------
 
 
@@ -339,18 +540,24 @@ def test_two_worlds_built_for_the_two_arms_are_equal_and_share_nothing(tmp_path:
 def test_a_short_loopbench_measures_every_pilot_in_every_arm_once(
     short_run: tuple[LoopMeasurement, ...],
 ) -> None:
-    """Two arms times two pilots, and both arms given the same allowance.
+    """Two arms times three pilots, and both arms given the same allowance.
 
     The equal allowance is the precondition for everything the report says. If the plain arm were
     handed the segment ceiling rather than the total, the evolution arm would win on move count
     alone and the table would read as the machinery having found more.
+
+    The set is spelled out rather than counted because it is also the only place the sweep's
+    membership is checked: an archetype defined but never added to ``PILOTS`` would be tested to
+    death here and exercise nothing the benchmark prints.
     """
-    assert len(short_run) == 4
+    assert len(short_run) == 6
     assert {(item.arm, item.pilot) for item in short_run} == {
         ("plain", "cycling"),
         ("evolution", "cycling"),
         ("plain", "memory-aware"),
         ("evolution", "memory-aware"),
+        ("plain", "conjuring"),
+        ("evolution", "conjuring"),
     }
     assert {item.allowance for item in short_run} == {6}
 
@@ -411,17 +618,221 @@ def test_the_control_holds_where_the_machinery_demonstrably_moves_the_other_pilo
     assert cycling_evolution.moves == cycling_evolution.allowance
 
 
-def test_the_two_pilots_are_indistinguishable_in_the_plain_arm(
+def test_the_blind_and_the_aware_pilot_are_indistinguishable_in_the_plain_arm(
     long_run: tuple[LoopMeasurement, ...],
 ) -> None:
     """The plain arm has no context to read, so the aware pilot degenerates into the blind one
-    there. That is what isolates the difference reported for it to the memory alone."""
+    there. That is what isolates the difference reported for it to the memory alone.
+
+    Named for the two archetypes it means rather than for their number. The conjuring pilot is
+    deliberately not one of them: it diverges from both by being refused, which is a difference
+    the *pilot* made and not one either arm did.
+    """
     arms = _by_arm(long_run)
     blind, aware = arms[("plain", "cycling")], arms[("plain", "memory-aware")]
 
     assert blind.distinct_pivots == aware.distinct_pivots
     assert blind.repeated_pivots == aware.repeated_pivots
     assert blind.moves == aware.moves
+
+
+# --- the refusal accounting --------------------------------------------------
+
+
+def test_every_ruling_against_a_pilot_that_only_conjures_is_the_unknown_entity_refusal(
+    refused_session: PilotSession,
+) -> None:
+    """THE ANTI-VACUITY CHECK FOR EVERY REFUSAL FIGURE BELOW.
+
+    A suite that only counted refusals would be exactly as green if the mediator were rejecting
+    these moves as *malformed*. That would pin the vocabulary check — a real control, on a
+    different code path, refusing before ``_validate`` ever returns — while the pivot refusal
+    the ``ref`` column actually reports stayed untested, and the module's docstring would still
+    read as though it had been measured.
+
+    ``RunPivot.entity_id`` is an unconstrained string, so an invented id is a *well-formed* move
+    and reaches ``_apply_pivot``, which asks the graph and refuses what it does not hold. Naming
+    that status is what keeps the two refusals apart.
+    """
+    statuses = {turn.ruling.status for turn in refused_session.transcript}
+
+    assert statuses == {RulingStatus.REFUSED_UNKNOWN_ENTITY}, statuses
+    assert all(isinstance(turn.move, RunPivot) for turn in refused_session.transcript), (
+        "the mediator recorded a move it could not parse, so this refused for the wrong reason"
+    )
+
+
+def test_a_refused_pivot_costs_a_move_and_a_streak_of_them_does_not_end_the_session(
+    refused_session: PilotSession,
+) -> None:
+    """Half of what :class:`LoopMeasurement` claims: the proposal cost a move.
+
+    One turn per proposal is what makes ``moves`` the moves *taken* rather than the moves that
+    worked, and the ceiling is what proves the turns were spent rather than skipped. The run is
+    twice the malformed tolerance long precisely so the second assertion can be made: an
+    unknown-entity refusal is ruled inside ``_apply``, after ``_validate`` has already succeeded
+    and reset the streak, so it never counts towards the guard that ends a session. Were that to
+    change, this run would stop at the tolerance and the benchmark would quietly be reporting a
+    shorter run than the one it was asked for — as the machinery's doing, in the evolution arm.
+    """
+    assert len(refused_session.transcript) == _REFUSED_RUN_MOVES
+    assert refused_session.concluded is False
+    assert "ceiling" in (refused_session.halted_reason or ""), refused_session.halted_reason
+
+
+def test_a_run_of_nothing_but_refusals_executes_no_pivot_and_spends_no_budget(
+    refused_measurement: LoopMeasurement,
+) -> None:
+    """The other half: the move executed no pivot, and the budget is the independent witness.
+
+    ``_count`` credits a pivot into ``seen`` only when the ruling accepted it, and a version that
+    forgot the second condition would report distinct pivots for work no connector ever did —
+    crediting a pilot for exactly the work the docstring says a benchmark counting proposals
+    would credit it for. The budget cannot be talked into agreeing: ``_apply_pivot`` refuses
+    before the engine is reached, so an executed pivot is a spent one and 0.0 here means none ran.
+
+    ``redundancy_rate`` is asserted on a real run of this shape and not only on a hand-built
+    measurement, because it is the column a reader compares across pilots, and a refusal-heavy
+    run divides by fewer executed pivots than it took moves.
+    """
+    assert refused_measurement.moves == _REFUSED_RUN_MOVES
+    assert refused_measurement.refused == _REFUSED_RUN_MOVES
+    assert refused_measurement.accepted == 0
+    assert refused_measurement.distinct_pivots == 0
+    assert refused_measurement.repeated_pivots == 0
+    assert refused_measurement.entities_discovered == 0
+    assert refused_measurement.evidence_sealed == 0
+    assert refused_measurement.budget_spent == 0.0, (
+        "a refused pivot reached the engine, so the refusal is not before the connector"
+    )
+    assert refused_measurement.redundancy_rate == 0.0
+
+
+def test_every_measurement_accounts_for_each_move_as_either_accepted_or_refused(
+    short_run: tuple[LoopMeasurement, ...],
+) -> None:
+    """The arithmetic that makes the docstring's claim true of the benchmark and not of one probe.
+
+    ``accepted`` and ``refused`` are counted turn by turn from the rulings while ``moves`` is the
+    length of the transcript, so the three agreeing is the evidence that no move was counted
+    twice or dropped — in either arm, where the evolution arm sums its counts across segments and
+    a lost segment would show up here and nowhere else on the table.
+
+    The identity is trivially satisfied by a sweep in which nothing was ever refused, which is the
+    state this file was in until the third archetype existed, so the last assertion is what stops
+    it going quietly back to being about nothing.
+    """
+    for item in short_run:
+        assert item.accepted + item.refused == item.moves, item
+
+    assert any(item.refused for item in short_run), (
+        "no cell in the sweep was refused anything, so the identity above holds vacuously"
+    )
+
+
+def test_the_conjuring_pilot_is_refused_on_some_of_its_moves_and_accepted_on_others(
+    short_run: tuple[LoopMeasurement, ...],
+) -> None:
+    """The sweep's new row is a lie in one direction or the other unless both are true.
+
+    With no refusals it is the cycling row under a second name, and ``ref`` is decoration again.
+    With nothing but refusals it executes no pivot, and a row whose every other column is 0
+    describes neither loop while looking like a measurement of both.
+
+    The divergence between the moves taken and the pivots executed is asserted inside a single
+    run, which is the whole reason the archetype is mixed rather than pure: it needs no second
+    run to compare against, so it cannot be explained by the two runs differing.
+
+    The split is pinned to the cadence rather than bounded away from zero, and the evolution arm
+    is the reason. "Some refusals and some acceptances" is satisfied by *any* division of the
+    moves, so an arm that swapped the two counters, or reported a single refusal out of six, read
+    as correct — and the evolution arm is where that matters most, because it sums its counters
+    across segments and a segment counted into the wrong column shows up nowhere else. Derived
+    from ``CONJURE_EVERY`` rather than written as 2, so a change to the cadence moves the pilot
+    and this assertion together instead of leaving one describing the other.
+    """
+    arms = _by_arm(short_run)
+
+    for arm in ("plain", "evolution"):
+        item = arms[(arm, "conjuring")]
+        expected_refused = item.moves // ConjuringPilot.CONJURE_EVERY
+        assert expected_refused > 0, "this run is too short to contain a conjured move at all"
+        assert item.refused == expected_refused, (
+            f"{arm}: {item.refused} refusals over {item.moves} moves is not the pilot's cadence"
+        )
+        assert item.accepted == item.moves - expected_refused, (
+            f"{arm}: accepted and refused do not divide the moves the way the pilot proposed them"
+        )
+        assert item.moves > item.distinct_pivots + item.repeated_pivots, (
+            f"{arm}: every move taken executed a pivot, so no move was spent on a refusal"
+        )
+
+
+def test_a_refused_run_is_exactly_as_redundant_as_a_clean_run_that_did_the_same_work(
+    long_run: tuple[LoopMeasurement, ...], equal_work_control: LoopMeasurement
+) -> None:
+    """The ``redun%`` column's own docstring, which said the opposite of this until it was
+    measured.
+
+    It claimed a refused pilot "divides by fewer executed pivots and scores better", inviting a
+    reader to discount the number. Both halves were wrong. Dividing the same repeats by fewer
+    executed pivots *raises* the rate, and there is nothing to discount: distinct pivots saturate
+    at what the world can answer, so past that point every executed pivot is a repeat and the
+    rate is a function of walk length alone. The refusals shortened the walk; they did not
+    flatter the rate, and a reader who applied the stated correction would move further from the
+    truth than one who read the number as printed.
+
+    Asserted as an identity against a run that executed the same number of pivots without being
+    refused once, because that is the only comparison that isolates the refusals — and asserted
+    against the row ``compare`` actually prints beside it, which is the *wrong* comparison and
+    the reason the caveat has to name which one it is. Adding ``refused`` to the denominator, the
+    plausible wrong answer, breaks the first assertion and not the second.
+
+    This is also the only assertion in the file on a long-run conjuring cell: every other refusal
+    figure is checked at six moves, where nothing has repeated yet and the rate is 0.0 whatever
+    the denominator is.
+    """
+    arms = _by_arm(long_run)
+    refused, same_allowance = arms[("plain", "conjuring")], arms[("plain", "cycling")]
+    executed = refused.distinct_pivots + refused.repeated_pivots
+
+    assert refused.refused > 0, "the conjuring cell was refused nothing, so this compares nothing"
+    assert refused.repeated_pivots > 0, "nothing repeated here, so every rate below is 0.0"
+    assert equal_work_control.refused == 0, "the control was refused too, so it controls for it"
+    assert equal_work_control.moves == executed
+    assert equal_work_control.distinct_pivots + equal_work_control.repeated_pivots == executed
+
+    assert refused.redundancy_rate == equal_work_control.redundancy_rate, (
+        "the refusals changed the rate, so they are in the denominator where only pivots belong"
+    )
+    assert refused.redundancy_rate == pytest.approx(refused.repeated_pivots / executed)
+    assert refused.redundancy_rate < same_allowance.redundancy_rate, (
+        "the row printed beside it reads the same, so the caveat about which to compare is moot"
+    )
+
+
+def test_the_machinery_did_not_cut_the_refused_run_short(
+    long_run: tuple[LoopMeasurement, ...],
+) -> None:
+    """The negative result, pinned so that prose cannot drift into claiming the opposite.
+
+    A loop that segmented a run, watched its yield and redirected it is the kind of thing a
+    reader expects to have *noticed* a pilot being refused a third of its moves. It does not: a
+    refusal is ruled below the seam, costs a move, spends no budget, and reaches the evolution
+    plane only as a turn that produced nothing. So the refused pilot spends its whole allowance
+    here, exactly as the never-refused control does, and the module says so rather than implying
+    the machinery limited the damage.
+    """
+    arms = _by_arm(long_run)
+    refused, control = arms[("evolution", "conjuring")], arms[("evolution", "cycling")]
+
+    assert refused.refused > 0, "nothing was refused, so this says nothing about a refused run"
+    assert refused.moves == refused.allowance, (
+        "the refused run stopped early; the module docstring says it does not"
+    )
+    assert control.moves == control.allowance, (
+        "the control stopped early too, so the line above is about the length and not the refusals"
+    )
 
 
 # --- the report --------------------------------------------------------------
@@ -502,7 +913,13 @@ def test_the_caveats_are_printed_before_the_table_and_not_beneath_it() -> None:
 def test_the_rendered_table_carries_one_row_per_measurement(
     short_run: tuple[LoopMeasurement, ...],
 ) -> None:
-    """A renderer that silently dropped a row would hide exactly the arm that went badly."""
+    """A renderer that silently dropped a row would hide exactly the arm that went badly.
+
+    Every pilot is counted by name, not just the rows totalled. ``len(rows) == len(short_run)``
+    stays true on its own however many archetypes there are, so the conjuring rows — the ones
+    that went badly, and the only ones carrying a non-zero ``ref`` — could go missing under an
+    assertion whose stated purpose is that they cannot.
+    """
     lines = render(short_run).splitlines()
     header = next(
         index for index, line in enumerate(lines) if line.split()[:3] == ["moves", "arm", "pilot"]
@@ -512,3 +929,37 @@ def test_the_rendered_table_carries_one_row_per_measurement(
     assert len(rows) == len(short_run)
     assert sum("cycling" in row for row in rows) == 2
     assert sum("memory-aware" in row for row in rows) == 2
+    assert sum("conjuring" in row for row in rows) == 2
+
+
+def test_the_rendered_ok_and_ref_columns_carry_what_the_measurement_counted(
+    short_run: tuple[LoopMeasurement, ...],
+) -> None:
+    """The ``ref`` column is the whole reason the third archetype exists, and nothing read it.
+
+    Every other test in this file asserts on :class:`LoopMeasurement`, which is upstream of the
+    renderer. So the counting could be perfect and the table still print a literal 0 there — the
+    exact state the ``ref`` column was in before this pilot shipped, and one that would restore
+    it silently. The same hole covers ``ok``: a formatter that printed ``accepted`` in both slots
+    would show a pilot refusing everything it accepted, and no assertion here would move.
+
+    Read by whitespace position rather than by column offset, so it fails on a lost value and not
+    on a widened field, and paired with the measurements by index because ``render`` iterates the
+    results in order — which makes a reordered table a failure here too, and it should be: a row
+    is only readable if it belongs to the run whose name it carries.
+    """
+    lines = render(short_run).splitlines()
+    header = next(
+        index for index, line in enumerate(lines) if line.split()[:3] == ["moves", "arm", "pilot"]
+    )
+    rows = [line for line in lines[header + 1 :] if line.strip()]
+
+    assert any(item.refused for item in short_run), (
+        "no cell in this sweep was refused anything, so the ref column below is all zeros"
+    )
+    for row, item in zip(rows, short_run, strict=True):
+        moves, arm, pilot, ok, ref = row.split()[:5]
+        assert (arm, pilot) == (item.arm, item.pilot), row
+        assert moves == str(item.moves), row
+        assert ok == str(item.accepted), f"the ok column is not the accepted count: {row}"
+        assert ref == str(item.refused), f"the ref column is not the refused count: {row}"

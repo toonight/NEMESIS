@@ -14,24 +14,39 @@ evolution arm is `EvolutionController.run`: the same moves cut into bounded segm
 `continue_session`, with a `ResearchContext` projected into each briefing. Nothing else
 differs, so anything that differs is the machinery.
 
-**Why two pilots and not one.** The memory is a *briefing field*. The plane cannot make a
+**Why three pilots and not one.** The memory is a *briefing field*. The plane cannot make a
 pilot read it — that is the containment property the seam exists for, and it is also the
 mechanism's limit. A benchmark with one pilot would report that limit as either a success or
-a failure depending on which pilot it happened to pick. So both archetypes run through both
+a failure depending on which pilot it happened to pick. So every archetype runs through both
 arms:
 
 - :class:`CyclingPilot` ignores the context entirely and will therefore repeat itself.
 - :class:`MemoryAwarePilot` reads ``exhausted_directions`` and skips what is in it.
+- :class:`ConjuringPilot` ignores it too, and every third move pivots on an entity it
+  invented — which the mediator refuses before any connector runs.
 
-The interesting cell is the interaction. If the memory works mechanically, the aware pilot
-differs between arms and the blind pilot does not — and that pair of results says something
-neither alone can.
+The interesting cell is the interaction between the first two. If the memory works
+mechanically, the aware pilot differs between arms and the blind pilot does not — and that
+pair of results says something neither alone can. The third pilot is not part of that pair.
+It is here because every field of :class:`LoopMeasurement` claims to be counted from the
+mediator's rulings rather than from what a pilot proposed, and with only cooperating pilots
+shipped that claim had never once been exercised: ``refused`` was 0 in every cell this
+benchmark had ever printed, and the ``ref`` column was decoration.
+
+What that archetype settles is the accounting and nothing beyond it, and the rest is worth
+stating as the negative it is: **the machinery does not limit a pilot that keeps proposing
+work it will be refused for.** The refusals cost moves and no budget, and nothing above the
+mediator reacted to them — at 12, 24 and 48 allowed moves the evolution arm spent the refused
+pilot's entire allowance, and at 72 it ran to move 66 where the never-refused pilot stopped at
+60, because refusals slow the arrival of repeats and so *delay* the plateau the detector is
+watching for. Being refused is a fact about the pilot; the loop neither notices it nor is
+meant to.
 
 **What this cannot tell you**, stated here because a benchmark's caveats belong above its
 numbers and not beneath them:
 
-- Nothing about a frontier model. Both pilots are fixed policies; a model's behaviour is not
-  a policy and the difference is the whole reason the milestone wanted one.
+- Nothing about a frontier model. All three pilots are fixed policies; a model's behaviour is
+  not a policy and the difference is the whole reason the milestone wanted one.
 - Nothing about long horizons. The fixture world is exhausted in tens of pivots, so a
   "plateau" here is mostly the world running out, which is a property of the corpus.
 - Nothing about whether the *directives* help. Eight of the nine directive types change only
@@ -98,7 +113,7 @@ is what the memory exists to notice.
 """
 
 
-# --- the two pilot archetypes ------------------------------------------------------
+# --- the three pilot archetypes ----------------------------------------------------
 
 
 class CyclingPilot:
@@ -161,6 +176,74 @@ class MemoryAwarePilot:
         # Every family is spent. Concluding is the honest move, and a pilot that kept going
         # here would be manufacturing the redundancy this arm exists to avoid.
         return Conclude(summary="every direction the briefing offers is exhausted")
+
+
+class ConjuringPilot:
+    """The cycling policy, except that every third move pivots on an entity it invented.
+
+    :class:`LoopMeasurement` claims every one of its fields is counted from the mediator's own
+    rulings rather than from what a pilot said it would do, because a refused proposal costs a
+    move and executes no pivot. Both cooperating archetypes only ever name an entity the
+    briefing surfaced, so that claim was never exercised end to end — ``refused`` was 0 in every
+    cell and the ``ref`` column of the table was decoration. This archetype is what makes the
+    claim measurable: the gap between :attr:`LoopMeasurement.moves` and the pivots actually
+    executed opens up inside a single run.
+
+    A pilot naming an entity it was never shown is the canonical untrusted-pilot failure the
+    seam exists for (invariant 5). The briefing is the only place a pilot learns what exists,
+    and ``PilotMediator._apply_pivot`` refuses an id the graph does not hold before it reaches a
+    connector — so this is a realistic failure to script rather than a contrived one.
+
+    Mixed rather than pure. A pilot refused on every move executes nothing, and a run that
+    executed nothing measures neither loop; two moves in three land here, so one run carries
+    the work and the waste together and the divergence between them is visible without
+    comparing runs.
+
+    Like :class:`CyclingPilot` it does **not** read the research context, and that is
+    deliberate: refusals are then the only thing that differs between the two archetypes, so
+    whatever the table shows for this one and not for that one is attributable to them.
+    """
+
+    name = "conjuring"
+
+    CONJURED_ENTITY_ID = "ent_conjured_by_the_pilot"
+    """An id no world in this benchmark can hold — :func:`_build_world` mints its entity ids
+    through ``new_id``. Well-formed enough to be routed like any other, so the refusal is the
+    mediator ruling on an invented lead and never a name collision or a rejected shape."""
+
+    CONJURE_EVERY = 3
+    """Moves per conjured one.
+
+    A conjured move does **not** advance the cross-product walk, and that is load-bearing rather
+    than incidental. Advancing it was measured first: three divides the six families, so the
+    conjured moves landed on ``PIVOT_CYCLE[2]`` and ``PIVOT_CYCLE[5]`` and on nothing else at
+    every run length, and those two families were then never executed once. That is not the
+    cycling policy with a third of its moves refused — it is a policy that permanently lost a
+    third of its vocabulary, which would have made the missing families a second new variable
+    beside the refusals and left neither of them isolated. Leaving the walk in place keeps the
+    pivots this pilot executes identical to the ones :class:`CyclingPilot` executes.
+    """
+
+    def __init__(self, moves: int) -> None:
+        self._remaining = moves
+        self._index = 0
+        self._proposed = 0
+
+    async def propose(self, briefing: Briefing) -> PilotMove:
+        if self._remaining <= 0 or not briefing.entities:
+            return Conclude(summary="out of moves")
+        self._remaining -= 1
+        self._proposed += 1
+
+        entity, family = _cross_product(briefing, self._index)
+        if self._proposed % self.CONJURE_EVERY == 0:
+            return RunPivot(
+                entity_id=self.CONJURED_ENTITY_ID,
+                pivot_type=family,
+                rationale="scripted, naming an entity no briefing surfaced",
+            )
+        self._index += 1
+        return RunPivot(entity_id=entity, pivot_type=family, rationale="scripted")
 
 
 def _cross_product(briefing: Briefing, index: int) -> tuple[str, PivotType]:
@@ -232,7 +315,25 @@ class LoopMeasurement:
 
     @property
     def redundancy_rate(self) -> float:
-        """Repeats as a share of executed pivots. The headline number for the memory claim."""
+        """Repeats as a share of executed pivots. The headline number for the memory claim.
+
+        The denominator is the pivots that *ran*, so a refused move neither raises nor lowers
+        this number — it shortens the walk behind it. This docstring got that backwards once,
+        and wrongly in both halves: it said a refused pilot "divides by fewer of them and scores
+        better", but dividing the *same* repeats by fewer executed pivots raises the rate (the
+        cycling pilot's 18 repeats over its own 48 executed is 37.5%, over 32 it is 56.2%), and
+        there is no distortion to correct for in the first place. Distinct pivots saturate at
+        what the world can answer, so past that point every executed pivot is a repeat and this
+        rate is a function of walk length alone: the conjuring pilot *given* 48 moves executes
+        32 of them and reads 6.2%, which is exactly what the cycling pilot reads when it is
+        given 32.
+
+        So the column is safe to read down an arm and unsafe to read across pilots, because
+        :func:`compare` pairs rows on the allowance and the cycling pilot at that same allowance
+        of 48 reads 37.5%. :attr:`refused` is what tells a reader which of those two comparisons
+        they are making — the honest control for a refused row is a clean run of equal *executed*
+        length, which is not a row this table prints.
+        """
         executed = self.distinct_pivots + self.repeated_pivots
         return self.repeated_pivots / executed if executed else 0.0
 
@@ -427,6 +528,7 @@ async def run_evolution_arm(
 PILOTS: Final[tuple[tuple[str, Callable[[int], object]], ...]] = (
     ("cycling", lambda moves: CyclingPilot(moves)),
     ("memory-aware", lambda moves: MemoryAwarePilot(moves)),
+    ("conjuring", lambda moves: ConjuringPilot(moves)),
 )
 
 RUN_LENGTHS: Final = (2, 4, 8, 12)
@@ -472,12 +574,24 @@ async def run_loopbench(
 
 CAVEATS: Final = (
     "WHAT THIS CANNOT TELL YOU",
-    "  No frontier model was involved: both pilots are fixed policies, and a model's",
+    "  No frontier model was involved: all three pilots are fixed policies, and a model's",
     "  behaviour is not a policy.",
     "  The fixture world holds 37 answerable (pivot type, entity) pairs, so nothing here is a",
     "  long-horizon result and a plateau is mostly the corpus running out.",
-    "  Both pilots enumerate a fixed cross-product, so their coverage is policy-determined and",
-    "  no memory could improve it. This can see waste avoided; it cannot see coverage gained.",
+    "  All three pilots enumerate a fixed cross-product, so their coverage is policy-determined",
+    "  and no memory could improve it. This can see waste avoided; it cannot see coverage",
+    "  gained.",
+    "  A refused move costs a move and executes no pivot, so for the conjuring pilot moves and",
+    "  executed pivots are different columns. redun% divides by the pivots that ran: read it",
+    "  down an arm, never across pilots. At 48 allowed it reads 6.2% against cycling's 37.5%,",
+    "  but 6.2% is also what cycling reads when it is *given* 32 moves — the refusals moved the",
+    "  walk length, not the rate. The honest control is a clean run of equal executed length,",
+    "  and this table does not print one.",
+    "  The refusals are one scripted failure, an invented entity id every third move. That the",
+    "  accounting survives it says the accounting is right; the cadence is a dial nobody has",
+    "  measured against a model, so no rate in the ref column predicts anything.",
+    "  The loop did not limit the refused pilot: it spent its whole allowance at 12, 24 and 48,",
+    "  and at 72 ran to move 66 where the never-refused pilot stopped at 60.",
     "  Eight of nine directive types change only briefing wording, so a scripted pilot cannot",
     "  respond to them and this measures nothing about redirection.",
 )
@@ -536,6 +650,7 @@ __all__ = [
     "PILOTS",
     "PIVOT_CYCLE",
     "RUN_LENGTHS",
+    "ConjuringPilot",
     "CyclingPilot",
     "LoopMeasurement",
     "MemoryAwarePilot",
