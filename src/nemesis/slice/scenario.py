@@ -164,6 +164,7 @@ from nemesis.core.provenance import (
 from nemesis.core.relationships import (
     Explanation,
     PivotMethod,
+    PivotSelectivity,
     Relationship,
     RelationType,
 )
@@ -199,6 +200,12 @@ from nemesis.pursuit.engine import (
 )
 from nemesis.pursuit.investigation import IncidentSeed, Investigation
 from nemesis.pursuit.materialize import MaterializationResult, materialize
+from nemesis.pursuit.resurgence import (
+    ResurgenceAssessment,
+    ResurgenceEngine,
+    ResurgenceSignal,
+    ResurgenceSignalKind,
+)
 from nemesis.resolve.engine import (
     HumanIdentityRefusal,
     PersonaLinkageAssessment,
@@ -247,6 +254,13 @@ CAPABILITY_LIFETIME: Final = timedelta(hours=4)
 CASE_AUTHORITY_REFERENCE: Final = "SIMULATED-CASE-GLASS-ANVIL-2026-0042"
 
 RESURGENCE_RULE: Final = "resurgence.shared-artifact-reconnection"
+
+TRACKED_CAMPAIGNS: Final = 40
+"""How many campaigns the resurgence assessment compares this cluster against.
+
+A stated assumption rather than a measurement, and the number the prior divides by. Forty is
+the order of magnitude a small team tracks; a larger corpus makes every prior smaller and the
+same evidence less conclusive, which is the direction honesty runs in."""
 RESURGENCE_RULE_VERSION: Final = "0.1.0"
 
 _SENSOR_REPLAY_METHOD: Final = CollectionMethod(
@@ -628,6 +642,14 @@ class ResurgenceStage(BaseModel):
     links: tuple[ResurgenceLink, ...]
     reconnected_by: tuple[str, ...]
     not_reconnected_by: tuple[str, ...]
+    assessment: ResurgenceAssessment
+    """The scored judgement, from the same two artifacts the narrative above reconnects on.
+
+    The stage's prose was hand-written for this scenario and says *that* the reconnection
+    happened; this says how strongly it is supported, through the same fusion, independence
+    collapse and robustness margin every other conclusion in this platform goes through. The
+    two are deliberately produced side by side: the day they disagree, the narrative is
+    wrong."""
 
 
 # --------------------------------------------------------------------------------------
@@ -2756,6 +2778,7 @@ async def _resurgence(
             f"PGP fingerprint {PGP_FINGERPRINT}",
         ),
         not_reconnected_by=_NOT_RECONNECTED_BY,
+        assessment=_resurgence_assessment(as_of=as_of),
     )
 
 
@@ -2995,4 +3018,61 @@ def run_glass_anvil_scenario(
             total_budget=total_budget,
             max_steps=max_steps,
         )
+    )
+
+
+def _resurgence_assessment(*, as_of: datetime) -> ResurgenceAssessment:
+    """Score the reconnection with the engine, from the same two artifacts the stage names.
+
+    The certificate is the strong half: a private key is not shared by accident, it is globally
+    unique by construction, and the observation is our own sensor's rather than a channel an
+    adversary could write into. The PGP fingerprint is the weak half and is scored as such —
+    republishing a public value demonstrates nothing about holding the key, and it is the
+    cheapest way to make a new operation look like an old one.
+
+    That second signal is also what makes the finding INTERNAL_LEAD rather than a deliverable:
+    it names a persona, and persona linkage is an investigative lead under founder decision D1.
+    The assessment carries the classification of its most restricted part, so the wrapper cannot
+    publish what its contents may not say.
+    """
+    return ResurgenceEngine().assess(
+        campaign=SCENARIO_SUBJECT,
+        signals=(
+            ResurgenceSignal(
+                kind=ResurgenceSignalKind.SHARED_PRIVATE_KEY,
+                shared_attribute=f"tls-certificate:{CERT_FINGERPRINT}",
+                selectivity=PivotSelectivity(
+                    attribute=f"tls-certificate:{CERT_FINGERPRINT}",
+                    is_globally_unique=True,
+                ),
+                observed_by=SourceDescriptor(
+                    source_class=SourceClass.OWN_SENSOR,
+                    identifier="nemesis-resurgence-watch",
+                    reliability=SourceReliability.COMPLETELY_RELIABLE,
+                ),
+                new_entity_type=EntityType.IP_ADDRESS,
+                new_entity_key=RESURGENCE_IP,
+                prior_entity_key=CLUSTER_IP,
+                extent=TemporalExtent.at(as_of),
+            ),
+            ResurgenceSignal(
+                kind=ResurgenceSignalKind.SHARED_PUBLISHED_FINGERPRINT,
+                shared_attribute=f"pgp:{PGP_FINGERPRINT}",
+                selectivity=PivotSelectivity(
+                    attribute=f"pgp:{PGP_FINGERPRINT}",
+                    is_globally_unique=True,
+                ),
+                observed_by=SourceDescriptor(
+                    source_class=SourceClass.DARK_WEB,
+                    identifier=FORUM_RESURGENT,
+                    reliability=SourceReliability.FAIRLY_RELIABLE,
+                ),
+                new_entity_type=EntityType.PERSONA,
+                new_entity_key=PERSONA_RESURGENT,
+                prior_entity_key=PERSONA_CURRENT,
+                extent=TemporalExtent.at(as_of),
+            ),
+        ),
+        candidate_population=TRACKED_CAMPAIGNS,
+        assessed_at=as_of,
     )

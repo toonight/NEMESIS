@@ -832,3 +832,39 @@ def test_the_investigation_itself_is_on_disk_when_the_run_ends(
 
     claims = run(JournalBackedClaimStore.open(workspace))
     assert len(claims.claims()) == len(result.stores.claims.claims())
+
+
+def test_the_resurgence_stage_is_scored_by_the_engine_not_only_narrated(
+    result: ScenarioResult,
+) -> None:
+    """Phase 8's prose says the reconnection happened; the engine says how well supported it is.
+
+    The two are produced side by side from the same two artifacts, so the day they disagree the
+    narrative is wrong. What the engine adds is the discipline every other conclusion here goes
+    through: a prior that falls with the size of the tracked corpus, collapse of signals from
+    one generating process, and the robustness margin.
+
+    Note the disclosure. The certificate is infrastructure and deliverable; the PGP fingerprint
+    names a persona, and persona linkage is an investigative lead under founder decision D1. The
+    assessment takes the classification of its most restricted part, so this finding cannot be
+    published as it stands — which is the wrapper being stopped from saying what its contents
+    may not.
+    """
+    from nemesis.core.confidence import ConfidenceBand
+    from nemesis.core.disclosure import DisclosureClass
+
+    assessment = result.resurgence.assessment
+
+    assert assessment.band is ConfidenceBand.VERY_LIKELY
+    assert assessment.is_actionable
+    assert not assessment.is_single_origin
+
+    # It survived the margin because the certificate came from our own sensor, which an
+    # adversary can cause an observation in but cannot author a record in.
+    assert not assessment.fusion.rests_only_on_plantable_evidence
+
+    assert assessment.disclosure is DisclosureClass.INTERNAL_LEAD
+    assert assessment.rests_on_internal_material
+
+    # A finding with no competing account on the page is an argument, not an assessment.
+    assert len(assessment.alternatives) >= 2
