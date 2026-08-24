@@ -29,6 +29,19 @@ answer and is deliberately not attempted here: it would relocate the repository'
 safety-critical arithmetic in the same change that adds a feature, turning the calibration
 freeze red across the whole diff at exactly the moment a reviewer's attention is worst.
 
+**A limitation the local bench measured, and it is not small.** The robustness margin keeps a
+fact attested by a channel an adversary cannot author, and
+:attr:`~nemesis.core.provenance.SourceDescriptor.is_adversary_influenceable` justifies that by
+saying an adversary "can cause an observation but cannot author the record". For artifact-borne
+signals those two come apart. :mod:`nemesis.calibration.localbench` runs a framer — a different
+operator who copies another's public key and kit — and our own sensor honestly observes both
+artifacts, so the margin leaves them standing and this engine calls the framer a resurgence of
+the party they framed. **2 of 3 adversarial pairs on that bench.**
+
+The margin's model is about who authored the *record*, not who arranged the *fact*, and causing
+the observation turns out to be enough. Nothing here fixes it: the fix is a threat-model change
+rather than a constant, and it belongs in an ADR rather than in a quiet edit to a ceiling.
+
 **Disclosure travels with the evidence.** An assessment resting on a persona signal takes the
 persona's classification. The wrapper does not get to publish what its contents may not say,
 and this is the one place a resurgence finding could have laundered an internal lead into a

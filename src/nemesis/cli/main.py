@@ -1047,6 +1047,39 @@ def memory(
 
 
 @app.command()
+def localbench(
+    operations: Annotated[
+        int, typer.Option(help="Controlled operations to run.", min=3, max=400)
+    ] = 12,
+    workspace: Annotated[
+        Path | None, typer.Option(help="Where to write the range's keys and kits.")
+    ] = None,
+) -> None:
+    """Run controlled operations on a loopback range and score them against the truth.
+
+    The part of milestone 3 that needs no funding, no registrar and no third party. Real keys,
+    real certificates, real TLS handshakes, real kit bytes — and the linkage is ground truth
+    because this command minted it rather than a label attached beside the evidence.
+
+    Everything binds to 127.0.0.1. Nothing is registered anywhere and nothing is contacted.
+
+    It covers three of the seven resurgence signal kinds — the ones whose evidence lives in
+    artifacts we can make. The rest draw their weight from populations counted against the
+    world, which a loopback range does not have and this command will not invent.
+    """
+    import tempfile
+
+    from nemesis.calibration.localbench import run_local_bench
+
+    console = Console()
+    root = Path(workspace) if workspace else Path(tempfile.mkdtemp(prefix="nemesis-bench-"))
+    result = run_local_bench(root, operations=operations)
+    console.print(result.render(), highlight=False)
+    console.print()
+    console.print(Text(f"  range written to {root}", style="dim"))
+
+
+@app.command()
 def verify(
     workspace: Annotated[
         Path | None,
