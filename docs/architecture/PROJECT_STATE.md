@@ -157,6 +157,8 @@ can be until a corpus of resolved cases exists.
 | Long-horizon memory that pays | `IMPLEMENTED` | The claim the plane exists for, and it is visible in the reference run rather than argued: the pilot asks a question no connector can answer, the trajectory records it, the next briefing carries `exhausted_directions`, and the pilot changes direction **without anything having refused it**. Nothing in this plane refuses a move; the mediator does that, and this plane never becomes a second one. |
 | Evolution evaluator | `IMPLEMENTED` (mechanism) / `PROPOSED` (every constant in it) | Seven hard gates, then three lexicographic tiers, over structure a model cannot write. The candidate is an `InvestigationCheckpoint`, deliberately **not** an attribution: optimising attribution confidence is a Goodhart trap that would teach the system to raise a number rather than find out what is true. Robustness (`origin_floor`) is ordered first, so a fragile spectacular finding loses to moderate independent corroboration. |
 | Durable operational memory, classified | `IMPLEMENTED` | `MODEL_GENERATED_OPERATIONAL_MEMORY`, carried in the object as a `Literal`. No `chain_of_thought` field and nowhere for one to go. A long horizon makes prompt injection *durable*, so a channel hint is sanitized, classified, and — if instruction-shaped — kept for the record and never projected into a briefing. What the containment actually rests on is that a directive is a closed enumeration and no string is a member of one. |
+| Evolution: what the loop consults, and what it only records | `IMPLEMENTED` (four mechanisms) / **partly inert** | Counted 2026-08-23, while scoping the benchmark milestone 1 asks for, and recorded here because a benchmark over an inert mechanism measures nothing. **Consulted and acted on:** the lineage (`resume` rebuilds head, memory, step index and the strike counter from it) and the negative-result memory (the evaluator reads `has_tried` into `redundant_pivots`, the detector reads that into `REDUNDANT_WORK`, and the run stops through it). **Recorded but not consulted:** `ScoreVector.ordering_key()` and `best_of()` have no caller outside their own module — deliberately, since `promotes()` says in its own docstring that comparing deltas is the wrong question for a chain and `best_of` is the *sibling* comparison for branching; but branching is itself unwired, so the tiered ordering the ADR presents as the evaluation never runs. **8 of the 9 `DirectiveType` members have zero references outside `supervisor.py`** — only `STOP_LOW_YIELD` reaches a code path — so a redirect changes the next briefing's wording and nothing else. `BranchPortfolio` appears outside its own module exactly once, in a docstring. And after a full reference run **3 of the 10 `ResearchMemory` lists are populated**; two of the seven empty ones, `unresolved_questions` and `contradictory_observations`, are projected into *every* briefing. None of this is a defect in itself — an unwired mechanism is a mechanism waiting for the feature that uses it — but it decides what a measurement of this plane could honestly claim. |
+| Evolution: four defects the plane shipped with | `IMPLEMENTED` (fixed 2026-08-23) | Each reproduced against the shipped code before it was fixed, each pinned in `tests/invariants/test_evolution_detector_defects.py`. The detector summed **four of six** tier-1 terms — `epistemic_key[0]` and `[1]` read positionally, two more named by attribute, and the terms at indices 4 and 5 never added — so a step gaining an evidence-backed claim counted as zero movement and healthy trajectories were assessed as plateaus. Repetition was read from `investigation.all_executed_pivots`, the **cumulative** history, so a family run once counted as repeated for ever; the reference demonstration escaped it only by overriding the window to 3, where the count lands exactly on a strict `>`. The supervisor's two exhaustion guards compared against the *immediately previous* directive, so alternating two postures defeated both permanently and the `STOP_LOW_YIELD` escalation beneath them was unreachable — measured over four consecutive steps with no promotion, no epistemic gain, every candidate rejected and the budget burning. And `_verdict_detail` wrote "the candidate beat the incumbent on the epistemic tier" into the hash-chained lineage on **every** promotion, including ones whose epistemic key was all zeros, although `promotes()` does not compare epistemic tiers and says so. The reference run used to stop at step 6 on a signal firing for the wrong reason; it now runs to step 9 and stops on a genuine plateau. |
 | Evolution adversarial review | `IMPLEMENTED` | Six independent lenses attacked ten design claims; a second pass reproduced each finding rather than confirming it. **25 confirmed, 4 refuted.** All 25 fixed, each pinned by a regression test in `tests/invariants/test_evolution_review_regressions.py`, and **every one of those 17 mutations was seen to go red** before the fix was accepted — 3 of them were vacuous on the first pass and the mutation check is what caught them. |
 | Calibration harness | `IMPLEMENTED` | `nemesis calibrate`. Six structural properties, plus scores that state what they are conditional on. |
 | Robustness margin | `IMPLEMENTED` | A conclusion must survive losing a plantable fact. Laundering false-match rate 100% to 0%. See ADR-0004. |
@@ -365,13 +367,42 @@ them are marked `IMPLEMENTED` in this same document. A milestone list that contr
 status table is the defect this project rejects, wearing the one costume nobody inspects: a
 plan rather than a claim.
 
-1. **Measure single-lineage Evolution against the conventional pilot loop.** The plane exists to
-   make one question answerable — does structured lineage plus explicit evaluation plus
-   negative-result memory plus plateau redirection let a frontier model keep making progress after
-   hundreds of pivots — and *building it does not answer it*. Run both loops over the same fixtures
-   with the same budget and compare pivots per useful discovery, redundant pivots avoided,
-   independent origins reached, and how far into a run each is still moving. This comes **before**
-   multi-model islands, which are `PROPOSED` and whose abstraction is already in place.
+**Milestone 1 rewritten 2026-08-23, for the same reason.** It described a measurement, somebody
+went to take it, and the measurement is not available. Every number below was counted rather
+than estimated.
+
+1. **Make the Evolution question answerable before trying to answer it.** The plane exists to
+   ask whether structured lineage plus explicit evaluation plus negative-result memory plus
+   plateau redirection lets a frontier model keep making progress after hundreds of pivots. The
+   previous wording said to run both loops over the same fixtures and compare. Four things stop
+   that, each measured:
+
+   - **The fixture world holds 37 answerable `(pivot type, entity)` pairs.** Counted directly
+     from `collect/fixtures/glass_anvil.py`: 9 passive-DNS, 8 certificate, 6 dark-web, 5 RDAP,
+     4 network, 3 blockchain, 2 malware. `nemesis demo` consumes most of them in one pass. Past
+     exhaustion a pivot on an unseen key returns an empty success and a repeat returns identical
+     content-addressed ids, so further pivots carry no information. **Hundreds of distinct pivots
+     is not a budget question; the world is not that large.**
+   - **There is no frontier model in the loop to measure.** Every shipped demonstration drives a
+     scripted pilot, and all six provider seats ship with no transport (ADR-0009). What can be
+     measured today is *the loop*; *a model in the loop* is a different and much weaker question,
+     and conflating them is how a benchmark comes to flatter its own harness.
+   - **`pilotbench` is not the harness for it.** It calls `mediator.drive`, which opens a new
+     investigation per call; the comparison needs `continue_session`. Its three nearest metrics
+     are defined incompatibly — `useful_pivots` counts pivots rather than discoveries, redundancy
+     is deduplicated within one session where the evolution notion is across steps, and plateau
+     does not exist there at all. Reusing `score_run` per segment would additionally turn
+     `every_move_was_recorded`, the one property allowed to fail a build, into a false FAIL.
+   - **Several mechanisms are recorded but not consulted**, so a benchmark over them would
+     measure nothing. See the Evolution rows in *What exists and works* for the list and the
+     counts behind it.
+
+   So the milestone is now: **either build a corpus that can sustain a long run, or decide to
+   measure the loop's mechanics and say so.** The second is answerable today with deterministic
+   pilots and is the cheaper of the two; the first is what the original question actually needs,
+   and carries its own hazard — whoever writes the corpus decides the answer, which is the
+   caveat `pilotbench`'s own corpus already carries. Multi-model islands stay `PROPOSED` behind
+   both.
 2. **Supply Linux confinement and a confined analyser before deploying real collection.**
    `collect_confined` and quarantine are wired, and the first opt-in Tor connector now makes
    their boundary live. It refuses real collection without kernel confinement; today that

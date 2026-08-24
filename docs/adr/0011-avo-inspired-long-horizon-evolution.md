@@ -522,3 +522,65 @@ is undetected.
 
 **Not verified:** that the scoring shape is *right*. It has never been scored against a known-correct
 answer and cannot be until resolved cases exist.
+
+---
+
+## Amendment, 2026-08-23: what a measurement pass found
+
+Somebody went to take the measurement this ADR asks for and did not get that far. What they
+found first is recorded here rather than in a commit message, because two of the items below
+change what this document may claim.
+
+**Four defects, each reproduced against the code as it shipped** and fixed in
+`tests/invariants/test_evolution_detector_defects.py`:
+
+1. `StagnationDetector.assess` summed **four of the six** tier-1 terms. It read
+   `epistemic_key[0]` and `[1]` positionally and then named `contradictions_resolved` and
+   `hypotheses_settled` by attribute — the same tuple reached two ways — so
+   `uncertainty_reduction` and `evidence_backed_claim_gain` were never added. A step gaining an
+   evidence-backed claim counted as zero movement, and the shipped default policy assessed four
+   such steps as a plateau. It now folds over the key, so a term added to the tier is counted the
+   day it exists.
+2. `StepRecord.pivot_families` was the checkpoint's `pivots_attempted`, built from the
+   investigation's **cumulative** executed-pivot history. A family run once appeared in every
+   later checkpoint, so `REPEATED_PIVOT_FAMILY` counted it once per step in the window, for ever.
+   The reference demonstration escaped it only by overriding the window to 3, where the count
+   lands exactly on a strict `>`. It is now read per step from the transcript's proposals.
+3. The supervisor's two exhaustion guards compared against the **immediately previous**
+   directive, so alternating `seek_independent_origin` and `revisit_prior_branch` defeated both
+   permanently — neither was ever "in force for two steps", and the `STOP_LOW_YIELD` escalation
+   beneath them was unreachable. Measured over four consecutive steps with no promotion, no
+   epistemic gain, every candidate rejected and the budget burning. The state now carries every
+   posture issued during the gainless streak.
+4. `_verdict_detail` wrote *"the candidate beat the incumbent on the epistemic tier"* into the
+   hash-chained lineage on **every** promotion, including ones whose epistemic key was all zeros.
+   `promotes()` does not compare epistemic tiers and says so in its own docstring. It now names
+   the tier that moved.
+
+**Two claims in this ADR need reading more narrowly.** Neither was false when written; both are
+narrower in the shipped build than the prose suggests, and the difference matters to anyone
+planning to measure this plane.
+
+- *"Evaluation is gated and lexicographic, never a weighted sum."* The gating is real and the
+  lexicographic comparison exists — but `ordering_key()` and `best_of()` have no caller outside
+  their own module. That is consistent with `promotes()`, which argues that comparing deltas is
+  the wrong question for a chain and leaves the ordering to *sibling* selection; sibling selection
+  is `BranchPortfolio`, which is itself unwired. So in the shipped loop the decision is a coarse
+  boolean over tiers 1 and 2, and tier 3 is inert. Nothing here is wrong; the ADR simply presents
+  as the evaluation a comparison the running loop does not perform.
+- *"The supervisor's whole vocabulary does nothing."* True, and more literally than intended:
+  **8 of the 9 `DirectiveType` members have zero references outside `supervisor.py`.** Only
+  `STOP_LOW_YIELD` reaches a code path. A redirect changes the next briefing's wording and
+  nothing else — which is the containment property this ADR wanted, and also means the
+  "redirection" half of *plateau redirection* is not yet a mechanism a benchmark could measure.
+
+**And one measurement about the memory.** After a full reference run, 3 of the 10
+`ResearchMemory` lists are populated. Two of the seven empty ones — `unresolved_questions` and
+`contradictory_observations` — are projected into *every* briefing, so the pilot is shown two
+headings that are structurally always blank.
+
+**The benchmark this ADR names as the next step is not buildable as written.** The fixture world
+holds **37** answerable `(pivot type, entity)` pairs, counted from `glass_anvil.py`; there is no
+frontier model wired to any of the six provider seats; and `pilotbench` drives `mediator.drive`
+where the comparison needs `continue_session`. See milestone 1 in `PROJECT_STATE.md` for the
+counts and for the two honest options that replace it.
