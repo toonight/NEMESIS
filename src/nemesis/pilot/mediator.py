@@ -486,6 +486,7 @@ class PilotMediator:
         """The move loop. Entered by :meth:`drive` on a new investigation and by
         :meth:`continue_session` on one already open; identical in every other respect."""
         transcript: list[TurnRecord] = []
+        conclusion = ""
         malformed_streak = 0
         last_ruling: Ruling | None = None
         concluded = False
@@ -521,7 +522,24 @@ class PilotMediator:
                 investigation,
                 identity,
                 outcome=outcome,
-                extra={"halted_reason": reason, "moves": str(len(transcript))},
+                extra={
+                    "halted_reason": reason,
+                    "moves": str(len(transcript)),
+                    # What the pilot said it concluded. It lived only in the `conclude` move's
+                    # ruling, so anything reading closes — an auditor, a projection — saw a
+                    # session end with no statement of what it ended with. Always present, even
+                    # when empty: absent and empty are different, and a reader should not have
+                    # to guess which happened.
+                    "summary": conclusion[:400],
+                    # Tallies a projection would otherwise have to replay every move to get.
+                    # Two things counting one session from different sources will eventually
+                    # disagree, and the close is the place that should not need replaying.
+                    "accepted": str(sum(1 for turn in transcript if turn.ruling.accepted)),
+                    "refused": str(sum(1 for turn in transcript if not turn.ruling.accepted)),
+                    "effects_requested": str(
+                        sum(1 for turn in transcript if turn.ruling.move_kind == "request_effect")
+                    ),
+                },
             )
 
         async def refuse(
@@ -659,6 +677,7 @@ class PilotMediator:
 
                 if isinstance(move, Conclude) and ruling.accepted:
                     concluded = True
+                    conclusion = move.summary
                     break
             else:
                 halted = f"reached the {max_moves}-move ceiling without concluding"
