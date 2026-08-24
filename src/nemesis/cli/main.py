@@ -1632,6 +1632,14 @@ def calibrate(
     console.print()
     console.print(measure_ceiling_sensitivity().render(), highlight=False)
     console.print(measure_floor_sensitivity().render(), highlight=False)
+    console.print(
+        Text(
+            "  Both studies run the swept grid: every signal kind against every other, over "
+            "three plantability splits and three populations. The grid is still a choice, and "
+            "a different one could give a different figure.",
+            style="dim",
+        )
+    )
 
     if not report.properties_hold:
         failed = [item.name for item in report.properties if not item.holds]

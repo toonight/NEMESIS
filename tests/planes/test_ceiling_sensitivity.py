@@ -99,3 +99,50 @@ def test_the_floor_study_probes_both_sides_of_the_shipped_value() -> None:
     """A one-sided probe would only ever find the threshold too strict or too loose."""
     assert any(floor < ACTIONABLE_FLOOR for floor in FLOOR_PERTURBATIONS)
     assert any(floor > ACTIONABLE_FLOOR for floor in FLOOR_PERTURBATIONS)
+
+
+# -- the swept set, which exists because "chosen by the author" was the objection --
+
+
+def test_the_swept_set_is_large_and_systematic() -> None:
+    from nemesis.calibration.ceilings import swept_cases
+
+    cases = swept_cases()
+    assert len(cases) > 400
+    assert len({case.name for case in cases}) == len(cases), "duplicate probe names"
+
+
+def test_the_swept_set_lands_on_both_sides_of_the_boundary() -> None:
+    """The flaw the first sweep had, pinned so it cannot come back.
+
+    A grid whose every case is a lead at baseline reports serene stability and measures
+    nothing about a threshold. The first version fixed the pair population at one value and
+    returned 0 of 231 actionable; sweeping the population is what fixed it.
+    """
+    from nemesis.calibration.ceilings import measure_ceiling_sensitivity, swept_cases
+
+    result = measure_ceiling_sensitivity(swept_cases())
+    actionable = sum(1 for _, verdict in result.baseline if verdict)
+    assert 0 < actionable < len(result.baseline)
+
+
+def test_the_swept_set_has_enough_movable_cases_to_measure_with() -> None:
+    """`movable` is the denominator that means something; a small one makes every rate noise."""
+    from nemesis.calibration.ceilings import measure_ceiling_sensitivity, swept_cases
+
+    result = measure_ceiling_sensitivity(swept_cases())
+    assert result.movable >= 20
+
+
+def test_a_gentle_order_preserving_change_is_reported_when_it_moves_anything() -> None:
+    """The headline claim turns on whether a *modest* magnitude change matters.
+
+    A study that only reported the drastic perturbations could show verdicts moving and leave a
+    reader unable to tell whether that took a 5% nudge or an inversion.
+    """
+    from nemesis.calibration.ceilings import measure_ceiling_sensitivity, swept_cases
+
+    result = measure_ceiling_sensitivity(swept_cases())
+    rendered = result.render()
+    if result.order_preserving_moves:
+        assert "gentlest order-preserving change" in rendered
