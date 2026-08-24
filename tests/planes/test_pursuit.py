@@ -215,7 +215,20 @@ class FakeGraph:
         return relationship
 
     async def neighbourhood(self, query: GraphQuery) -> Subgraph:
-        raise NotImplementedError("the engine does not traverse the graph")
+        """Depth-1 only: the edges touching one node.
+
+        This used to raise "the engine does not traverse the graph", which was true when it was
+        written. The engine now reassesses whose each touched node is after a pivot, and whose a
+        node is, is answered by the edges on it — so it reads them. Kept deliberately dumb: a
+        richer fake would start to disagree with InMemoryGraphStore, and the fake is here to
+        record what the engine asked for, not to be a second graph implementation.
+        """
+        touching = tuple(
+            edge
+            for edge in self.relationships
+            if query.entity_id in {edge.source_id, edge.target_id}
+        )
+        return Subgraph(entities=(), relationships=touching, explanations=())
 
     async def explain_connection(
         self, source_id: str, target_id: str, *, max_depth: int = 4

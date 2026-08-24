@@ -47,9 +47,11 @@ from typing import Annotated, Final, Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from nemesis.core.authorization import OperationClass
-from nemesis.core.claims import Claim
+from nemesis.core.claims import Claim, DerivationKind
 from nemesis.core.confidence import ConfidenceBand, Opinion, band_of, describe
+from nemesis.core.entities import Entity, EntityType
 from nemesis.core.ids import ClaimId, EntityId
+from nemesis.core.relationships import Relationship, RelationType
 from nemesis.core.temporal import TemporalExtent, require_utc
 
 
@@ -122,6 +124,12 @@ the adversary's is the one error that is not recoverable, so "likely" is not goo
 as a separate constant rather than imported because ``core`` may not import ``disrupt``; the
 duplication is the import contract's price and is asserted equal by a test.
 """
+
+
+ACTOR_HELD_ROLES: Final[frozenset[InfrastructureRole]] = frozenset(
+    {InfrastructureRole.ACTOR_OWNED, InfrastructureRole.ACTOR_CONTROLLED}
+)
+"""The only roles that make a node the adversary's to take away."""
 
 
 class FacetAssessment(BaseModel):
@@ -294,16 +302,24 @@ class RoleAssessment(BaseModel):
         if self.role is InfrastructureRole.UNKNOWN:
             return self
 
-        if not self.facets:
-            raise ValueError(
-                f"role {self.role.value} rests on at least one facet; a classification "
-                "supported by nothing is a guess wearing a label"
-            )
-        if self.opinion.is_vacuous:
-            raise ValueError(
-                f"role {self.role.value} cannot rest on a vacuous opinion: nobody having "
-                "looked is not a classification, however confident the label sounds"
-            )
+        # The bar is asymmetric, and deliberately so: a role that *permits* an effect must be
+        # supported, and a role that *forbids* one need not be. Over-applying
+        # SHARED_INFRASTRUCTURE costs a refusal; under-applying it costs a third party their
+        # server. SHARED_INFRASTRUCTURE in particular is established by the node's type rather
+        # than by any facet, and manufacturing a synthetic facet to satisfy a uniform rule would
+        # be inventing an ownership finding nobody made — the exact sin this module exists to
+        # prevent, committed to satisfy a validator.
+        if self.role in ACTOR_HELD_ROLES:
+            if not self.facets:
+                raise ValueError(
+                    f"role {self.role.value} rests on at least one facet; a classification "
+                    "supported by nothing is a guess wearing a label"
+                )
+            if self.opinion.is_vacuous:
+                raise ValueError(
+                    f"role {self.role.value} cannot rest on a vacuous opinion: nobody having "
+                    "looked is not a classification, however confident the label sounds"
+                )
         missing = sorted(f.value for f in REQUIRED_FACETS[self.role] - seen)
         if missing:
             raise ValueError(
@@ -449,11 +465,6 @@ def _check_every_operation_is_tiered() -> None:
 _check_every_operation_is_tiered()
 
 
-ACTOR_HELD_ROLES: Final[frozenset[InfrastructureRole]] = frozenset(
-    {InfrastructureRole.ACTOR_OWNED, InfrastructureRole.ACTOR_CONTROLLED}
-)
-"""The only roles that make a node the adversary's to take away."""
-
 ESTABLISHED_ROLES: Final[frozenset[InfrastructureRole]] = frozenset(
     role for role in InfrastructureRole if role is not InfrastructureRole.UNKNOWN
 )
@@ -502,3 +513,325 @@ __all__ = [
     "is_role_eligible",
     "role_attributes",
 ]
+
+
+# -- deriving a standing from what the graph holds --------------------------------
+
+OWNERSHIP_PREDICATE: Final = "legally_owned_by"
+"""The claim predicate that asserts legal ownership of a node.
+
+A **claim predicate and deliberately not a** :class:`~nemesis.core.relationships.RelationType`.
+An ownership edge would be traversable, and therefore citable as the premise of a pivot — the
+same argument that keeps attribution off the graph (``ClaimKind.ATTRIBUTION`` sits at epistemic
+strength 1 so nothing stronger derives from it). Ownership is a statement about the world made
+by somebody who looked at a register; it is not a path between two nodes to be walked.
+
+Nothing collects it today. The project's own RDAP fixture returns
+``entities.registrant: "REDACTED FOR PRIVACY"``, which is what a real GDPR-era lookup returns,
+so this predicate is expected to arrive from an analyst submission or an authoritative record —
+:data:`ADMISSIBLE_OWNERSHIP_DERIVATIONS` is what it must carry to count.
+"""
+
+ADMISSIBLE_OWNERSHIP_DERIVATIONS: Final[frozenset[DerivationKind]] = frozenset(
+    {
+        DerivationKind.AUTHORITATIVE_RECORD,
+        DerivationKind.HUMAN_ANALYST,
+        DerivationKind.DIRECT_COLLECTION,
+    }
+)
+"""What an ownership claim must be derived from to move a node's standing.
+
+Excludes ``MODEL_ASSERTION`` and ``STATISTICAL_MODEL`` (invariant 1), and excludes
+``EXTERNAL_REPORT``: a vendor blog saying whose a server is, is an assertion about a register
+its author did not read either.
+
+Note which way this cuts. Refusing a model's guess about an owner leaves the node
+``ACTOR_CONTROLLED`` rather than ``COMPROMISED_LEGITIMATE`` — the *more* permissive outcome. The
+rule is not the platform protecting itself; it is the platform declining to launder a guess
+into a fact in either direction.
+"""
+
+ADVERSARY_ENTITY_TYPES: Final[frozenset[EntityType]] = frozenset(
+    {EntityType.THREAT_ACTOR, EntityType.PERSONA, EntityType.ALIAS}
+)
+"""Node types that mean *the adversary* rather than merely *a party*.
+
+``EntityCategory.ACTOR`` cannot do this job: it contains ``ORGANIZATION`` alongside
+``THREAT_ACTOR``, so a company controlling its own web server would read as adversary control.
+The distinction is the difference between a finding and a normal Tuesday.
+"""
+
+CONTROL_RELATIONS: Final[frozenset[RelationType]] = frozenset(
+    {RelationType.CONTROLS, RelationType.OPERATED_BY}
+)
+"""Edges that assert who operates a node. Both are in ``IDENTITY_ASSERTING_RELATIONS``, so
+neither can be constructed without citing supporting claims."""
+
+USE_RELATIONS: Final[frozenset[RelationType]] = frozenset(
+    {
+        RelationType.COMMUNICATES_WITH,
+        RelationType.COMMANDS,
+        RelationType.DELIVERED_BY,
+        RelationType.REDIRECTS_TO,
+        RelationType.TARGETED,
+    }
+)
+"""Edges that record what a node was seen doing. Establish ``OBSERVED_USE`` and nothing else."""
+
+
+def _widen(left: TemporalExtent, right: TemporalExtent) -> TemporalExtent:
+    """The union of two observation windows, as a core-local helper.
+
+    ``nemesis.graph.memory.widen_extent`` does this already, and ``core`` may not import
+    ``graph``. Duplicating four lines is the import contract's price; the alternative is a core
+    module reaching up into a plane above it, which is the thing the contract exists to stop.
+    """
+    return TemporalExtent(
+        known_from=min(left.known_from, right.known_from),
+        known_until=max(left.known_until, right.known_until),
+    )
+
+
+def _independent_origins(claim_ids: Sequence[str], claims: Sequence[Claim]) -> int:
+    """Distinct asserters behind a set of claims.
+
+    An honest ceiling rather than a measurement, and the difference matters. The fusion sense
+    of independence is the *provenance cluster*
+    (:meth:`~nemesis.core.provenance.SourceDescriptor.provenance_cluster`), which lives on the
+    evidence a claim cites, not on the claim — and this function is pure and holds no vault. Two
+    feeds that both copied one blog have two asserters and one origin, so this over-states
+    independence in exactly the case invariant-16 machinery exists to catch.
+
+    It is used only to populate ``independent_source_count``, which a human approver reads
+    through :meth:`FacetAssessment.describe`. The standing *gate* does not consult it — an
+    over-count therefore cannot widen what an effect may do, only what a reviewer is told, and
+    the basis string says what was counted so they can discount it.
+    """
+    wanted = set(claim_ids)
+    return len({claim.asserted_by for claim in claims if claim.claim_id in wanted})
+
+
+def _facet_from_edges(
+    facet: ControlFacet,
+    edges: Sequence[Relationship],
+    claims: Sequence[Claim],
+    *,
+    holder: str,
+    what: str,
+) -> FacetAssessment | None:
+    if not edges:
+        return None
+    strongest = max(edges, key=lambda e: e.confidence.projected_probability)
+    cited = tuple(dict.fromkeys(cid for edge in edges for cid in edge.supporting_claims))
+    origins = _independent_origins(cited, claims)
+    extent = edges[0].extent
+    for edge in edges[1:]:
+        extent = _widen(extent, edge.extent)
+    return FacetAssessment(
+        facet=facet,
+        holder=holder,
+        opinion=strongest.confidence,
+        independent_source_count=origins,
+        basis=f"{what} ({len(edges)} edge(s), {origins} distinct asserter(s))",
+        supporting_claims=tuple(cited),
+        extent=extent,
+    )
+
+
+def _other_end(edge: Relationship, entity_id: str) -> tuple[str, EntityType] | None:
+    if edge.source_id == entity_id:
+        return edge.target_id, edge.target_type
+    if edge.target_id == entity_id:
+        return edge.source_id, edge.source_type
+    return None
+
+
+def derive_standing(
+    entity: Entity,
+    *,
+    relationships: Sequence[Relationship],
+    claims: Sequence[Claim],
+    assessed_at: datetime,
+) -> RoleAssessment:
+    """Work out whose a node is from the edges and claims that touch it.
+
+    Deterministic and total: every input produces an assessment, and ``UNKNOWN`` is what most
+    inputs produce. That is the intended shape. Observed use — traffic to a C2, a redirect
+    chain, delivery of a payload — populates ``OBSERVED_USE`` and moves the role not at all,
+    because it is the node being *used* and says nothing about whose it is.
+
+    The rules, in order, and each one is a refusal before it is a classification:
+
+    1. A node whose *type* is shared by unrelated parties is ``SHARED_INFRASTRUCTURE``, and this
+       outranks everything below. Adversary traffic through a registrar is not a reason to act
+       against the registrar. (Type-level and therefore crude: it cannot tell a two-tenant host
+       from a forty-thousand-tenant one, and it does not catch a shared IP or CDN domain at all,
+       which :class:`~nemesis.core.relationships.PivotSelectivity` handles instead.)
+    2. A ``VICTIM`` node is ``VICTIM_INFRASTRUCTURE``.
+    3. An admissible owner who is the adversary, plus adversary control, is ``ACTOR_OWNED``.
+    4. An admissible owner who is *not* the adversary, plus adversary control, is
+       ``COMPROMISED_LEGITIMATE`` — the §6 case, and the one that cannot be reached from
+       collection alone because registrant data is redacted.
+    5. An admissible non-adversary owner with adversary *use* but no adversary control is
+       ``ABUSED_LEGITIMATE_SERVICE``.
+    6. Adversary control with no established owner is ``ACTOR_CONTROLLED`` — the honest answer
+       for most adversary infrastructure, which is rented rather than owned.
+    7. Everything else is ``UNKNOWN``.
+
+    Control asserted by an ``ORGANIZATION`` moves nothing: a company operating its own server is
+    not a finding, and ``EntityCategory.ACTOR`` cannot make that distinction because it holds
+    both. See :data:`ADVERSARY_ENTITY_TYPES`.
+    """
+    control_edges: list[Relationship] = []
+    use_edges: list[Relationship] = []
+    controller: str | None = None
+    controller_is_adversary = False
+
+    for edge in relationships:
+        end = _other_end(edge, entity.entity_id)
+        if end is None:
+            continue
+        other_id, other_type = end
+        if edge.relation in CONTROL_RELATIONS and other_type in ADVERSARY_ENTITY_TYPES:
+            control_edges.append(edge)
+            controller = f"{other_type.value}:{other_id}"
+            controller_is_adversary = True
+        elif edge.relation in USE_RELATIONS:
+            use_edges.append(edge)
+
+    owner: str | None = None
+    owner_claims: list[Claim] = []
+    subject = f"{entity.entity_type.value}:{entity.natural_key}"
+    for claim in claims:
+        if claim.statement.predicate != OWNERSHIP_PREDICATE:
+            continue
+        if claim.statement.subject != subject:
+            continue
+        if claim.derivation not in ADMISSIBLE_OWNERSHIP_DERIVATIONS:
+            continue
+        owner = claim.statement.obj
+        owner_claims.append(claim)
+
+    facets: list[FacetAssessment] = []
+    if owner is None and entity.entity_type is EntityType.VICTIM:
+        # The node *is* the harmed party, so the type itself answers the ownership question and
+        # no separate claim is needed. Synthesised rather than left absent because the
+        # alternative is UNKNOWN, and UNKNOWN blocks third-party engagement — the platform would
+        # identify a victim and then be unable to notify anyone about them, which is the harm
+        # this classification exists to prevent rather than a cautious version of preventing it.
+        owner = f"{entity.entity_type.value}:{entity.natural_key}"
+        facets.append(
+            FacetAssessment(
+                facet=ControlFacet.LEGAL_OWNERSHIP,
+                holder=owner,
+                opinion=Opinion(belief=0.9, disbelief=0.0, uncertainty=0.1),
+                independent_source_count=2,
+                basis="the node is itself a victim entity; its type is the ownership answer",
+                extent=entity.extent,
+            )
+        )
+    elif owner is not None and owner_claims:
+        facets.append(
+            FacetAssessment(
+                facet=ControlFacet.LEGAL_OWNERSHIP,
+                holder=owner,
+                # An admissible ownership claim is a record, not an inference: belief is high
+                # and the residual uncertainty is that registers go stale, not that the reader
+                # might have misread one.
+                opinion=Opinion(belief=0.85, disbelief=0.0, uncertainty=0.15),
+                independent_source_count=_independent_origins(
+                    tuple(c.claim_id for c in owner_claims), owner_claims
+                ),
+                basis=(
+                    f"{len(owner_claims)} admissible ownership claim(s) "
+                    f"({len({c.asserted_by for c in owner_claims})} distinct asserter(s))"
+                ),
+                supporting_claims=tuple(c.claim_id for c in owner_claims),
+                extent=entity.extent,
+            )
+        )
+    control = _facet_from_edges(
+        ControlFacet.CURRENT_CONTROL,
+        control_edges,
+        claims,
+        holder=controller or "",
+        what="adversary control asserted by a claim-citing edge",
+    )
+    if control is not None:
+        facets.append(control)
+    use = _facet_from_edges(
+        ControlFacet.OBSERVED_USE,
+        use_edges,
+        claims,
+        holder="",
+        what="observed operational use, which establishes nothing about whose this is",
+    )
+    if use is not None:
+        facets.append(use)
+
+    owner_is_adversary = owner is not None and owner.split(":", 1)[0] in {
+        t.value for t in ADVERSARY_ENTITY_TYPES
+    }
+
+    role = InfrastructureRole.UNKNOWN
+    reasoning: list[str] = []
+    if entity.is_shared_infrastructure:
+        role = InfrastructureRole.SHARED_INFRASTRUCTURE
+        reasoning.append(
+            f"{entity.entity_type.value} is shared by unrelated parties by default; use of it "
+            "by the adversary is not a reason to act against it"
+        )
+    elif entity.entity_type is EntityType.VICTIM:
+        role = InfrastructureRole.VICTIM_INFRASTRUCTURE
+    elif owner is not None and controller_is_adversary and owner_is_adversary:
+        role = InfrastructureRole.ACTOR_OWNED
+    elif owner is not None and controller_is_adversary:
+        role = InfrastructureRole.COMPROMISED_LEGITIMATE
+        reasoning.append(
+            f"the adversary operates it, {owner} owns it; the answer is remediation and "
+            "notification, never a takedown"
+        )
+    elif owner is not None and use_edges and not owner_is_adversary:
+        role = InfrastructureRole.ABUSED_LEGITIMATE_SERVICE
+    elif controller_is_adversary:
+        role = InfrastructureRole.ACTOR_CONTROLLED
+        reasoning.append(
+            "control is established and ownership is not; registrant data is routinely "
+            "redacted, so this is the strongest honest classification"
+        )
+    else:
+        reasoning.append(
+            "nothing establishes who owns or controls this node; observed use is not evidence "
+            "of either"
+        )
+
+    # A role other than UNKNOWN needs a non-vacuous opinion and its required facets. Where the
+    # evidence does not reach that bar the honest output is UNKNOWN rather than a weak
+    # classification, because a weak classification is what the gate would act on.
+    required = REQUIRED_FACETS[role]
+    present = {item.facet for item in facets}
+    if role is not InfrastructureRole.UNKNOWN and not required <= present:
+        reasoning.append(
+            f"downgraded to unknown: {role.value} requires "
+            f"{', '.join(sorted(f.value for f in required - present))}"
+        )
+        role = InfrastructureRole.UNKNOWN
+
+    if role is InfrastructureRole.UNKNOWN:
+        opinion = Opinion.vacuous()
+    else:
+        opinion = max(
+            (item.opinion for item in facets if item.facet in required),
+            key=lambda o: o.projected_probability,
+            default=Opinion(belief=0.6, disbelief=0.1, uncertainty=0.3),
+        )
+
+    return RoleAssessment(
+        entity_id=entity.entity_id,
+        natural_key=entity.natural_key,
+        role=role,
+        opinion=opinion,
+        facets=tuple(facets),
+        assessed_at=assessed_at,
+        reasoning=tuple(reasoning),
+    )

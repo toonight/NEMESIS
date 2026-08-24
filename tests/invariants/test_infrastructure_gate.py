@@ -358,3 +358,179 @@ async def test_a_provider_may_not_be_notified_about_a_target_nobody_classified()
         capability,
     )
     assert result.outcome is EffectOutcome.REFUSED_UNAUTHORIZED
+
+
+# -- producer and gate, end to end --------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_a_node_the_producer_could_not_classify_is_written_unknown_and_refused() -> None:
+    """The two halves meeting: derivation writes what it found, the boundary acts on it.
+
+    Observed use only — traffic to a C2 and nothing about whose the node is. The producer
+    records ``unknown`` on the entity rather than leaving the attribute absent, because those
+    are different facts; the boundary then refuses a takedown against it.
+
+    This is the case the whole subsystem exists for, and it is worth being clear about which
+    way it fails: NEMESIS cannot currently tell a compromised legitimate host from adversary
+    infrastructure, because registrant data is redacted. What it can do is decline to call
+    either one the adversary's, which turns an unrecoverable error into a refusal.
+    """
+    from nemesis.core.entities import Entity, EntityType
+    from nemesis.core.temporal import TemporalExtent
+    from nemesis.graph.memory import InMemoryGraphStore
+    from nemesis.pursuit.standing import reassess_standing
+
+    graph = InMemoryGraphStore()
+    now = utcnow()
+    portal = Entity.create(
+        entity_id=new_id(IdPrefix.ENTITY),
+        entity_type=EntityType.DOMAIN,
+        observed_form="unclassified-portal.example",
+        extent=TemporalExtent.at(now),
+        is_synthetic=True,
+    )
+    stored = await graph.upsert_entity(portal)
+
+    roles = await reassess_standing(graph, [stored.entity_id], claims=(), assessed_at=now)
+    assert roles[stored.entity_id] is InfrastructureRole.UNKNOWN
+
+    reread = await graph.get_entity(stored.entity_id)
+    assert reread is not None
+    assert reread.attributes[ROLE_ATTRIBUTE] == "unknown"
+
+    gw = gateway()
+    target = TargetFingerprint.create(
+        entity_id=stored.entity_id,
+        entity_type="domain",
+        natural_key=stored.natural_key,
+        bound_attributes=dict(reread.attributes),
+    )
+    capability = issued(gw, target, OperationClass.TAKEDOWN_REQUEST_DRAFT)
+    result = await registry(gw).execute(
+        request_against(target, OperationClass.TAKEDOWN_REQUEST_DRAFT, dict(reread.attributes)),
+        capability,
+    )
+    assert result.outcome is EffectOutcome.REFUSED_UNAUTHORIZED
+    assert "unknown" in result.detail
+
+
+@pytest.mark.anyio
+async def test_a_reclassification_strands_the_capability_signed_against_the_old_answer() -> None:
+    """Nobody has to remember to revoke.
+
+    A takedown is approved while a node reads ``actor_controlled``. An analyst then submits an
+    authoritative ownership claim naming an innocent company, the producer reassesses, and the
+    entity now reads ``compromised_legitimate``. The capability's target fingerprint covers the
+    old value, so it stops matching and the grant is spent on nothing.
+
+    ``merge_attributes`` keeps the previous answer under ``infrastructure_role@prior1``, so the
+    change is auditable rather than silent.
+    """
+    from nemesis.core.claims import Claim, ClaimKind, DerivationKind, Statement
+    from nemesis.core.confidence import Opinion
+    from nemesis.core.entities import Entity, EntityType
+    from nemesis.core.ids import content_id
+    from nemesis.core.infrastructure import OWNERSHIP_PREDICATE
+    from nemesis.core.relationships import PivotMethod, Relationship, RelationType
+    from nemesis.core.temporal import TemporalExtent
+    from nemesis.graph.memory import InMemoryGraphStore
+    from nemesis.pursuit.standing import reassess_standing
+
+    graph = InMemoryGraphStore()
+    now = utcnow()
+    extent = TemporalExtent.at(now)
+
+    site = await graph.upsert_entity(
+        Entity.create(
+            entity_id=new_id(IdPrefix.ENTITY),
+            entity_type=EntityType.DOMAIN,
+            observed_form="initech-blog.example",
+            extent=extent,
+            is_synthetic=True,
+        )
+    )
+    actor = await graph.upsert_entity(
+        Entity.create(
+            entity_id=new_id(IdPrefix.ENTITY),
+            entity_type=EntityType.THREAT_ACTOR,
+            observed_form="glass-anvil",
+            extent=extent,
+            is_synthetic=True,
+        )
+    )
+    backing = Claim.create(
+        kind=ClaimKind.OBSERVATION,
+        statement=Statement(
+            subject="domain:initech-blog.example",
+            predicate="observed",
+            obj="a web shell",
+            natural_language="A web shell was served from the host.",
+        ),
+        derivation=DerivationKind.DIRECT_COLLECTION,
+        asserted_by=new_id(IdPrefix.ACTOR),
+        asserted_at=now,
+        valid_extent=extent,
+        supported_by_evidence=(content_id(IdPrefix.EVIDENCE, b"a sealed capture"),),
+    )
+    await graph.add_relationship(
+        Relationship(
+            edge_id=new_id(IdPrefix.EDGE),
+            source_id=actor.entity_id,
+            target_id=site.entity_id,
+            source_type=EntityType.THREAT_ACTOR,
+            target_type=EntityType.DOMAIN,
+            relation=RelationType.CONTROLS,
+            extent=extent,
+            confidence=Opinion(belief=0.8, disbelief=0.05, uncertainty=0.15),
+            pivot_method=PivotMethod.DIRECT_OBSERVATION,
+            supporting_claims=(backing.claim_id,),
+            is_synthetic=True,
+        )
+    )
+
+    roles = await reassess_standing(graph, [site.entity_id], claims=(backing,), assessed_at=now)
+    assert roles[site.entity_id] is InfrastructureRole.ACTOR_CONTROLLED
+
+    approved_state = await graph.get_entity(site.entity_id)
+    assert approved_state is not None
+    gw = gateway()
+    target = TargetFingerprint.create(
+        entity_id=site.entity_id,
+        entity_type="domain",
+        natural_key=site.natural_key,
+        bound_attributes=dict(approved_state.attributes),
+    )
+    capability = issued(gw, target, OperationClass.TAKEDOWN_REQUEST_DRAFT)
+
+    # An analyst establishes who actually owns the host.
+    ownership = Claim.create(
+        kind=ClaimKind.FACT,
+        statement=Statement(
+            subject="domain:initech-blog.example",
+            predicate=OWNERSHIP_PREDICATE,
+            obj="organization:Initech",
+            natural_language="The domain is registered to Initech, a payroll company.",
+        ),
+        derivation=DerivationKind.AUTHORITATIVE_RECORD,
+        asserted_by=new_id(IdPrefix.ACTOR),
+        asserted_at=now,
+        valid_extent=extent,
+        supported_by_evidence=(content_id(IdPrefix.EVIDENCE, b"a sealed corporate registry"),),
+    )
+    roles = await reassess_standing(
+        graph, [site.entity_id], claims=(backing, ownership), assessed_at=now
+    )
+    assert roles[site.entity_id] is InfrastructureRole.COMPROMISED_LEGITIMATE
+
+    now_state = await graph.get_entity(site.entity_id)
+    assert now_state is not None
+    assert now_state.attributes[ROLE_ATTRIBUTE] == "compromised_legitimate"
+    assert now_state.attributes["infrastructure_role@prior1"] == "actor_controlled"
+
+    result = await registry(gw).execute(
+        request_against(target, OperationClass.TAKEDOWN_REQUEST_DRAFT, dict(now_state.attributes)),
+        capability,
+    )
+    assert result.outcome is EffectOutcome.REFUSED_TARGET_CHANGED
+    assert result.external_contact_made is False

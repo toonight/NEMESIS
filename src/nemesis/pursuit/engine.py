@@ -38,6 +38,8 @@ from nemesis.collect.quarantine import (
 from nemesis.core.claims import Claim
 from nemesis.core.entities import Entity
 from nemesis.core.ids import IdPrefix, new_id
+from nemesis.core.infrastructure import InfrastructureRole
+from nemesis.core.relationships import Relationship
 from nemesis.core.temporal import TemporalExtent, utcnow
 from nemesis.ports.collection import (
     ConnectorCapabilities,
@@ -59,6 +61,7 @@ from nemesis.pursuit.investigation import (
 )
 from nemesis.pursuit.materialize import materialize
 from nemesis.pursuit.policy import PursuitPolicy, RuleBasedPursuitPolicy
+from nemesis.pursuit.standing import reassess_standing
 
 ENGINE_ACTOR_KIND = "agent"
 
@@ -456,6 +459,7 @@ class PursuitEngine:
         held: list[str] = []
         recorded: list[Claim] = []
         discovered: list[str] = []
+        materialized_edges: list[Relationship] = []
         skipped: tuple[str, ...] = ()
 
         if result is not None and result.succeeded:
@@ -495,6 +499,35 @@ class PursuitEngine:
                 discovered.append(stored.entity_id)
             for relationship in materialized.relationships:
                 await self._graph.add_relationship(relationship)
+                materialized_edges.append(relationship)
+
+        # Reassess whose each *affected* node is, now that this pivot's edges and claims are in
+        # the graph. Done here rather than at approval time because this is where the knowledge
+        # changes: a node that looked like the adversary's before an ownership claim arrived
+        # must stop looking like it the moment one does, and a capability signed against the
+        # old answer stops matching its target fingerprint on its own.
+        #
+        # Both ends of every new edge, not merely the entities this pivot discovered. Assessing
+        # `discovered` alone classifies a node when it is *found* and never again, so a control
+        # edge landing on an already-known node three pivots later would change the evidence and
+        # not the classification.
+        #
+        # Honest note on how well this is tested: the change is **not** observable on the
+        # reference scenario. Its only control edges are three `operated_by` edges running
+        # asn -> organization — a host operating its own ASN — which correctly move no standing
+        # because an ORGANIZATION is not the adversary. The tally there is 11 classified nodes
+        # before and after. The gap this closes is covered by unit tests, not by the demo.
+        affected = [
+            *discovered,
+            *(edge.source_id for edge in materialized_edges),
+            *(edge.target_id for edge in materialized_edges),
+        ]
+        standing = await reassess_standing(
+            self._graph,
+            affected,
+            claims=recorded,
+            assessed_at=self._clock(),
+        )
 
         executed = executed.model_copy(
             update={
@@ -536,6 +569,12 @@ class PursuitEngine:
                 "truncated": str(executed.truncated),
                 "error": executed.error or "",
                 "unmaterialized_claims": str(len(skipped)),
+                # Recorded as a tally so a run where classification silently stopped
+                # happening shows up as a changed count rather than as nothing.
+                "standing_assessed": str(len(standing)),
+                "standing_unknown": str(
+                    sum(1 for role in standing.values() if role is InfrastructureRole.UNKNOWN)
+                ),
             },
         )
         return investigation
