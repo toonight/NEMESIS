@@ -39,13 +39,25 @@ from collections.abc import Callable, Sequence
 from datetime import datetime
 from typing import Final
 
+from pydantic import BaseModel, ConfigDict
+
 from nemesis.core.entities import Entity, EntityType
 from nemesis.core.ids import ClaimId
 from nemesis.core.provenance import SourceClass, SourceDescriptor, SourceReliability
 from nemesis.core.relationships import PivotSelectivity, Relationship, RelationType
 from nemesis.core.temporal import TemporalExtent
 from nemesis.ports.storage import GraphQuery, GraphStore
-from nemesis.pursuit.resurgence import ResurgenceSignal, ResurgenceSignalKind
+from nemesis.pursuit.investigation import (
+    Investigation,
+    InvestigationBranch,
+    InvestigationState,
+)
+from nemesis.pursuit.resurgence import (
+    ResurgenceAssessment,
+    ResurgenceEngine,
+    ResurgenceSignal,
+    ResurgenceSignalKind,
+)
 
 
 class BridgeRule:
@@ -330,9 +342,213 @@ def signals_by_candidate(
     return {key: tuple(members) for key, members in grouped.items()}
 
 
+# ---------------------------------------------------------------------------
+# Closing the loop
+#
+# `DETECT -> PURSUE -> ... -> DISRUPT -> WATCH -> REAPPEARANCE -> PURSUE`. Every piece of that
+# existed separately and nothing joined the last two: an investigation entered
+# MONITORING_RESURGENCE and stayed there, because the thing that would have noticed a return
+# was never asked.
+# ---------------------------------------------------------------------------
+
+
+class ResurgenceFinding(BaseModel):
+    """One candidate, scored. The unit is the candidate rather than the campaign."""
+
+    model_config = ConfigDict(frozen=True)
+
+    candidate_type: EntityType
+    candidate_key: str
+    assessment: ResurgenceAssessment
+
+
+class WatchReport(BaseModel):
+    """What one pass of the resurgence watch examined, and what it concluded.
+
+    ``candidates_examined`` and ``not_watching_reason`` are both here because an empty
+    ``findings`` tuple is ambiguous on its own, and the ambiguity is the dangerous kind: a
+    control that quietly stopped running looks exactly like a control that ran and found
+    nothing. One of these fields always says which happened.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    investigation_id: str
+    campaign: str
+    checked_at: datetime
+    candidates_examined: int = 0
+    findings: tuple[ResurgenceFinding, ...] = ()
+    not_watching_reason: str | None = None
+
+    @property
+    def actionable(self) -> tuple[ResurgenceFinding, ...]:
+        return tuple(f for f in self.findings if f.assessment.is_actionable)
+
+    @property
+    def resumes(self) -> bool:
+        """Whether this pass justifies reopening the case.
+
+        Leads do not reopen cases. With provenance unresolved every assembled signal is
+        plantable and the margin removes it, so a watch that resumed on anything it found would
+        spend the remaining budget on whatever coincidence the graph happened to contain — and
+        an adversary who knows that can arrange coincidences cheaply.
+        """
+        return bool(self.actionable)
+
+    def render(self) -> str:
+        if self.not_watching_reason is not None:
+            return (
+                f"Resurgence watch did not run for {self.investigation_id}: "
+                f"{self.not_watching_reason}"
+            )
+        lines = [
+            f"Resurgence watch for {self.campaign} ({self.investigation_id}) at "
+            f"{self.checked_at.isoformat()}",
+            f"  {self.candidates_examined} candidate(s) examined, "
+            f"{len(self.actionable)} actionable",
+        ]
+        for finding in self.findings:
+            verdict = "RESUME" if finding.assessment.is_actionable else "lead"
+            lines.append(
+                f"  [{verdict}] {finding.candidate_type.value}:{finding.candidate_key} — "
+                f"{finding.assessment.band.value}"
+            )
+        if not self.findings:
+            lines.append("  nothing in the graph connects this cluster to anything new")
+        return "\n".join(lines)
+
+
+async def watch_for_resurgence(
+    graph: GraphStore,
+    investigation: Investigation,
+    *,
+    campaign: str,
+    candidate_population: int,
+    now: datetime,
+    provenance_of: Callable[[tuple[ClaimId, ...]], SourceDescriptor] = _unresolved_provenance,
+    engine: ResurgenceEngine | None = None,
+) -> WatchReport:
+    """Ask, for a case sitting in resurgence watch, whether the adversary has come back.
+
+    **The state is the trigger.** A case that is still open is being pursued, and running the
+    watch over it would score its own live infrastructure as its own return. Anything other than
+    ``MONITORING_RESURGENCE`` is declined with the reason recorded rather than answered with an
+    empty result.
+
+    The cluster is taken from the investigation's own branch foci — the entities it actually
+    worked on — so the watch inherits whatever the case established rather than needing a
+    separately maintained list of what the campaign owns.
+
+    One assessment per candidate. Fusing signals about several candidates into one verdict would
+    answer a question nobody asked and let distinct candidates prop each other up through a
+    shared fact key.
+    """
+    if investigation.state is not InvestigationState.MONITORING_RESURGENCE:
+        return WatchReport(
+            investigation_id=investigation.investigation_id,
+            campaign=campaign,
+            checked_at=now,
+            not_watching_reason=(
+                f"the investigation is {investigation.state.value}, not "
+                f"{InvestigationState.MONITORING_RESURGENCE.value}; a case still being pursued "
+                "would score its own live infrastructure as its own return"
+            ),
+        )
+
+    signals = await assemble_resurgence_signals(
+        graph,
+        prior_entity_ids=[branch.focus_entity_id for branch in investigation.branches],
+        observed_at=now,
+        provenance_of=provenance_of,
+    )
+    scorer = engine or ResurgenceEngine()
+    grouped = signals_by_candidate(signals)
+
+    findings = tuple(
+        ResurgenceFinding(
+            candidate_type=entity_type,
+            candidate_key=natural_key,
+            assessment=scorer.assess(
+                campaign=campaign,
+                signals=members,
+                candidate_population=candidate_population,
+                assessed_at=now,
+            ),
+        )
+        for (entity_type, natural_key), members in sorted(
+            grouped.items(), key=lambda item: (item[0][0].value, item[0][1])
+        )
+    )
+    return WatchReport(
+        investigation_id=investigation.investigation_id,
+        campaign=campaign,
+        checked_at=now,
+        candidates_examined=len(grouped),
+        findings=findings,
+    )
+
+
+def resume_pursuit(
+    investigation: Investigation,
+    *,
+    candidate_entity_id: str,
+    candidate_key: str,
+    reason: str,
+    now: datetime,
+    additional_budget: float,
+) -> Investigation:
+    """Reopen a watched case on a candidate that came back.
+
+    Pure, like ``mark_monitoring_resurgence`` next to it: the state transition is a value, and
+    recording it in the audit trail belongs to whoever has the sink. The resumption is also
+    written into ``notes`` so it survives on the object itself rather than only in a log.
+
+    **Everything already done survives.** Prior branches, hypotheses and the budget already
+    spent are untouched, and the candidate arrives as a new branch. A case that reopened as a
+    blank page would have thrown away the reason we recognised the return — destroying our
+    investigative continuity along with the adversary's operational one, which is the trade §9
+    exists to refuse.
+
+    **The budget is added to, never reset.** A case that reopens with a fresh allowance every
+    time is a tap an adversary controls: returning is cheap for them, and the budget is what
+    bounds what it costs us. The increment is a required argument for the same reason the
+    candidate population is — every value that could be defaulted is either the permissive one
+    or the one that silently strangles a real resumption.
+    """
+    if additional_budget < 0:
+        raise ValueError("a resumption cannot grant a negative budget increment")
+
+    branch_id = f"B{len(investigation.branches)}"
+    resumed = investigation.with_branch(
+        InvestigationBranch(
+            branch_id=branch_id,
+            focus_entity_id=candidate_entity_id,
+            focus_entity_key=candidate_key,
+            depth=0,
+            budget_allocated=additional_budget,
+            created_at=now,
+        )
+    )
+    return resumed.model_copy(
+        update={
+            "state": InvestigationState.OPEN,
+            "total_budget": investigation.total_budget + additional_budget,
+            "last_step_at": now,
+            "notes": (
+                *investigation.notes,
+                f"resurgence resumed pursuit on {candidate_key} at {now.isoformat()}: {reason}",
+            ),
+        }
+    )
+
+
 __all__ = [
     "BRIDGE_RULES",
     "BridgeRule",
+    "ResurgenceFinding",
+    "WatchReport",
     "assemble_resurgence_signals",
+    "resume_pursuit",
     "signals_by_candidate",
+    "watch_for_resurgence",
 ]
