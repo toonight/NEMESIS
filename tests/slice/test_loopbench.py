@@ -374,6 +374,9 @@ def test_the_control_pilot_behaves_identically_in_both_arms(
     assert plain.evidence_sealed == evolution.evidence_sealed
     assert plain.moves == evolution.moves
     assert plain.entities_discovered == evolution.entities_discovered
+    assert plain.budget_spent == evolution.budget_spent, (
+        "identical work cost a different amount, so the arms are not spending the same budget"
+    )
     assert evolution.segments == 2, "the evolution arm did not actually segment the run"
 
 
