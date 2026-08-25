@@ -179,6 +179,42 @@ republished fingerprint are both things the operator chose to show, and they are
 that reason rather than because one collector found both."""
 
 
+FRAMER_COSTLY_KINDS: Final[frozenset[ResurgenceSignalKind]] = frozenset(
+    {
+        ResurgenceSignalKind.SHARED_EXFILTRATION_ENDPOINT,
+        ResurgenceSignalKind.SHARED_FINANCIAL_ENDPOINT,
+    }
+)
+"""Signals a framer cannot present without handing the proceeds to the party being framed.
+
+**An allowlist, and everything not named here is cheap.** The same discipline
+:func:`~nemesis.core.provenance.SourceDescriptor.is_adversary_influenceable` adopted after its
+blocklist version turned out to be the bug: a kind nobody has classified must be unable, on its
+own, to make a finding actionable. The opposite default flatters the evidence, which is the
+direction that takes somebody's infrastructure away.
+
+The membership test is not "how hard was this to obtain" — it is **"what does using it to frame
+somebody cost the framer, continuously".** Both members route the operation's *takings*:
+
+- ``SHARED_EXFILTRATION_ENDPOINT`` — the module's own argument, and the reason this table has
+  the shape it does: "Copying a drop address to have somebody else blamed means sending your
+  victims' credentials to the party you are framing."
+- ``SHARED_FINANCIAL_ENDPOINT`` — the same mechanism with money. Its own docstring does not make
+  this argument and it is made here: funds moving to an address clustered with the old
+  operation's means the framer's proceeds land in the framed party's cluster.
+
+Notably absent, and this is the point of ADR-0013 rather than an oversight:
+
+- ``SHARED_PRIVATE_KEY`` carries the highest ceiling and is **not** framer-costly. Stealing a key
+  is expensive; *using a stolen one* costs nothing further, and this module's own docstring says
+  so — "an adversary who lost a key, or one framing a competitor with a stolen one, produces the
+  same observation". A ceiling ordered by acquisition cost cannot answer a question about
+  ongoing cost.
+- ``SHARED_TOOLING_ARTIFACT`` is a copy. On the local bench it is the fact that tips a framed
+  pair past the single-origin veto, having cost the framer nothing.
+"""
+
+
 def _check_tables_are_total() -> None:
     """Import-time check, in the house style of ``authorization._check_risk_table``.
 
@@ -193,6 +229,14 @@ def _check_tables_are_total() -> None:
         raise RuntimeError(
             f"resurgence signal kind(s) without a ceiling {sorted(missing_ceiling)} or a "
             f"correlation group {sorted(missing_group)}"
+        )
+    unknown = FRAMER_COSTLY_KINDS - set(ResurgenceSignalKind)
+    if unknown:
+        raise RuntimeError(f"FRAMER_COSTLY_KINDS names non-kinds {sorted(unknown)}")
+    if not FRAMER_COSTLY_KINDS:
+        raise RuntimeError(
+            "FRAMER_COSTLY_KINDS is empty, which makes every resurgence finding unreachable; "
+            "an empty allowlist is a refusal to decide wearing a control's name"
         )
 
 
@@ -388,9 +432,22 @@ class ResurgenceAssessment(BaseModel):
     def is_actionable(self) -> bool:
         """Whether this is strong enough to re-open a case against the named campaign.
 
-        Four conditions, each able to veto. The band must be estimable at all; the projected
+        Five conditions, each able to veto. The band must be estimable at all; the projected
         probability must clear the floor; the finding must not rest solely on facts an adversary
-        could have planted; and it must not rest on a single independent origin.
+        could have planted; it must not rest on a single independent origin; and at least one
+        contributing signal must be one a framer could not present without paying for it.
+
+        The fifth was added by ADR-0013, after the local bench attributed a *framer* — a
+        different operator who copied a key and a kit — to the party they framed, in 2 of 3
+        adversarial pairs. The measurement that decided its shape: the genuine pair and the
+        framed pair are the same object, band by band and field by field, because the
+        observations are identical. Nothing that reweights what is already there can separate
+        them, so the veto asks for something else to be present rather than scoring what is.
+
+        Why a fifth veto and not a correction to the fourth: an adversary can *cause* an
+        observation our own sensor honestly records, and the plantability model is about who
+        authored the record. For a copyable artifact those come apart, and the margin —
+        correctly, by its own terms — leaves the framer's facts standing.
 
         The last one is not implied by the others and was added after measuring: one
         certificate match attested by one own-sensor — unplantable, so the robustness margin
@@ -406,7 +463,18 @@ class ResurgenceAssessment(BaseModel):
             and self.opinion.projected_probability >= ACTIONABLE_FLOOR
             and not self.fusion.rests_only_on_plantable_evidence
             and not self.is_single_origin
+            and self.has_framer_costly_signal
         )
+
+    @property
+    def has_framer_costly_signal(self) -> bool:
+        """Whether any contributing signal is one a framer would have to pay to present.
+
+        Read off :data:`FRAMER_COSTLY_KINDS`, which is an allowlist: a kind nobody classified is
+        cheap. Separate from :meth:`is_actionable` so a reader can see *which* veto refused, and
+        so the renderer can say it.
+        """
+        return any(item.kind in FRAMER_COSTLY_KINDS for item in self.contributions)
 
     def render(self) -> str:
         lines = [

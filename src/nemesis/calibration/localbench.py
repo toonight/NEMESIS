@@ -459,7 +459,23 @@ def run_local_bench(
             name=f"op{index:03d}.bench.invalid",
             key_id=f"key-{family}",
             kit_id=f"kit-{family}" if role in (0, 1) else f"kit-{index}-solo",
-            drop=f"drop-{index}@bench.invalid",
+            # Shared per family, because an operator's takings have to go somewhere and the
+            # same operator sends them to the same place. Until ADR-0013 every operation was
+            # minted with its own drop, so SHARED_EXFILTRATION_ENDPOINT — the one kind whose
+            # docstring argues a framer bears a cost — fired zero times, while three docstrings
+            # here and in the rendered report claimed it was exercised. That omission is what
+            # made the genuine pair and the framed pair the same object: with the drop back,
+            # a genuine pair carries exfil + key + tooling and a framed pair carries key +
+            # tooling, and the bench can tell a real fix from one that just refuses everything.
+            # ...but only for the two that also share a kit. The third keeps its own, so the
+            # range still contains linked pairs resting on a single fact and the single-origin
+            # veto still has something to refuse. Sharing it across all three took that
+            # category to 0/0 and quietly retired a control the bench exists to measure.
+            drop=(
+                f"drop-family-{family}@bench.invalid"
+                if role in (0, 1)
+                else f"drop-{index}@bench.invalid"
+            ),
             started_at=started + timedelta(days=index * 7),
             operator=f"operator-{family}",
         )

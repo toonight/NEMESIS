@@ -300,6 +300,14 @@ async def test_two_independent_bridges_with_provenance_support_a_resurgence() ->
     await link(graph, old_kit, family, RelationType.BELONGS_TO_FAMILY)
     await link(graph, new_kit, family, RelationType.BELONGS_TO_FAMILY)
 
+    # ADR-0013: the certificate and the family are both things a framer can copy, and until one
+    # of them costs the framer something this chain produces a lead. The drop is that cost —
+    # presenting it means delivering your victims' credentials to the party you are framing —
+    # so it is what makes this assembly a finding rather than a lead.
+    drop = await node(graph, EntityType.EMAIL_ADDRESS, "drop@anvil.invalid")
+    await link(graph, old_ip, drop, RelationType.COMMUNICATES_WITH)
+    await link(graph, new_ip, drop, RelationType.COMMUNICATES_WITH)
+
     signals = await assemble_resurgence_signals(
         graph,
         prior_entity_ids=[old_ip.entity_id, old_kit.entity_id],
@@ -309,6 +317,7 @@ async def test_two_independent_bridges_with_provenance_support_a_resurgence() ->
     kinds = {s.kind for s in signals}
     assert ResurgenceSignalKind.SHARED_PRIVATE_KEY in kinds
     assert ResurgenceSignalKind.SHARED_TOOLING_ARTIFACT in kinds
+    assert ResurgenceSignalKind.SHARED_EXFILTRATION_ENDPOINT in kinds
 
     result = ResurgenceEngine().assess(
         campaign="GLASS ANVIL",
@@ -317,6 +326,7 @@ async def test_two_independent_bridges_with_provenance_support_a_resurgence() ->
         assessed_at=NOW,
     )
     assert result.is_actionable
+    assert result.has_framer_costly_signal
     assert not result.is_single_origin
 
 
