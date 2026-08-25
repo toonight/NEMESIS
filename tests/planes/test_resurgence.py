@@ -219,8 +219,48 @@ def test_one_plantable_fact_cannot_carry_a_resurgence_finding() -> None:
 def test_two_independent_unplantable_facts_support_a_resurgence() -> None:
     """The engine must be able to say yes, or it is not a detector.
 
-    Two different things about the world — a private key the operator reused and a build
-    artefact from their toolchain — each attested by a channel an adversary cannot write into.
+    Three different things about the world, and the third is load-bearing for a reason ADR-0013
+    measured: a private key and a build artefact are both *copies*, and a framer presenting them
+    produces evidence identical to a genuine return, field for field. The drop address is not a
+    copy — presenting it means routing your victims' credentials to the party you are framing —
+    so it is what lets this pair be a finding rather than a lead.
+
+    Before ADR-0013 this test asserted the same conclusion from the first two alone. That is
+    the assertion the local bench falsified.
+    """
+    result = assess(
+        signal(
+            ResurgenceSignalKind.SHARED_PRIVATE_KEY,
+            attribute="cert:3f8a1c7d9e4b2a6058c31df24e97b0a5",
+            globally_unique=True,
+            observed_by=unplantable("tls-honeypot"),
+        ),
+        signal(
+            ResurgenceSignalKind.SHARED_TOOLING_ARTIFACT,
+            attribute="build:pdb-path-D:\\anvil\\loader",
+            population=3,
+            observed_by=unplantable("malware-sandbox"),
+        ),
+        signal(
+            ResurgenceSignalKind.SHARED_EXFILTRATION_ENDPOINT,
+            attribute="email_address:drop@anvil.invalid",
+            globally_unique=True,
+            observed_by=unplantable("mail-sensor"),
+        ),
+    )
+    assert result.is_actionable
+    assert result.has_framer_costly_signal
+    assert result.band not in {ConfidenceBand.INSUFFICIENT_BASIS, ConfidenceBand.ALMOST_NO_CHANCE}
+    assert not result.fusion.rests_only_on_plantable_evidence
+
+
+def test_copies_alone_are_a_lead_however_unplantable_the_record() -> None:
+    """The other half of the test above, and the one the bench had to teach us.
+
+    The same two facts, each attested by a channel an adversary cannot write into, each
+    globally unique — and refused, because both are artifacts a framer can copy. The record is
+    authentic; what it attests to is transferable. Every earlier veto passes here, which is why
+    a fifth one was needed rather than a correction to a fourth.
     """
     result = assess(
         signal(
@@ -236,9 +276,12 @@ def test_two_independent_unplantable_facts_support_a_resurgence() -> None:
             observed_by=unplantable("malware-sandbox"),
         ),
     )
-    assert result.is_actionable
-    assert result.band not in {ConfidenceBand.INSUFFICIENT_BASIS, ConfidenceBand.ALMOST_NO_CHANCE}
+    assert not result.has_framer_costly_signal
+    assert not result.is_actionable
+    # Every other veto passes, so this refusal is the fifth one and nothing else.
+    assert result.band is not ConfidenceBand.INSUFFICIENT_BASIS
     assert not result.fusion.rests_only_on_plantable_evidence
+    assert not result.is_single_origin
 
 
 def test_signals_from_one_generating_process_do_not_accumulate() -> None:
@@ -275,8 +318,12 @@ def test_signals_from_one_generating_process_do_not_accumulate() -> None:
 # -- the §31 scenarios -------------------------------------------------------------
 
 
-def test_c2_migration_is_recognised_through_a_reused_key() -> None:
-    """The C2 address changed; the private key behind its certificate did not."""
+def test_c2_migration_through_a_reused_key_is_a_lead_not_a_finding() -> None:
+    """The C2 address changed; the private key behind its certificate did not.
+
+    Asserted ``is_actionable`` until ADR-0013. Renamed rather than edited in place, because
+    the change is in what the platform concludes and a test whose name still promises
+    recognition would hide it."""
     result = assess(
         signal(
             ResurgenceSignalKind.SHARED_PRIVATE_KEY,
@@ -295,8 +342,17 @@ def test_c2_migration_is_recognised_through_a_reused_key() -> None:
             new_entity_key="203.0.113.88",
         ),
     )
-    assert result.is_actionable
     assert result.disclosure is DisclosureClass.DELIVERABLE
+    # ADR-0013, and this is a capability the platform gave up deliberately rather than a
+    # regression. A reused key and a copied beacon config are both strings a framer can present;
+    # this module's own docstring says a thief with a stolen key "produces the same observation".
+    # Canonical C2 migration is therefore a lead here, not a finding, until something the framer
+    # would have to pay for shows up alongside it.
+    assert not result.is_actionable
+    assert not result.has_framer_costly_signal
+    assert result.band is not ConfidenceBand.INSUFFICIENT_BASIS, (
+        "the refusal must be the framer-cost veto, not a collapse of the estimate"
+    )
 
 
 def test_wallet_reuse_is_a_financial_signal_and_stays_deliverable() -> None:
@@ -461,3 +517,80 @@ def test_a_single_origin_is_a_lead_however_confident_it_looks() -> None:
     assert result.is_single_origin
     assert not result.is_actionable
     assert "one independent origin" in result.render()
+
+
+# -- ADR-0013: corroboration must weigh staging cost, not count facts ----------------
+
+
+def test_a_finding_needs_one_signal_a_framer_would_have_to_pay_for() -> None:
+    """The fifth veto, and the reason it is not a reweighting.
+
+    Measured on the local bench: the genuine pair and the framed pair are the same object —
+    band ``very_likely``, belief 0.8100, 2 facts, 2 unplantable, ``no_removable_fact``, 2
+    independent origins, actionable, both — because the observations are identical. Nothing
+    that reweights what is already there can separate them.
+
+    What separates them is a signal the framer would have to *pay* for: routing the takings
+    to the party being framed. A key and a kit are copies; a drop address is a transfer.
+    """
+    key_and_kit = (
+        signal(
+            ResurgenceSignalKind.SHARED_PRIVATE_KEY,
+            attribute="public_key:aa",
+            observed_by=sensor("own-sensor-a"),
+            globally_unique=True,
+        ),
+        signal(
+            ResurgenceSignalKind.SHARED_TOOLING_ARTIFACT,
+            attribute="kit_hash:bb",
+            observed_by=sensor("own-sensor-b"),
+            globally_unique=True,
+        ),
+    )
+    engine = ResurgenceEngine()
+    copies_only = engine.assess(
+        campaign="glass-anvil",
+        signals=key_and_kit,
+        candidate_population=POPULATION,
+        assessed_at=NOW,
+    )
+    assert not copies_only.is_actionable
+    assert not copies_only.has_framer_costly_signal
+
+    with_a_transfer = engine.assess(
+        campaign="glass-anvil",
+        signals=(
+            *key_and_kit,
+            signal(
+                ResurgenceSignalKind.SHARED_EXFILTRATION_ENDPOINT,
+                attribute="email_address:drop@example.invalid",
+                observed_by=sensor("own-sensor-c"),
+                globally_unique=True,
+            ),
+        ),
+        candidate_population=POPULATION,
+        assessed_at=NOW,
+    )
+    assert with_a_transfer.has_framer_costly_signal
+    assert with_a_transfer.is_actionable
+
+
+def test_the_framer_costly_table_is_total_and_defaults_to_cheap() -> None:
+    """An allowlist, in the discipline ``provenance.py`` adopted after its blocklist was the bug.
+
+    A new signal kind that nobody classified must be *cheap* — unable on its own to make a
+    finding actionable. The opposite default flatters the evidence, which is the direction that
+    gets somebody's infrastructure taken away.
+    """
+    from nemesis.pursuit.resurgence import FRAMER_COSTLY_KINDS
+
+    assert set(ResurgenceSignalKind) >= FRAMER_COSTLY_KINDS
+    assert FRAMER_COSTLY_KINDS, "an empty table makes every finding unreachable"
+    assert set(ResurgenceSignalKind) != FRAMER_COSTLY_KINDS, (
+        "a table naming all of them is no table"
+    )
+    # The two whose docstrings argue the framer bears a cost: the takings go there.
+    assert ResurgenceSignalKind.SHARED_PRIVATE_KEY not in FRAMER_COSTLY_KINDS, (
+        "the module's own docstring says a thief 'produces the same observation'"
+    )
+    assert ResurgenceSignalKind.NAMING_PATTERN not in FRAMER_COSTLY_KINDS

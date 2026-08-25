@@ -575,6 +575,11 @@ def _actionable_at(assessment: object, floor: float) -> bool:
         and assessment.opinion.projected_probability >= floor  # type: ignore[attr-defined]
         and not assessment.fusion.rests_only_on_plantable_evidence  # type: ignore[attr-defined]
         and not assessment.is_single_origin  # type: ignore[attr-defined]
+        # ADR-0013's fifth veto. Mirrored here because this function must agree with the engine
+        # at the shipped floor — a test asserts exactly that, and it caught this the moment the
+        # veto landed. A floor study measuring a *different* verdict function from the one the
+        # platform ships reports sensitivity for a system nobody runs.
+        and assessment.has_framer_costly_signal  # type: ignore[attr-defined]
     )
 
 

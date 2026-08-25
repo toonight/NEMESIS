@@ -233,17 +233,25 @@ async def test_two_independent_facts_about_one_candidate_reopen_the_case() -> No
     was a single-origin lead. Per-candidate grouping is doing exactly what it should: "this
     address is the campaign returning" is not supported by a fact about somebody else.
 
-    So the world here gives one candidate domain two bridges in two different correlation
-    groups: the certificate it presents (key control) and the kit it was built with (tooling).
+    So the world here gives one candidate domain three bridges in three different correlation
+    groups: the certificate it presents (key control), the kit it was built with (tooling), and
+    the address it delivers its takings to.
+
+    The third arrived with ADR-0013. The first two are both artifacts a framer can copy, and a
+    framer copying them produces evidence identical to a return; the drop is the one a framer
+    cannot present without delivering their victims' credentials to the party they are framing.
+    Without it this case is a lead and the case does not reopen.
     """
     graph = InMemoryGraphStore()
     prior = await node(graph, EntityType.DOMAIN, "acme-invoice-portal.example")
     returned = await node(graph, EntityType.DOMAIN, "globex-invoice-portal.example")
     cert = await node(graph, EntityType.TLS_CERTIFICATE, "3f" * 32)
     kit = await node(graph, EntityType.PHISHING_KIT, "anvil-kit")
+    drop = await node(graph, EntityType.EMAIL_ADDRESS, "drop@anvil.invalid")
     for domain in (prior, returned):
         await link(graph, domain, cert, RelationType.PRESENTS_CERTIFICATE)
         await link(graph, domain, kit, RelationType.BUILT_WITH)
+        await link(graph, domain, drop, RelationType.COMMUNICATES_WITH)
 
     case = watched(prior).model_copy(
         update={

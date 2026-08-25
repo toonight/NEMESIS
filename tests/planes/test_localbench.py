@@ -140,29 +140,50 @@ def test_pairs_sharing_nothing_are_never_called_linked() -> None:
 # -- the finding: the margin does not stop a planted artifact ------------------------
 
 
-def test_a_framer_who_copies_the_observables_is_attributed_to_the_party_framed() -> None:
-    """**This asserts a failure of the engine, and it is the bench's most useful output.**
+def test_a_framer_who_copies_the_observables_is_refused() -> None:
+    """Was an assertion of failure until ADR-0013; now an assertion of the defence.
 
-    A different operator copies family 0's key and kit. Our own sensor honestly observes both,
-    so the robustness margin — which keeps a fact attested by a channel an adversary cannot
-    author — leaves them standing, and the engine calls the framer a resurgence of the party
-    they framed.
+    The history matters and is why this test was rewritten rather than replaced. It used to
+    assert ``any(o.called_linked for o in planted)`` — the engine attributing a *framer* to the
+    party they framed, 2 of 3 adversarial pairs — with a note that the fix was a threat-model
+    change and belonged in an ADR. Its own text said that if it ever passed, it should be
+    rewritten to assert the defence rather than deleted. This is that rewrite.
 
-    The margin's plantability model is about **who authored the record**, not about **who
-    arranged the fact**. For artifact-borne signals observed by our own sensors those come
-    apart, and this is where. `SourceDescriptor.is_adversary_influenceable` says an adversary
-    "can cause an observation but cannot author the record" — the bench shows causing the
-    observation is enough.
-
-    Pinned as an expectation rather than fixed here: the fix is a threat-model change, not a
-    constant, and it should be argued in an ADR rather than smuggled into a test run.
+    What changed: :data:`~nemesis.pursuit.resurgence.FRAMER_COSTLY_KINDS` and the fifth veto on
+    ``is_actionable``. A key and a kit are copies; a drop address is a transfer, and a framer
+    presenting one is routing their victims' credentials to the party they are framing.
     """
     result = bench()
     planted = result.planted_pairs
     assert planted, "the bench produced no adversarial pairs, so this proves nothing"
-    assert any(o.called_linked for o in planted), (
-        "if this now passes, the engine gained a defence against planted artifacts and this "
-        "test should be rewritten to assert it rather than deleted"
+    assert not any(o.called_linked for o in planted), (
+        "a framer was attributed to the party they framed: "
+        + "; ".join(
+            f"{o.left} x {o.right} {sorted(s.kind.value for s in o.signals)}"
+            for o in planted
+            if o.called_linked
+        )
+    )
+
+
+def test_refusing_the_framer_did_not_cost_the_genuine_findings() -> None:
+    """The half that is not optional, and the reason the test above is not enough on its own.
+
+    Measured while writing ADR-0013: removing ``OWN_SENSOR`` from the unplantable allowlist also
+    takes the adversarial figure to 0/3 — and recall from 10/10 to 0/10. An engine that refuses
+    everything satisfies the framer assertion perfectly and is useless. Any future change that
+    buys the framer refusal with recall fails here rather than passing quietly.
+    """
+    result = bench()
+    clearable = result.clearable_pairs
+    assert clearable, "no linked pair carried enough facts to be recognisable"
+    assert result.true_positives == len(clearable), (
+        f"recall fell to {result.true_positives}/{len(clearable)}; a framer defence bought "
+        f"with recall is the blunt fix ADR-0013 measured and rejected"
+    )
+    assert result.single_fact_refusals, (
+        "no linked pair rests on a single fact, so the single-origin veto is unmeasured — the "
+        "shape the fixture had when every operation shared a drop"
     )
 
 
