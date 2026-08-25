@@ -1046,6 +1046,37 @@ def memory(
     )
 
 
+@app.command(name="standing-demo")
+def standing_demo(
+    workspace: Annotated[
+        Path | None, typer.Option(help="Where to write the vault, audit trail and drafts.")
+    ] = None,
+) -> None:
+    """Exercise the infrastructure role gate end to end: whose a target is decides what may run.
+
+    The reference `demo` never reaches this gate. Its capability permits one operation class,
+    SIMULATION, and every role is eligible for that one — so the gate stayed silent through the
+    whole run, not because it agreed but because nothing it governs was ever asked for.
+
+    This asks for the two implemented operations it does govern, against five targets the
+    standing producer classified: a domain the adversary controls, a legitimate company's host
+    the adversary has compromised, a registrar unrelated parties share, a node nobody could
+    classify, and one whose classification the approver forgot to bind. Both operations only
+    produce text and neither can send it; nothing is contacted.
+    """
+    import asyncio
+
+    from nemesis.slice.standing_session import run_standing_demonstration
+
+    console = Console()
+    result = asyncio.run(
+        run_standing_demonstration(workspace=Path(workspace) if workspace else None)
+    )
+    console.print(result.render(), highlight=False)
+    console.print()
+    console.print(Text(f"  workspace {result.workspace}", style="dim"))
+
+
 @app.command()
 def localbench(
     operations: Annotated[
@@ -1058,8 +1089,12 @@ def localbench(
     """Run controlled operations on a loopback range and score them against the truth.
 
     The part of milestone 3 that needs no funding, no registrar and no third party. Real keys,
-    real certificates, real TLS handshakes, real kit bytes — and the linkage is ground truth
-    because this command minted it rather than a label attached beside the evidence.
+    real certificates, real kit bytes — and the linkage is ground truth because this command
+    minted it rather than a label attached beside the evidence.
+
+    It opens no socket. An earlier version served each certificate over loopback TLS so the
+    fingerprint came off a wire; only the collection plane may hold network capability, so the
+    certificate is now read as bytes. Weaker, and said so in both directions.
 
     Everything binds to 127.0.0.1. Nothing is registered anywhere and nothing is contacted.
 

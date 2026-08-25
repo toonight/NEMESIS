@@ -389,7 +389,7 @@ class BenchResult:
         lines = [
             "Local bench — controlled operations on a loopback range",
             "",
-            "  Real keys, real certificates, real handshakes, real kit bytes. The linkage is",
+            "  Real keys, real certificates, real kit bytes, and no socket at all. The linkage is",
             "  ground truth because this module minted it, not a label attached beside the",
             "  evidence. Nothing was registered anywhere and no third party was contacted.",
             "",

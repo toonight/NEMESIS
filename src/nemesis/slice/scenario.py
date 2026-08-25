@@ -2561,9 +2561,18 @@ async def _effects(
         actor=context.actor, actor_kind=ActorKind.AGENT, request=notification, result=drafted
     )
 
-    # The rejected option, attempted anyway. Two independent controls refuse it: the class
-    # has no adapter, and the capability forbids it. Recorded, because a pattern of denied
-    # attempts is a security signal.
+    # The rejected option, attempted anyway. Recorded, because a pattern of denied attempts is
+    # a security signal.
+    #
+    # ONE control refuses it here, not two. This comment used to claim the class having no
+    # adapter was a second, independent refusal; it is not, on this path. `perform` calls
+    # `preflight` in the parent process and looks up no adapter at all — the lookup lives in the
+    # child worker, strictly downstream — so what refuses is the capability's forbidden set, and
+    # the observed detail says exactly that: "registrar_suspension is explicitly forbidden by
+    # this capability". Depth here is real but differently shaped: widen the capability and the
+    # next thing to refuse is the infrastructure role gate, which `preflight` reaches before any
+    # adapter question is asked. Naming the wrong control as the backstop is how someone widens
+    # a grant believing a second one still stands.
     forbidden = EffectRequest(
         operation_id=new_id(IdPrefix.OPERATION),
         operation=OperationClass.REGISTRAR_SUSPENSION,
