@@ -1572,7 +1572,14 @@ def own_sensor_fixtures() -> FixtureTable:
     table: dict[FixtureKey, FixtureAnswer] = {}
     artifact_ref = _ref(EntityType.SOURCE_CODE_ARTIFACT, BUILD_PATH)
 
-    def captured(domain: str, *, message_id: str, seen: datetime, note: str) -> ObservationRecord:
+    def captured(
+        domain: str,
+        *,
+        message_id: str,
+        seen: datetime,
+        note: str,
+        available_from: datetime | None = None,
+    ) -> ObservationRecord:
         return _record(
             artifact=_render(
                 "SIMULATED email security gateway capture",
@@ -1598,9 +1605,12 @@ def own_sensor_fixtures() -> FixtureTable:
             shared_attribute=f"kit build path {BUILD_PATH}",
             population=KIT_MARKER_POPULATION,
             corpus=KIT_MARKER_CORPUS,
+            available_from=available_from,
         )
 
-    def exfiltrated(domain: str, *, seen: datetime, note: str) -> ObservationRecord:
+    def exfiltrated(
+        domain: str, *, seen: datetime, note: str, available_from: datetime | None = None
+    ) -> ObservationRecord:
         """What the egress side of the same edge saw: where the credentials went.
 
         A second *observation*, not a second organisation. The gateway inspects inbound mail
@@ -1630,6 +1640,7 @@ def own_sensor_fixtures() -> FixtureTable:
             shared_attribute=f"credential drop {EXFIL_ADDRESS}",
             population=EXFIL_DROP_POPULATION,
             corpus=EXFIL_DROP_CORPUS,
+            available_from=available_from,
         )
 
     table[(PivotType.OWN_TELEMETRY, SEED_DOMAIN)] = FixtureAnswer(
@@ -1647,6 +1658,9 @@ def own_sensor_fixtures() -> FixtureTable:
             ),
         )
     )
+    # The gate belongs on each record, not on the answer: `FixtureAnswer` has no
+    # `available_from` and used to discard one passed here without a word, which left both of
+    # these visible to a run answering as of phase 2.
     table[(PivotType.OWN_TELEMETRY, RESURGENCE_DOMAIN)] = FixtureAnswer(
         records=(
             captured(
@@ -1657,13 +1671,14 @@ def own_sensor_fixtures() -> FixtureTable:
                     "Forty-five days after the disruption, aimed at the same accounts-payable "
                     "mailbox."
                 ),
+                available_from=RESURGENCE_AS_OF,
             ),
             exfiltrated(
                 RESURGENCE_DOMAIN,
                 seen=RESURGENCE_AS_OF,
                 note="The same drop as the original wave, still collecting.",
+                available_from=RESURGENCE_AS_OF,
             ),
-        ),
-        available_from=RESURGENCE_AS_OF,
+        )
     )
     return table

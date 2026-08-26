@@ -19,6 +19,7 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 
 import pytest
+from pydantic import ValidationError
 
 from nemesis.collect.base import (
     QUALIFIER_GLOBALLY_UNIQUE,
@@ -51,6 +52,7 @@ from nemesis.collect.fixtures.glass_anvil import (
     PROMPT_INJECTION_POST,
     REGISTRAR,
     RESURGENCE_AS_OF,
+    RESURGENCE_DOMAIN,
     RESURGENCE_IP,
     SCENARIO_PRESENT,
     SEED_DOMAIN,
@@ -60,6 +62,7 @@ from nemesis.collect.fixtures.glass_anvil import (
     dark_web_fixtures,
     malware_fixtures,
     network_fixtures,
+    own_sensor_fixtures,
     passive_dns_fixtures,
     phase_one_detection,
     rdap_fixtures,
@@ -70,11 +73,12 @@ from nemesis.collect.simulated import (
     SimulatedDarkWebConnector,
     SimulatedMalwareConnector,
     SimulatedNetworkConnector,
+    SimulatedOwnSensorConnector,
     SimulatedPassiveDnsConnector,
     SimulatedRdapConnector,
     simulated_connectors,
 )
-from nemesis.core.claims import ClaimKind, DerivationKind
+from nemesis.core.claims import ClaimKind, DerivationKind, Statement
 from nemesis.core.entities import (
     CATEGORY_OF,
     EntityCategory,
@@ -84,6 +88,7 @@ from nemesis.core.entities import (
 )
 from nemesis.core.evidence import AdmissibilityDefect, ArtifactKind
 from nemesis.core.relationships import IDENTITY_ASSERTING_RELATIONS, Relationship, RelationType
+from nemesis.core.temporal import TemporalExtent
 from nemesis.ports.collection import PivotRequest, PivotResult, PivotType
 from nemesis.pursuit.materialize import materialize
 
@@ -531,6 +536,113 @@ def test_resurgent_persona_is_invisible_before_its_date() -> None:
     )
     assert len(phase_eight.observations) == 2
     assert any(PGP_FINGERPRINT in claim.statement.obj for claim in phase_eight.observations)
+
+
+def test_resurgence_own_telemetry_is_invisible_before_its_date() -> None:
+    """The third connector carrying phase-8 material, and the one nobody had asserted this on.
+
+    The certificate and dark-web gates above were tested and work. This one was not, and did
+    not: the fixture passed ``available_from`` to ``FixtureAnswer``, which has no such field,
+    so pydantic's default ``extra="ignore"`` swallowed it and every record came back
+    ungated. A phase-2 connector returned two records dated forty-five days in its future.
+
+    The consequence is not visible in the reference run, because both callers of this pivot
+    sit in the resurgence stage and ask with the phase-8 clock. That is exactly why it
+    survived: a control is only as good as the caller that happens to exercise it, and this
+    one had none.
+    """
+    phase_two = _pivot(
+        SimulatedOwnSensorConnector(as_of=SCENARIO_PRESENT),
+        PivotType.OWN_TELEMETRY,
+        EntityType.DOMAIN,
+        RESURGENCE_DOMAIN,
+    )
+    assert phase_two.succeeded
+    assert phase_two.is_empty, (
+        "a phase-2 run can see the resurgence wave; the transaction-time gate is open"
+    )
+
+    phase_eight = _pivot(
+        SimulatedOwnSensorConnector(as_of=RESURGENCE_AS_OF),
+        PivotType.OWN_TELEMETRY,
+        EntityType.DOMAIN,
+        RESURGENCE_DOMAIN,
+    )
+    assert len(phase_eight.observations) == 2
+    assert any(RESURGENCE_DOMAIN in claim.statement.subject for claim in phase_eight.observations)
+
+
+def test_the_original_wave_stays_visible_from_the_start() -> None:
+    """The gate must close on the future without closing on the past.
+
+    Stated separately because the cheapest way to make the test above pass is to gate the
+    whole answer, which would delete the original wave from every phase-2 run — and the
+    original wave is the only unplantable attestation the reference scenario has.
+    """
+    phase_two = _pivot(
+        SimulatedOwnSensorConnector(as_of=SCENARIO_PRESENT),
+        PivotType.OWN_TELEMETRY,
+        EntityType.DOMAIN,
+        SEED_DOMAIN,
+    )
+    assert len(phase_two.observations) == 2
+
+
+def test_a_fixture_answer_refuses_a_field_it_does_not_have() -> None:
+    """The structural half of the fix, and the reason the gate could be open at all.
+
+    ``FixtureAnswer`` accepted and discarded ``available_from`` in silence for as long as the
+    fixture had been claiming to use it. Silence is the whole defect: a typo'd or misplaced
+    keyword on a fixture model is always a control that is not there, and it should cost a
+    traceback at import rather than a wrong answer at collection time.
+    """
+    with pytest.raises(ValidationError):
+        FixtureAnswer(records=(), available_from=RESURGENCE_AS_OF)  # type: ignore[call-arg]
+
+    with pytest.raises(ValidationError):
+        ObservationRecord(  # type: ignore[call-arg]
+            artifact=b"x",
+            artifact_kind=ArtifactKind.LOG_RECORD,
+            statement=Statement(
+                subject="domain:a.example",
+                predicate=RelationType.RESOLVES_TO.value,
+                obj="ip_address:203.0.113.1",
+                natural_language="a",
+            ),
+            extent=TemporalExtent.at(SCENARIO_PRESENT),
+            trucated=True,
+        )
+
+
+def test_no_fixture_table_smuggles_phase_eight_material_past_the_gate() -> None:
+    """Every record dated after the scenario present must say so, in every fixture set.
+
+    Written over the tables rather than over one connector, because the defect was a single
+    misplaced keyword and nothing would have stopped the next author repeating it in a
+    different table.
+    """
+    tables = {
+        "passive_dns": passive_dns_fixtures(),
+        "certificate": certificate_fixtures(),
+        "rdap": rdap_fixtures(),
+        "network": network_fixtures(),
+        "malware": malware_fixtures(),
+        "dark_web": dark_web_fixtures(),
+        "blockchain": blockchain_fixtures(),
+        "own_sensor": own_sensor_fixtures(),
+    }
+    ungated: list[str] = []
+    for name, table in tables.items():
+        for (pivot, key), answer in table.items():
+            for record in answer.records:
+                if record.extent.known_from <= SCENARIO_PRESENT:
+                    continue
+                if record.available_from is None:
+                    ungated.append(f"{name}:{pivot.value}:{key}")
+    assert not ungated, (
+        "these records are dated after the scenario present and carry no available_from, so "
+        f"a phase-2 run can see evidence that did not exist yet: {sorted(set(ungated))}"
+    )
 
 
 def test_collection_is_stamped_with_the_scenario_clock_not_the_wall_clock() -> None:
