@@ -41,6 +41,7 @@ from nemesis.core.relationships import PivotSelectivity
 from nemesis.core.temporal import TemporalExtent
 from nemesis.pursuit.resurgence import (
     BELIEF_CEILING,
+    ResurgenceAssessment,
     ResurgenceEngine,
     ResurgenceSignal,
     ResurgenceSignalKind,
@@ -560,26 +561,33 @@ class FloorSensitivity:
         return "\n".join(lines)
 
 
-def _actionable_at(assessment: object, floor: float) -> bool:
+def _actionable_at(assessment: ResurgenceAssessment, floor: float) -> bool:
     """The actionable verdict recomputed against an arbitrary floor.
 
     Recomputed rather than reached by mutating ``ACTIONABLE_FLOOR``, which is ``Final`` and
     should stay that way: a probe that rebinds a shipped constant is one bad ``finally`` away
     from leaving the platform running on a threshold nobody chose. Every component of the
     verdict is already exposed, so the parameterised form needs no mutation at all.
+
+    **Typed, and it was not.** The parameter used to be ``object`` with a ``type: ignore`` on
+    every clause, so mypy could not see a field rename here at all — the annotation is what
+    makes a rename a type error rather than a silent divergence. The agreement test that guards
+    the rest now runs over the swept grid rather than six hand-picked probes: a mis-wiring to
+    ``continuity_established`` shows up at 1 disagreement over the probes and 21 over the sweep,
+    and a control that fails on one case is one case away from not failing at all.
     """
     from nemesis.core.confidence import ConfidenceBand
 
     return (
-        assessment.band is not ConfidenceBand.INSUFFICIENT_BASIS  # type: ignore[attr-defined]
-        and assessment.opinion.projected_probability >= floor  # type: ignore[attr-defined]
-        and not assessment.fusion.rests_only_on_plantable_evidence  # type: ignore[attr-defined]
-        and not assessment.is_single_origin  # type: ignore[attr-defined]
+        assessment.band is not ConfidenceBand.INSUFFICIENT_BASIS
+        and assessment.opinion.projected_probability >= floor
+        and not assessment.fusion.rests_only_on_plantable_evidence
+        and not assessment.is_single_origin
         # ADR-0013's fifth veto. Mirrored here because this function must agree with the engine
         # at the shipped floor — a test asserts exactly that, and it caught this the moment the
         # veto landed. A floor study measuring a *different* verdict function from the one the
         # platform ships reports sensitivity for a system nobody runs.
-        and assessment.has_framer_costly_signal  # type: ignore[attr-defined]
+        and assessment.has_framer_costly_signal
     )
 
 

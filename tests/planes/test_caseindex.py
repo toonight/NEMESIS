@@ -13,6 +13,7 @@ deleting the index costs nothing but the time to replay the events.
 
 from __future__ import annotations
 
+import json
 import tempfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -158,6 +159,63 @@ def test_an_appearance_carries_when_and_what_was_run() -> None:
     assert appearance.first_seen == T0
     assert appearance.last_seen == T0 + timedelta(hours=3)
     assert appearance.pivots == ("registration_record", "resolution_history")
+
+
+def test_an_entity_materialized_by_a_pivot_is_remembered_in_the_case() -> None:
+    """The actor at the far end of a pivot is part of the case even if nothing pivots on it.
+
+    Reproduced by a live Codex-piloted run: the graph held
+    ``ip -> c2_infrastructure -> threat_actor``, while memory reported zero cases for the
+    actor. ``pivot.execute`` recorded only the entity queried and a count of what came back;
+    the natural keys at the far end were gone by projection time.
+
+    This is a filing fact, not attribution evidence. Remembering that a report mentioned an
+    actor does not upgrade the report's ``external_reporting`` edge or establish control of
+    the IP.
+    """
+    inv = new_id(IdPrefix.INVESTIGATION)
+    event = pivoted(
+        inv,
+        entity="179.43.175.38:6870",
+        entity_type="c2_infrastructure",
+        pivot="threat_intel_lookup",
+        at=T0 + timedelta(minutes=1),
+    )
+    event = event.model_copy(
+        update={
+            "inputs": {
+                **event.inputs,
+                "materialized_entities": json.dumps(
+                    [
+                        ["c2_infrastructure", "179.43.175.38:6870"],
+                        ["threat_actor", "gru-unit-29155"],
+                    ],
+                    separators=(",", ":"),
+                ),
+            }
+        }
+    )
+
+    memory = rebuild([opened(inv, seed="179.43.175.38", seed_type="ip_address", at=T0), event])
+
+    assert memory.cases_for("threat_actor", "gru-unit-29155") == (inv,)
+    actor = memory.appearances_of("threat_actor", "gru-unit-29155")[0]
+    assert actor.pivots == (), "the pivot discovered the actor; it did not run against it"
+    assert memory.unreadable == 0
+
+
+def test_a_malformed_materialized_entity_set_is_a_reported_hole() -> None:
+    """A corrupted discovery list must not silently turn a known actor into zero cases."""
+    inv = new_id(IdPrefix.INVESTIGATION)
+    event = pivoted(inv, entity="179.43.175.38", entity_type="ip_address", at=T0)
+    event = event.model_copy(
+        update={"inputs": {**event.inputs, "materialized_entities": "not-json"}}
+    )
+
+    memory = rebuild([event])
+
+    assert memory.cases_for("ip_address", "179.43.175.38") == (inv,)
+    assert memory.unreadable == 1
 
 
 def test_prior_effects_against_a_target_are_recalled() -> None:

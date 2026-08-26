@@ -208,3 +208,39 @@ def test_the_untouched_kinds_are_named_not_omitted() -> None:
 def test_a_range_of_one_operation_is_refused() -> None:
     with pytest.raises(ValueError, match="no pair"):
         bench(operations=1)
+
+
+def test_the_bench_scores_the_recurrence_half_against_its_own_ground_truth() -> None:
+    """Without this column the bench cannot see that the split happened.
+
+    Every bench source is an own sensor, so ``fuse`` returns ``no_removable_fact`` on every pair
+    and the margin removes nothing — which means the identity figures are byte-identical whether
+    the recurrence half is wired correctly, wired to the wrong thing, or not wired at all. The
+    two halves need two ground truths: ``truly_linked`` is *same operator*, and this one is
+    *the range minted one artifact for both ends*.
+
+    They disagree on exactly the adversarial pairs, which is the split stated as a measurement:
+    the framer's values really do recur, and the operator really is not the same.
+    """
+    result = bench()
+    sharing = result.artifact_sharing_pairs
+    assert sharing, "no pair shares an artifact, so this measures nothing"
+    assert result.continuity_recognised == len(sharing), (
+        f"recurrence established on only {result.continuity_recognised}/{len(sharing)} pairs "
+        f"that really do share an artifact"
+    )
+    assert result.continuity_false == 0, (
+        f"recurrence established on {result.continuity_false} pairs that share nothing at all"
+    )
+    for outcome in result.planted_pairs:
+        assert outcome.shares_a_real_artifact, "the framer must really share the artifacts"
+        assert outcome.continuity_established, "the framer's values really do recur"
+        assert not outcome.called_linked, "and the operator really is not the same"
+
+
+def test_the_report_states_both_conclusions_and_that_they_are_scored_differently() -> None:
+    """A reader must not take the recurrence figure as support for the identity one."""
+    rendered = bench().render()
+    assert "RECURRENCE" in rendered
+    assert "ADVERSARIAL" in rendered
+    assert "different* ground truth" in rendered

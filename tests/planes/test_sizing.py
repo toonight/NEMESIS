@@ -50,7 +50,7 @@ def test_the_requirement_is_inflated_by_the_discriminating_fraction() -> None:
     """Pairs that cannot move under any perturbation teach a calibration nothing.
 
     Sizing against the raw precision arithmetic would under-order the corpus by the reciprocal
-    of that fraction — roughly sixfold on the current grid.
+    of that fraction — roughly tenfold on the current grid.
     """
     report = size_milestone_three()
     assert 0.0 < report.discriminating_fraction < 1.0
@@ -77,3 +77,48 @@ def test_the_report_refuses_to_be_read_as_ground_truth() -> None:
     rendered = size_milestone_three().render()
     assert "NOT milestone 3" in rendered
     assert "order of magnitude" in rendered
+
+
+def test_the_documented_sizing_matches_what_the_module_computes() -> None:
+    """The figures in the docs are derived, so a change to the engine must move them together.
+
+    Added after they came apart. ADR-0013's framer-cost veto refuses cases the sweep had counted
+    as movable, which halved the discriminating fraction — 17.1% to 9.5% — and roughly doubled
+    every operation count. Nobody re-ran ``nemesis calibrate``, so ADR-0012's table,
+    ``PROJECT_STATE.md``, and two module docstrings all kept quoting a corpus size the code no
+    longer produced, for a day.
+
+    ``scripts/check_documented_counts.py`` could not catch it: these are figures in prose, not
+    counts of things in the repository, and its registry is the wrong instrument. This is the
+    right one, because it recomputes rather than remembers.
+    """
+    from pathlib import Path
+
+    report = size_milestone_three()
+    by_margin = {item.margin: item for item in report.requirements}
+
+    def grouped(value: int) -> str:
+        """Thousands separated by a space, as the documents write them."""
+        return f"{value:,}".replace(",", " ")
+
+    ten, five, two = by_margin[0.10], by_margin[0.05], by_margin[0.02]
+    quoted = {
+        Path("docs/adr/0012-controlled-operations-for-ground-truth.md"): (
+            f"| ±10% | {ten.discriminating_pairs} | {grouped(ten.total_pairs)} | "
+            f"~{grouped(ten.operations)} |"
+        ),
+        Path("docs/architecture/PROJECT_STATE.md"): (
+            f"**±10% needs ~{grouped(ten.operations)} controlled operations, "
+            f"±5% ~{grouped(five.operations)}, ±2% ~{grouped(two.operations)}**"
+        ),
+    }
+    for path, expected in quoted.items():
+        text = path.read_text(encoding="utf-8")
+        assert expected in text, (
+            f"{path} does not quote what sizing computes.\n  expected: {expected}\n"
+            f"  run `uv run nemesis calibrate` and restate the figures."
+        )
+
+    fraction = f"{report.discriminating_fraction:.1%}"
+    state = Path("docs/architecture/PROJECT_STATE.md").read_text(encoding="utf-8")
+    assert f"{report.movable}/{report.grid_cases} = {fraction}" in state

@@ -25,6 +25,7 @@ Ordering inside a step matters and is deliberate:
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Sequence
 from datetime import datetime
 
@@ -459,6 +460,7 @@ class PursuitEngine:
         held: list[str] = []
         recorded: list[Claim] = []
         discovered: list[str] = []
+        materialized_entities: dict[tuple[str, str], None] = {}
         materialized_edges: list[Relationship] = []
         skipped: tuple[str, ...] = ()
 
@@ -497,6 +499,7 @@ class PursuitEngine:
             for entity in materialized.entities:
                 stored = await self._graph.upsert_entity(entity)
                 discovered.append(stored.entity_id)
+                materialized_entities[(stored.entity_type.value, stored.natural_key)] = None
             for relationship in materialized.relationships:
                 await self._graph.add_relationship(relationship)
                 materialized_edges.append(relationship)
@@ -571,6 +574,15 @@ class PursuitEngine:
                 "claims": str(len(recorded)),
                 "evidence_sealed": str(len(sealed)),
                 "entities": str(len(discovered)),
+                # The count above detects gross drift and cannot reconstruct which nodes
+                # entered the case. The typed natural keys are the durable filing record:
+                # entity ids are graph-local aliases and disappear at process boundaries.
+                # Sorted and compact so the same connector answer produces the same audit
+                # input regardless of claim ordering. PivotRequest.max_results bounds the
+                # list; this never serializes an unbounded graph traversal.
+                "materialized_entities": json.dumps(
+                    sorted(materialized_entities), separators=(",", ":")
+                ),
                 "truncated": str(executed.truncated),
                 "error": executed.error or "",
                 "unmaterialized_claims": str(len(skipped)),

@@ -15,7 +15,6 @@ from nemesis.calibration.ceilings import (
     _actionable_at,
     measure_ceiling_sensitivity,
     measure_floor_sensitivity,
-    probe_cases,
 )
 from nemesis.pursuit.resurgence import ACTIONABLE_FLOOR, BELIEF_CEILING, ResurgenceEngine
 
@@ -59,9 +58,18 @@ def test_the_floor_study_does_not_rebind_the_shipped_threshold() -> None:
 
 
 def test_the_parameterised_verdict_agrees_with_the_shipped_one_at_the_shipped_floor() -> None:
-    """Otherwise the floor study would be measuring a different function from the engine's."""
+    """Otherwise the floor study would be measuring a different function from the engine's.
+
+    Over the **swept** grid, not the six hand-picked probes. Measured while splitting the
+    resurgence conclusion, by wiring ``_actionable_at`` to gate on ``continuity_established``
+    instead of the framer-cost veto: the six probes catch that at **1** disagreement, the swept
+    grid at **21**. Both catch this particular slip, and one detection site is a test that
+    passes or fails on a single case landing the right way. Twenty-one is a signal.
+    """
+    from nemesis.calibration.ceilings import swept_cases
+
     engine = ResurgenceEngine()
-    for case in probe_cases():
+    for case in swept_cases():
         assessment = engine.assess(
             campaign="probe",
             signals=case.signals,

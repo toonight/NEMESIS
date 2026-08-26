@@ -21,6 +21,7 @@ recorded rather than swallowed.
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 
@@ -836,7 +837,8 @@ def test_the_engine_records_the_asn_but_opens_no_branch_on_it() -> None:
         entity_types=frozenset({EntityType.DOMAIN}),
         responder=_resolution_result,
     )
-    engine = _engine(connectors=(connector,), graph=graph)
+    audit = FakeAudit()
+    engine = _engine(connectors=(connector,), graph=graph, audit=audit)
 
     investigation = asyncio.run(engine.start(_seed(), total_budget=10.0))
     investigation = asyncio.run(engine.step(investigation))
@@ -848,6 +850,13 @@ def test_the_engine_records_the_asn_but_opens_no_branch_on_it() -> None:
     assert spawned.parent_branch_id == "B0"
     assert spawned.depth == 1
     assert len(graph.relationships) == 2
+
+    event = next(item for item in audit.events if item.action == "pivot.execute")
+    assert json.loads(event.inputs["materialized_entities"]) == [
+        ["asn", HOST_ASN],
+        ["domain", SEED_DOMAIN],
+        ["ip_address", HOST_IP],
+    ]
 
 
 def test_evidence_is_sealed_before_the_claims_that_cite_it() -> None:
