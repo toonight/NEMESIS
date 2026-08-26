@@ -33,6 +33,7 @@ from nemesis.collect.base import (
     FixtureTable,
     SimulatedConnector,
 )
+from nemesis.collect.fixtures import iron_tide
 from nemesis.collect.fixtures.glass_anvil import (
     SCENARIO_PRESENT,
     blockchain_fixtures,
@@ -344,7 +345,14 @@ class SimulatedOwnSensorConnector(SimulatedConnector):
                     SourceReliability.COMPLETELY_RELIABLE,
                 ),
                 supported_pivots=frozenset({PivotType.OWN_TELEMETRY}),
-                supported_entity_types=frozenset({EntityType.DOMAIN}),
+                # An address and a sample, alongside a domain. Our own edge can honestly be
+                # asked "what did you record about this address" and "what did you record
+                # about this binary"; both are questions about traffic that arrived and files
+                # we hold. Widened rather than duplicated into a second class because the
+                # posture — no egress, unplantable channel — is identical for all three.
+                supported_entity_types=frozenset(
+                    {EntityType.DOMAIN, EntityType.IP_ADDRESS, EntityType.MALWARE}
+                ),
                 is_simulated=True,
                 cost_per_call=0.5,
             ),
@@ -389,3 +397,303 @@ def dark_web_connector(
     if config:
         raise ValueError("the simulated dark-web connector accepts no runtime configuration")
     return SimulatedDarkWebConnector(as_of=datetime.fromisoformat(as_of))
+
+
+# ==========================================================================================
+# Operation IRON TIDE — the connector set for an IP-seeded investigation
+# ==========================================================================================
+#
+# A SEPARATE SET, deliberately, rather than more fixtures behind the same eight connectors.
+#
+# Two reasons, and the second is the load-bearing one.
+#
+# **Provenance.** `FIXTURE_OPERATOR` collapses GLASS ANVIL's connectors into one origin, which
+# is correct and is the whole reason no pair of them can fuse as corroboration. IRON TIDE is a
+# second synthetic world; giving it the same operator string would make the two worlds one
+# origin, and a run that fused across them would be fusing a demo with a different demo.
+#
+# **GLASS ANVIL must not move.** `SimulatedHostProfileConnector` answers two pivots the rule
+# policy has proposed for every IP entity since it was written and that nothing has ever
+# answered. Adding it to `simulated_connectors()` would change the reference scenario's pivot
+# count, its audit trail and its frozen calibration — for a capability that scenario does not
+# need. So it is wired into this set and only this set, and the reference run is byte-identical
+# to what it was before this module grew.
+
+IRON_TIDE_OPERATOR: Final = "NEMESIS IRON TIDE fixture set"
+"""Operator recorded on every IRON TIDE source. Identical across the set, for the same reason
+:data:`FIXTURE_OPERATOR` is: one origin wearing seven hats, and
+:meth:`~nemesis.core.provenance.SourceDescriptor.provenance_cluster` must collapse them.
+
+Distinct from :data:`FIXTURE_OPERATOR`, so the two fixture sets never fuse as two origins."""
+
+IRON_TIDE_SET: Final = "iron-tide"
+"""Stamped into every ``CollectionMethod``. Two synthetic worlds that recorded the same
+fixture-set name would be indistinguishable in the one field a reader uses to tell them
+apart."""
+
+IRON_TIDE_TOR_SANDBOX_PROFILE: Final = TOR_SANDBOX_PROFILE
+
+
+NORTHWIND_OPERATOR: Final = iron_tide.NORTHWIND_OPERATOR
+"""The victim's own security operation, and a *second* provenance cluster.
+
+The own-telemetry connector answers for NORTHWIND's sensors, so it must carry NORTHWIND's
+operator and not the fixture set's. This is not cosmetic. `provenance_cluster()` groups by
+operator, so labelling the resolver log with :data:`IRON_TIDE_OPERATOR` would fold the victim's
+own network records into the same origin as the commercial malware feed — and the run's central
+claim, that one statement is attested both by a channel an adversary can write into and by one
+they cannot, would collapse into a single origin agreeing with itself.
+
+It is also what the reference scenario already does: `phase_one_detection()` sources carry
+`operator:ACME Corp Security Operations`, a distinct cluster from the seven fixture connectors.
+The only thing IRON TIDE adds is applying that consistently to the *same sensors asked as a
+pivot* rather than only to the ones replayed as a seed.
+"""
+
+
+def _iron_tide_source(
+    source_class: SourceClass,
+    identifier: str,
+    reliability: SourceReliability,
+    operator: str = IRON_TIDE_OPERATOR,
+) -> SourceDescriptor:
+    return SourceDescriptor(
+        source_class=source_class,
+        identifier=identifier,
+        reliability=reliability,
+        operator=operator,
+    )
+
+
+class SimulatedHostProfileConnector(SimulatedConnector):
+    """What kind of address this is, and what it presents. The missing IP-side connector.
+
+    :data:`~nemesis.pursuit.policy.PIVOTS_FOR_ENTITY` has proposed ``proxy_classification``
+    and ``service_fingerprint`` for every IP address since it was written, and until this
+    class existed nothing answered either: both came back as
+    ``No connector can answer ... REQUIRES_EXTERNAL_DATA``. On a domain-seeded case that costs
+    almost nothing. On an address-seeded one it is the difference between an investigation and
+    a guess, because **the tenant count is what licenses reading co-location as control** and
+    no other connector in this module produces one for an address.
+
+    Reads a third-party scan corpus. It does not probe: the posture is passive DNS's and
+    certificate transparency's — somebody else's observation of the public internet — which is
+    what keeps it on the right side of invariant 15. A deployment swapping the fixture for a
+    licensed host-profile feed changes the adapter and nothing else.
+    """
+
+    def __init__(self, *, as_of: datetime, fixtures: FixtureTable | None = None) -> None:
+        super().__init__(
+            capabilities=ConnectorCapabilities(
+                name="simulated-host-profile",
+                version=CONNECTOR_VERSION,
+                source=_iron_tide_source(
+                    SourceClass.INTERNET_SCAN,
+                    "SIMULATED host-profile and TLS-scan corpus",
+                    SourceReliability.USUALLY_RELIABLE,
+                ),
+                supported_pivots=frozenset(
+                    {
+                        PivotType.PROXY_CLASSIFICATION,
+                        PivotType.SERVICE_FINGERPRINT,
+                        PivotType.HOSTING_NEIGHBOURS,
+                    }
+                ),
+                supported_entity_types=frozenset({EntityType.IP_ADDRESS, EntityType.NETBLOCK}),
+                is_simulated=True,
+                cost_per_call=1.5,
+                redistribution_permitted=False,
+            ),
+            fixtures=iron_tide.host_profile_fixtures() if fixtures is None else fixtures,
+            as_of=as_of,
+            fixture_set=IRON_TIDE_SET,
+        )
+
+
+def _iron_tide(
+    *,
+    name: str,
+    source_class: SourceClass,
+    identifier: str,
+    reliability: SourceReliability,
+    pivots: frozenset[PivotType],
+    entity_types: frozenset[EntityType],
+    fixtures: FixtureTable,
+    as_of: datetime,
+    cost: float,
+    redistribution_permitted: bool = True,
+    handles_hostile_content: bool = False,
+    isolation_factory: str | None = None,
+    sandbox_profile: str | None = None,
+    operator: str = IRON_TIDE_OPERATOR,
+) -> SimulatedConnector:
+    """Build one IRON TIDE connector.
+
+    A helper rather than eight subclasses: the GLASS ANVIL classes each carry an argument in
+    their docstring about a decision specific to that scenario, and copying seven of them to
+    change two strings would duplicate the arguments without duplicating their truth.
+    """
+    return SimulatedConnector(
+        capabilities=ConnectorCapabilities(
+            name=name,
+            version=CONNECTOR_VERSION,
+            source=_iron_tide_source(source_class, identifier, reliability, operator),
+            supported_pivots=pivots,
+            supported_entity_types=entity_types,
+            is_simulated=True,
+            handles_hostile_content=handles_hostile_content,
+            isolation_factory=isolation_factory,
+            cost_per_call=cost,
+            redistribution_permitted=redistribution_permitted,
+        ),
+        fixtures=fixtures,
+        as_of=as_of,
+        sandbox_profile=sandbox_profile,
+        fixture_set=IRON_TIDE_SET,
+    )
+
+
+def iron_tide_connectors(
+    *, as_of: datetime = iron_tide.SCENARIO_PRESENT
+) -> tuple[IntelligenceConnector, ...]:
+    """Every IRON TIDE connector, answering as of one instant.
+
+    Costs are the GLASS ANVIL costs where the capability is the same, so the two runs' pivot
+    orderings are comparable. The new one — host profile at 1.5 — sits between passive DNS and
+    malware analysis: a scan corpus lookup is more expensive than a DNS lookup and cheaper than
+    detonating a sample.
+    """
+    return (
+        _iron_tide(
+            name="simulated-own-edge-telemetry",
+            source_class=SourceClass.OWN_SENSOR,
+            identifier="SIMULATED NORTHWIND edge sensors",
+            reliability=SourceReliability.COMPLETELY_RELIABLE,
+            pivots=frozenset({PivotType.OWN_TELEMETRY}),
+            entity_types=frozenset({EntityType.DOMAIN, EntityType.IP_ADDRESS, EntityType.MALWARE}),
+            fixtures=iron_tide.own_sensor_fixtures(),
+            as_of=as_of,
+            cost=0.5,
+            operator=NORTHWIND_OPERATOR,
+        ),
+        _iron_tide(
+            name="simulated-passive-dns",
+            source_class=SourceClass.INTERNET_SCAN,
+            identifier="SIMULATED passive-DNS corpus",
+            reliability=SourceReliability.USUALLY_RELIABLE,
+            pivots=frozenset({PivotType.RESOLUTION_HISTORY, PivotType.REVERSE_RESOLUTION}),
+            entity_types=frozenset({EntityType.DOMAIN, EntityType.IP_ADDRESS}),
+            fixtures=iron_tide.passive_dns_fixtures(),
+            as_of=as_of,
+            cost=1.0,
+        ),
+        SimulatedHostProfileConnector(as_of=as_of),
+        _iron_tide(
+            name="simulated-certificate-transparency",
+            source_class=SourceClass.INTERNET_SCAN,
+            identifier="SIMULATED certificate-transparency corpus",
+            reliability=SourceReliability.USUALLY_RELIABLE,
+            pivots=frozenset({PivotType.CERTIFICATE_HISTORY, PivotType.CERTIFICATE_REUSE}),
+            entity_types=frozenset(
+                {EntityType.DOMAIN, EntityType.IP_ADDRESS, EntityType.TLS_CERTIFICATE}
+            ),
+            fixtures=iron_tide.certificate_fixtures(),
+            as_of=as_of,
+            cost=1.2,
+        ),
+        _iron_tide(
+            name="simulated-rdap",
+            source_class=SourceClass.OPEN_SOURCE,
+            identifier="SIMULATED RDAP service",
+            reliability=SourceReliability.COMPLETELY_RELIABLE,
+            pivots=frozenset({PivotType.REGISTRATION_RECORD}),
+            entity_types=frozenset({EntityType.DOMAIN}),
+            fixtures=iron_tide.rdap_fixtures(),
+            as_of=as_of,
+            cost=0.8,
+        ),
+        _iron_tide(
+            name="simulated-network-ownership",
+            source_class=SourceClass.OPEN_SOURCE,
+            identifier="SIMULATED BGP/RIR feed",
+            reliability=SourceReliability.USUALLY_RELIABLE,
+            pivots=frozenset({PivotType.NETWORK_OWNERSHIP}),
+            entity_types=frozenset({EntityType.IP_ADDRESS, EntityType.NETBLOCK, EntityType.ASN}),
+            fixtures=iron_tide.network_fixtures(),
+            as_of=as_of,
+            cost=0.6,
+        ),
+        _iron_tide(
+            name="simulated-malware-analysis",
+            source_class=SourceClass.COMMERCIAL_FEED,
+            identifier="SIMULATED malware analysis service",
+            reliability=SourceReliability.USUALLY_RELIABLE,
+            pivots=frozenset(
+                {
+                    PivotType.MALWARE_LOOKUP,
+                    PivotType.C2_EXTRACTION,
+                    PivotType.MALWARE_SIMILARITY,
+                }
+            ),
+            entity_types=frozenset({EntityType.MALWARE, EntityType.PHISHING_KIT}),
+            fixtures=iron_tide.malware_fixtures(),
+            as_of=as_of,
+            cost=2.0,
+            redistribution_permitted=False,
+        ),
+        _iron_tide(
+            name="simulated-dark-web",
+            source_class=SourceClass.DARK_WEB,
+            identifier="SIMULATED isolated Tor collector",
+            reliability=SourceReliability.USUALLY_RELIABLE,
+            pivots=frozenset(
+                {
+                    PivotType.DARK_WEB_SEARCH,
+                    PivotType.PERSONA_ACTIVITY,
+                    PivotType.MARKETPLACE_LISTING,
+                }
+            ),
+            entity_types=frozenset({EntityType.PERSONA, EntityType.FORUM, EntityType.MARKETPLACE}),
+            fixtures=iron_tide.dark_web_fixtures(),
+            as_of=as_of,
+            cost=4.0,
+            redistribution_permitted=False,
+            handles_hostile_content=True,
+            isolation_factory="nemesis.collect.simulated:iron_tide_dark_web_connector",
+            sandbox_profile=IRON_TIDE_TOR_SANDBOX_PROFILE,
+        ),
+    )
+
+
+def iron_tide_dark_web_connector(
+    as_of: str, config: Mapping[str, str] | None = None
+) -> IntelligenceConnector:
+    """Factory for IRON TIDE's confined collector, addressed by name across a process boundary.
+
+    Mirrors :func:`dark_web_connector`. The isolating collector takes a ``module:function``
+    string rather than an object, because an object cannot cross a pipe and pickling one would
+    hand the child a deserialization surface.
+    """
+    if config:
+        raise ValueError("the simulated dark-web connector accepts no runtime configuration")
+    return _iron_tide(
+        name="simulated-dark-web",
+        source_class=SourceClass.DARK_WEB,
+        identifier="SIMULATED isolated Tor collector",
+        reliability=SourceReliability.USUALLY_RELIABLE,
+        pivots=frozenset(
+            {
+                PivotType.DARK_WEB_SEARCH,
+                PivotType.PERSONA_ACTIVITY,
+                PivotType.MARKETPLACE_LISTING,
+            }
+        ),
+        entity_types=frozenset({EntityType.PERSONA, EntityType.FORUM, EntityType.MARKETPLACE}),
+        fixtures=iron_tide.dark_web_fixtures(),
+        as_of=datetime.fromisoformat(as_of),
+        cost=4.0,
+        redistribution_permitted=False,
+        handles_hostile_content=True,
+        isolation_factory="nemesis.collect.simulated:iron_tide_dark_web_connector",
+        sandbox_profile=IRON_TIDE_TOR_SANDBOX_PROFILE,
+    )

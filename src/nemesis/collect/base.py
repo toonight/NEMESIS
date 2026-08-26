@@ -239,6 +239,7 @@ class SimulatedConnector:
         fixtures: FixtureTable,
         as_of: datetime,
         sandbox_profile: str | None = None,
+        fixture_set: str = FIXTURE_SET,
     ) -> None:
         if not capabilities.is_simulated:
             raise ValueError(
@@ -259,6 +260,10 @@ class SimulatedConnector:
         self._fixtures = fixtures
         self._as_of = as_of
         self._sandbox_profile = sandbox_profile
+        # Recorded in every CollectionMethod. A second operation's fixtures answering under
+        # the first operation's name would make two synthetic worlds indistinguishable in
+        # provenance, which is the one field a reader uses to tell them apart.
+        self._fixture_set = fixture_set
         self._actor = connector_actor_id(capabilities.name, capabilities.version)
 
     @property
@@ -290,7 +295,7 @@ class SimulatedConnector:
                 "entity_key": request.entity_key,
                 "max_results": str(request.max_results),
                 "as_of": self._as_of.isoformat(),
-                "fixture_set": FIXTURE_SET,
+                "fixture_set": self._fixture_set,
             },
             # Set here, never taken from a parameter: there is no code path by which a
             # subclass or a caller can produce an unflagged synthetic artifact.
