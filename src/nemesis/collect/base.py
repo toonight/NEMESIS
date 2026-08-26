@@ -103,7 +103,7 @@ class ObservationRecord(BaseModel):
     does.
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     artifact: bytes
     """Preserved byte-for-byte. Its SHA-256 becomes the evidence identifier, so two
@@ -130,9 +130,20 @@ class ObservationRecord(BaseModel):
 
 
 class FixtureAnswer(BaseModel):
-    """What one connector returns for one (pivot type, entity key) question."""
+    """What one connector returns for one (pivot type, entity key) question.
 
-    model_config = ConfigDict(frozen=True)
+    ``extra="forbid"`` rather than pydantic's default, and it is a control rather than
+    tidiness. ``available_from`` is a field of :class:`ObservationRecord` and not of this
+    model; the reference fixture passed it here for as long as its docstring had been
+    claiming a transaction-time gate, and the default ``extra="ignore"`` discarded it in
+    silence. Both phase-8 own-sensor records came back ungated, so a connector answering as
+    of phase 2 returned evidence dated forty-five days in its own future.
+
+    A misplaced keyword on a fixture model is always a control that is not there. It should
+    cost a traceback where it is written, not a wrong answer where it is read.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     records: tuple[ObservationRecord, ...] = ()
     truncated: bool = False
