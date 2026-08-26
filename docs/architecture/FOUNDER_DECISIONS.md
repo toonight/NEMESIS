@@ -234,6 +234,33 @@ The local seat remains the configuration under which this question does not aris
 
 ---
 
+## D-egress: may the MVP hold more than one live-egress connector, and is a host-pin an "allowlist"?
+
+**Raised 2026-08-26 while wiring `RansomwareLiveConnector`. Not answered here.**
+
+Invariant 15 says "the **sole** egress is a fetch of specific URLs from an operator-supplied
+allowlist, off by default with no endpoint shipped, confined by the kernel and marked
+`NEMESIS-EGRESS-ALLOWED`." There are now **two** opt-in egress connectors — the Tor onion
+snapshot and the `ransomware.live` OSINT reader — which strains the word *sole*. Two sub-questions:
+
+1. **Count.** Is "sole egress" a hard cap of one connector, or shorthand for "one disciplined
+   egress *mechanism class*" — operator-approved, off by default, confined, marked — of which
+   there may be several instances? The second reading is how the Tor connector was itself added;
+   this makes it explicit rather than assumed.
+2. **Granularity.** The Tor connector allowlists **each target** (one approved onion at a time).
+   The OSINT connector pins the **host** (`ransomware.live`) but lets the pilot choose the actor
+   it queries within that host. Is a host-pin an acceptable "operator-supplied allowlist" for a
+   public search API where targets cannot be pre-enumerated, or must every query target be
+   pre-approved too?
+
+**Working default (implemented):** the connector exists, is host-pinned, confined, off by
+default and wired into no registry, so the *posture* (nothing egresses unless an operator turns
+it on under kernel confinement) is unchanged — only the literal count of egress connectors moved.
+Nothing in the code decides the wording of invariant 15; amending it is a founder act, and this
+entry is the tripwire that keeps the change from happening silently.
+
+---
+
 ## What is *not* on this list
 
 Reversible engineering choices are made and documented in `docs/adr/` without asking:

@@ -89,7 +89,7 @@ ANALYST = new_id(IdPrefix.ACTOR)
 # --- Builders -----------------------------------------------------------------
 
 
-def _evidence(payload: bytes) -> EvidenceObject:
+def _evidence(payload: bytes, *, is_simulated: bool = True) -> EvidenceObject:
     return EvidenceObject.seal(
         artifact=payload,
         artifact_kind=ArtifactKind.DNS_RECORD,
@@ -102,7 +102,7 @@ def _evidence(payload: bytes) -> EvidenceObject:
             method=CollectionMethod(
                 collector_name="passive-dns-fixture",
                 collector_version="0.1.0",
-                is_simulated=True,
+                is_simulated=is_simulated,
             ),
             collected_at=NOW,
         ),
@@ -345,6 +345,7 @@ class FakeConnector:
         entity_types: frozenset[EntityType],
         responder: Callable[[PivotRequest], PivotResult],
         cost: float = 1.0,
+        is_simulated: bool = True,
     ) -> None:
         self._responder = responder
         self.requests: list[PivotRequest] = []
@@ -354,7 +355,7 @@ class FakeConnector:
             source=SourceDescriptor(source_class=SourceClass.INTERNET_SCAN, identifier=name),
             supported_pivots=pivots,
             supported_entity_types=entity_types,
-            is_simulated=True,
+            is_simulated=is_simulated,
             cost_per_call=cost,
         )
 
@@ -370,14 +371,14 @@ class FakeConnector:
         return True
 
 
-def _resolution_result(request: PivotRequest) -> PivotResult:
+def _resolution_result(request: PivotRequest, *, is_simulated: bool = True) -> PivotResult:
     """One pivot that discovers a host and the network announcing it.
 
     The ASN is the shared-infrastructure control: it is a real, recordable fact about the
     host and must not become a line of enquiry of its own.
     """
     artifact = b'{"answer": "198.51.100.23", "first_seen": "2026-02-20"}'
-    evidence = _evidence(artifact)
+    evidence = _evidence(artifact, is_simulated=is_simulated)
     return PivotResult(
         request=request,
         connector_name="passive-dns-fixture",
@@ -857,6 +858,35 @@ def test_the_engine_records_the_asn_but_opens_no_branch_on_it() -> None:
         ["domain", SEED_DOMAIN],
         ["ip_address", HOST_IP],
     ]
+
+
+def test_real_collection_never_marks_the_seed_or_discoveries_as_synthetic() -> None:
+    """A real connector routed through pursuit must not leave a simulated graph behind.
+
+    Reproduced while preparing the first live onion snapshot: ``start`` hard-coded the seed
+    to synthetic and ``_absorb`` did the same to every entity materialized from connector
+    output. The evidence correctly said ``is_simulated=False`` while both graph endpoints
+    said the opposite.
+    """
+    graph = FakeGraph()
+    connector = FakeConnector(
+        name="real-passive-source",
+        pivots=frozenset({PivotType.RESOLUTION_HISTORY}),
+        entity_types=frozenset({EntityType.DOMAIN}),
+        responder=lambda request: _resolution_result(request, is_simulated=False),
+        is_simulated=False,
+    )
+    engine = _engine(connectors=(connector,), graph=graph)
+    seed = _seed().model_copy(update={"is_synthetic": False})
+
+    investigation = asyncio.run(engine.start(seed, total_budget=10.0))
+    investigation = asyncio.run(engine.step(investigation))
+
+    stored_seed = asyncio.run(graph.find_entity(EntityType.DOMAIN, SEED_DOMAIN))
+    discovered = asyncio.run(graph.find_entity(EntityType.IP_ADDRESS, HOST_IP))
+    assert stored_seed is not None and stored_seed.is_synthetic is False
+    assert discovered is not None and discovered.is_synthetic is False
+    assert investigation.branches[0].executed[0].connector == "passive-dns-fixture"
 
 
 def test_evidence_is_sealed_before_the_claims_that_cite_it() -> None:

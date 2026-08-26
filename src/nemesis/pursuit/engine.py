@@ -158,7 +158,7 @@ class PursuitEngine:
             entity_type=seed.entity_type,
             observed_form=seed.entity_key,
             extent=TemporalExtent.at(seed.observed_at),
-            is_synthetic=True,
+            is_synthetic=seed.is_synthetic,
         )
         stored = await self._graph.upsert_entity(entity)
 
@@ -227,6 +227,7 @@ class PursuitEngine:
                 "seed_key": seed.entity_key,
                 "detected_by": seed.detected_by,
                 "budget": str(total_budget),
+                "is_synthetic": str(seed.is_synthetic),
             },
         )
         return investigation
@@ -421,7 +422,13 @@ class PursuitEngine:
                     f"{candidate.entity_type.value}. REQUIRES_EXTERNAL_DATA."
                 ),
             )
-            return await self._absorb(investigation, branch, executed, result=None)
+            return await self._absorb(
+                investigation,
+                branch,
+                executed,
+                result=None,
+                is_synthetic=investigation.seed.is_synthetic,
+            )
 
         result, isolation_failure = await collect_confined(connector, request)
         if isolation_failure is not None:
@@ -433,7 +440,13 @@ class PursuitEngine:
                 error=isolation_failure,
                 actual_cost=connector.capabilities.cost_per_call,
             )
-            return await self._absorb(investigation, branch, executed, result=None)
+            return await self._absorb(
+                investigation,
+                branch,
+                executed,
+                result=None,
+                is_synthetic=connector.capabilities.is_simulated,
+            )
 
         assert result is not None  # _collect returns one or the other, never neither
         executed = ExecutedPivot(
@@ -445,7 +458,13 @@ class PursuitEngine:
             truncated=result.truncated,
             actual_cost=connector.capabilities.cost_per_call,
         )
-        return await self._absorb(investigation, branch, executed, result=result)
+        return await self._absorb(
+            investigation,
+            branch,
+            executed,
+            result=result,
+            is_synthetic=connector.capabilities.is_simulated,
+        )
 
     async def _absorb(
         self,
@@ -454,6 +473,7 @@ class PursuitEngine:
         executed: ExecutedPivot,
         *,
         result: PivotResult | None,
+        is_synthetic: bool,
     ) -> Investigation:
         """Persist what came back, in the order provenance requires."""
         sealed: list[str] = []
@@ -494,7 +514,7 @@ class PursuitEngine:
                     continue
                 recorded.append(await self._claims.record(claim))
 
-            materialized = materialize(tuple(recorded), is_synthetic=True)
+            materialized = materialize(tuple(recorded), is_synthetic=is_synthetic)
             skipped = materialized.skipped
             for entity in materialized.entities:
                 stored = await self._graph.upsert_entity(entity)

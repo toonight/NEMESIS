@@ -53,6 +53,13 @@ class IncidentSeed(BaseModel):
     context: dict[str, str] = Field(default_factory=dict)
     supporting_evidence: tuple[EvidenceId, ...] = ()
     victim_hint: str | None = None
+    is_synthetic: bool = True
+    """Whether the seed came from a simulated scenario.
+
+    Defaults to ``True`` for the repository's fixture-backed demonstrations. A deployment
+    admitting a real observable must opt out explicitly; losing that distinction at the
+    investigation boundary would make every downstream entity provenance ambiguous.
+    """
 
 
 class BranchState(StrEnum):

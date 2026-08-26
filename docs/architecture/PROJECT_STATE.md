@@ -65,7 +65,14 @@ end-to-end vertical slice exist with tests. `uv run nemesis demo` runs DETECT th
 RESURGENCE and exits 0. No default command or repository test has touched a real system: the
 demo's seven connectors read fixtures and every scenario address is reserved for documentation.
 An opt-in Tor snapshot connector now exists, with no configured endpoint and no live CI test;
-using it is real external collection and requires an explicit authorized allowlist. The largest
+using it is real external collection and requires an explicit authorized allowlist. A second
+opt-in egress connector — `RansomwareLiveConnector`, a bounded reader of the public
+`ransomware.live` OSINT API — now exists on the same pattern (host-pinned, confined, off by
+default, no endpoint wired, hostile-content isolation). **It puts invariant 15's "sole egress"
+wording under strain: there are now two egress connectors, and this one pins a host but lets the
+pilot choose the actor it queries rather than allowlisting each target. Whether the MVP may hold
+two egress connectors, and whether a host-pin is an acceptable "operator-supplied allowlist",
+is a founder decision — see [FOUNDER_DECISIONS.md](FOUNDER_DECISIONS.md).** The largest
 weakness is not a missing feature — it is that no confidence
 figure this system produces has ever been validated against a known-correct answer, and none
 can be until a corpus of resolved cases exists.
@@ -113,7 +120,7 @@ can be until a corpus of resolved cases exists.
 | Attribution engine | `IMPLEMENTED` | Five separate dimensions, no collapsed score, human identity behind a pre-scoring gate. |
 | Disruption planner | `IMPLEMENTED` | Proposes options it cannot execute, including ones requiring legal authority. |
 | Pursuit engine | `IMPLEMENTED` | Deterministic rule policy, branch abandonment with mandatory reasons, replayable. |
-| Connectors | `IMPLEMENTED` (one real, opt-in) / `SIMULATED` (demo) | Seven fixture connectors remain the default. `TorOnionConnector` takes bounded snapshots of explicitly allowlisted v3 onion services, follows no redirects, parses no content and refuses to run without kernel confinement. No endpoint ships and no live network test runs in CI. |
+| Connectors | `IMPLEMENTED` (two real, opt-in) / `SIMULATED` (demo) | Seven fixture connectors remain the default. `TorOnionConnector` takes bounded snapshots of explicitly allowlisted v3 onion services, follows no redirects, parses no content and refuses to run without kernel confinement. `RansomwareLiveConnector` reads the public `ransomware.live` OSINT API for the victims a threat actor has *claimed*, host-pinned over HTTPS, each record sealed as a third-party report of an adversary's own claim (never a confirmed compromise) with a deception assessment. Both are `is_simulated=False`, handle hostile content, run only under `collect_confined`, and ship with no endpoint wired and no live CI test. See the invariant-15 wording note above. |
 | GLASS ANVIL scenario | `SIMULATED` | Fixtures verified by mutation testing. |
 | IRON TIDE scenario | `SIMULATED` | The second slice, seeded on an **IP address** rather than a domain. `nemesis trace`. Exercises what a domain seed never has to face: co-location on an address means nothing until somebody counts the tenants, so the run collects a tenant count before it believes a reverse pivot. Contract in [`IRON_TIDE.md`](IRON_TIDE.md). |
 
