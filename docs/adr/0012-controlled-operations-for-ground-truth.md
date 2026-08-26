@@ -50,17 +50,21 @@ from prose, so it moves when the engine or the grid moves:
 
 | target precision | discriminating pairs | pairs total | controlled operations |
 |---|---|---|---|
-| ±10% | 97 | 566 | ~283 |
-| ±5% | 385 | 2 246 | ~1 123 |
-| ±2% | 2 401 | 14 006 | ~7 003 |
+| ±10% | 97 | 1 019 | ~510 |
+| ±5% | 385 | 4 043 | ~2 022 |
+| ±2% | 2 401 | 25 211 | ~12 606 |
 
 Halving the margin roughly quadruples the requirement, which is why ±2% — what "calibrated"
 usually means — is a programme rather than an experiment.
 
 **The assumptions, because the numbers are worthless without them.** Sizing uses the worst-case
 rate, so these are the honest upper bound of the arithmetic and not a pessimistic flourish. The
-inflation from 97 pairs to 566 is the discriminating fraction: 17.1% of swept cases can move
+inflation from 97 pairs to 1 019 is the discriminating fraction: 9.5% of swept cases can move
 under a ceiling perturbation at all, and pairs that cannot move teach a calibration nothing.
+**These figures were restated on 2026-08-25**: they read 566 / ~283 / 17.1% until ADR-0013's
+framer-cost veto halved the fraction. The veto refuses cases the sweep counted as movable, so
+fewer of them can move — the corpus a revisit would need is larger, not smaller, and nobody
+re-ran `nemesis calibrate` when the veto landed. The lesson is in the ADR that caused it.
 That fraction is a real measurement of *this engine* against a grid whose shape is a choice, and
 it assumes real operations would land near the decision boundary about as often — which they
 would not, exactly. Two pairs per operation is a frank guess and a parameter for that reason.

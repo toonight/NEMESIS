@@ -1,7 +1,7 @@
 """Controlled operations on a loopback range, where the linkage is real because we made it.
 
 Milestone 3 is *controlled operations on infrastructure we own* — the protocol's only path to
-ground truth for this project — and it was costed at ~283 operations and declined (ADR-0012).
+ground truth for this project — and it was costed at ~510 operations and declined (ADR-0012).
 This is the part of it that needs no funding, no registrar and no third party: a range on
 127.0.0.1, where the operations are ours and the linkage is known because this module minted it.
 
