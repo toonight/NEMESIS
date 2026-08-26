@@ -13,11 +13,12 @@ arbitrarily or turn one real-world thing back into several. The relation between
 entity belongs on neither of them.
 
 **So the index is derived from the audit trail**, which already records it: an
-``investigation.start`` names the seed, every ``pivot.execute`` names both the investigation and
-the entity it touched, and a ``pilot.move`` that requested an effect names the investigation and
-the target it was aimed at. Both kinds of event make an appearance, because an entity we ran an
-effect against is an entity we have met — a projection that knew we had acted against a target
-and not that we had ever seen it was contradicting itself. That trail is append-only and
+``investigation.start`` names the seed, every ``pivot.execute`` names both the investigation,
+the entity it touched, and the typed natural keys it materialized, and a ``pilot.move`` that
+requested an effect names the investigation and the target it was aimed at. Each makes an
+appearance, because an entity admitted to the graph or acted against is an entity the case has
+met — a projection that knew an actor was at the far end of an edge and not that the actor had
+ever appeared was contradicting the graph it projected. That trail is append-only and
 hash-chained, so the projection
 inherits durability and tamper-evidence from a mechanism that already had them, and this module
 adds no authoritative state. Deleting the index costs the time to replay the events and nothing
@@ -41,6 +42,7 @@ this module at them would produce confident answers from evidence that cannot su
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
@@ -219,6 +221,34 @@ def _investigation_of(subject: str) -> str:
     return subject.split("/", 1)[0]
 
 
+def _materialized_entities(raw: str) -> tuple[tuple[str, str], ...] | None:
+    """Decode the typed natural keys a pivot admitted to the graph.
+
+    ``None`` is the malformed sentinel rather than the empty tuple: an empty result is an
+    honest answer, while malformed JSON is a hole the projection must count. Older audit
+    entries omit the field altogether and are handled by the caller as the old, narrower
+    record they genuinely are.
+    """
+    try:
+        decoded = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(decoded, list):
+        return None
+
+    entities: list[tuple[str, str]] = []
+    for item in decoded:
+        if (
+            not isinstance(item, list)
+            or len(item) != 2
+            or not all(isinstance(value, str) and value for value in item)
+        ):
+            return None
+        entity_type, natural_key = item
+        entities.append((entity_type, natural_key))
+    return tuple(entities)
+
+
 @dataclass
 class _Accumulator:
     """Mutable working state for one (type, key, investigation) triple.
@@ -301,9 +331,10 @@ def rebuild(events: Iterable[AuditEvent]) -> AdversaryMemory:
             # that target with no case history, so a recurrence check was blind to exactly the
             # assets an operator rebuilds: the ones we acted on last time.
             #
-            # Only effect targets, not everything a pivot surfaced. A domain that shared an
-            # address once is a lead, and counting leads as appearances would report a
-            # recurrence for anything ever co-hosted with anything.
+            # Effect targets are recorded even when no pivot materialized them. Pivot results
+            # themselves are handled below from their typed natural-key list. A recurrence in
+            # this projection means "filed in two cases", never common control: a co-hosted
+            # lead can recur as a filing fact without becoming attribution evidence.
             target_type = event.inputs.get("target_entity_type")
             if not target_type:
                 # Same rule as an untyped pivot: a persona and a domain can spell the same
@@ -339,6 +370,24 @@ def rebuild(events: Iterable[AuditEvent]) -> AdversaryMemory:
         pivot = event.inputs.get("pivot")
         if pivot:
             slot.pivots.add(pivot)
+
+        raw_materialized = event.inputs.get("materialized_entities")
+        if raw_materialized is None:
+            # Backward compatibility: old entries genuinely did not preserve the result keys.
+            # They still describe the entity pivoted on and are not malformed for predating
+            # the wider audit contract.
+            continue
+        materialized = _materialized_entities(raw_materialized)
+        if materialized is None:
+            unreadable += 1
+            continue
+        for discovered_type, discovered_key in materialized:
+            discovered = appearances.setdefault(
+                (discovered_type, discovered_key, investigation_id),
+                _Accumulator(first=event.occurred_at, last=event.occurred_at),
+            )
+            discovered.first = min(discovered.first, event.occurred_at)
+            discovered.last = max(discovered.last, event.occurred_at)
 
     built = tuple(
         EntityAppearance(

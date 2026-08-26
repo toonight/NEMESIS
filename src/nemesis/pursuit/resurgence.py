@@ -375,6 +375,53 @@ class ResurgenceSignal(BaseModel):
         )
 
 
+class ObservedRecurrence(BaseModel):
+    """One value seen on both sides, and whether we observed it or were told about it.
+
+    **The weaker of the two conclusions this engine reaches, and deliberately not a number.**
+    The proposition is ``PropositionClass.OBSERVATION`` — margin 0, "planting does not change
+    the truth of an observation" — and it says exactly one thing: *this value appears on both
+    sides*. It does not say the artifact is in *use* by anyone, because for a copyable public
+    value that would be false: a framer republishing somebody's PGP fingerprint makes the value
+    recur and demonstrates nothing about who holds the key.
+
+    **Why no probability.** Fusing the same signals against ``OBSERVATION`` instead of
+    ``SHARED_ORIGIN`` returns the identical opinion whenever the margin removed nothing — every
+    pair on the local bench, 33 of 33 — because the margin only bites on a plantable fact. A
+    second figure would print the same float under a second heading and read as corroboration of
+    the first. The prior is wrong for it besides:
+    :func:`base_rate_for_campaign_population` is the share of new infrastructure attributable to
+    a campaign we already follow, which is the prior for *identity*. A recurrence needs no prior:
+    the value either appeared twice or it did not.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: ResurgenceSignalKind
+    shared_attribute: Annotated[str, Field(min_length=1)]
+    prior_entity_key: Annotated[str, Field(min_length=1)]
+    new_entity_key: Annotated[str, Field(min_length=1)]
+
+    attested_by: Annotated[str, Field(min_length=1)]
+    attestation_is_plantable: bool
+    """Whether an adversary could have authored the *record* of this recurrence.
+
+    The one place in this engine where reading the source class is the right thing to do.
+    ``is_adversary_influenceable`` asks "could the adversary have written this down", and for
+    the recurrence proposition that is the whole question — ADR-0013 exists because the same
+    answer was being used for identity, which asks who *arranged* the fact.
+    """
+
+    extent: TemporalExtent
+
+    def render(self) -> str:
+        seen = "reported" if self.attestation_is_plantable else "OBSERVED"
+        return (
+            f"{seen:9} {self.kind.value}: {self.shared_attribute} "
+            f"({self.prior_entity_key} -> {self.new_entity_key}, via {self.attested_by})"
+        )
+
+
 class AlternativeExplanation(BaseModel):
     """A competing account of the same observations."""
 
@@ -410,6 +457,14 @@ class ResurgenceAssessment(BaseModel):
     opinion: Opinion
     fusion: FusionResult
     contributions: tuple[SignalContribution, ...] = ()
+
+    recurrences: tuple[ObservedRecurrence, ...] = ()
+    """What recurred, listed rather than scored — the weaker of the two conclusions.
+
+    ``opinion``/``band``/``is_actionable`` answer *who is behind this*; these answer *what came
+    back*. For a framer the two differ in truth value on identical evidence, and before the
+    split this object could only assert the false one."""
+
     alternatives: tuple[AlternativeExplanation, ...] = ()
     disclosure: DisclosureClass = DisclosureClass.DELIVERABLE
     base_rate: float = 0.0
@@ -467,6 +522,21 @@ class ResurgenceAssessment(BaseModel):
         )
 
     @property
+    def continuity_established(self) -> bool:
+        """Whether at least one recurrence was *observed* rather than merely reported.
+
+        Fail-closed on nothing: an assessment with no signals establishes no continuity, which
+        ``any()`` over an empty tuple gives for free. Worth stating because the obvious idiom
+        gets it backwards — ``not fusion.rests_only_on_plantable_evidence`` is True on an empty
+        fusion, and reusing it here would have established continuity on every pair that shares
+        nothing at all.
+
+        Establishing continuity says the values recur and says **nothing** about who is using
+        them. That is what :meth:`is_actionable` is for, and it refuses far more often.
+        """
+        return any(not item.attestation_is_plantable for item in self.recurrences)
+
+    @property
     def has_framer_costly_signal(self) -> bool:
         """Whether any contributing signal is one a framer would have to pay to present.
 
@@ -477,8 +547,32 @@ class ResurgenceAssessment(BaseModel):
         return any(item.kind in FRAMER_COSTLY_KINDS for item in self.contributions)
 
     def render(self) -> str:
+        """Two conclusions, in the order the evidence supports them.
+
+        Recurrence first because it is what was observed, then identity, which is inferred from
+        it and refused far more often. The caveat between them is fixed text and not a
+        parameter: the whole risk of publishing two conclusions is that a reader takes the
+        stronger-sounding one as support for the weaker, and the sentence that prevents it must
+        not be something a caller can drop.
+        """
+        established = "ESTABLISHED" if self.continuity_established else "not established"
         lines = [
-            f"Resurgence assessment for {self.campaign}: {describe(self.opinion)}",
+            f"Resurgence assessment for {self.campaign}",
+            "",
+            f"  WHAT RECURRED — {established}",
+        ]
+        if not self.recurrences:
+            lines.append("    nothing recurred; there is no observation here to explain")
+        lines.extend(f"    {item.render()}" for item in self.recurrences)
+        lines.extend(
+            [
+                "    A recurring value can be a copy. This says these values appear on both",
+                "    sides and says nothing about who is using them.",
+                "",
+                f"  WHO IS BEHIND IT — {describe(self.opinion)}",
+            ]
+        )
+        lines += [
             f"  prior: {self.base_rate:.2e} against {self.candidate_population} tracked "
             f"campaign(s)",
             f"  disclosure: {self.disclosure.value}",
@@ -500,6 +594,11 @@ class ResurgenceAssessment(BaseModel):
             lines.append(
                 "  ! everything here traces to one independent origin; corroboration from a "
                 "second would change what this supports"
+            )
+        if not self.has_framer_costly_signal and self.recurrences:
+            lines.append(
+                "  ! every value above is one a framer could present without paying for it; "
+                "identity cannot rest on copies alone (ADR-0013)"
             )
         lines.append(
             "  actionable: "
@@ -621,12 +720,25 @@ class ResurgenceEngine:
             )
             for signal in signals
         )
+        recurrences = tuple(
+            ObservedRecurrence(
+                kind=signal.kind,
+                shared_attribute=signal.shared_attribute,
+                prior_entity_key=signal.prior_entity_key,
+                new_entity_key=signal.new_entity_key,
+                attested_by=signal.observed_by.identifier,
+                attestation_is_plantable=signal.observed_by.is_adversary_influenceable,
+                extent=signal.extent,
+            )
+            for signal in signals
+        )
         return ResurgenceAssessment(
             campaign=campaign,
             assessed_at=assessed_at,
             opinion=opinion,
             fusion=result,
             contributions=contributions,
+            recurrences=recurrences,
             alternatives=_alternatives_for(signals),
             disclosure=disclosure,
             base_rate=base_rate,
