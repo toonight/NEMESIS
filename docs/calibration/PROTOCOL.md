@@ -14,9 +14,9 @@ it against synthetic cases. Milestone 3 `REQUIRES_EXTERNAL_DATA`, milestone 6 `P
 
 > **What `IMPLEMENTED` claims here, and what it does not.** It claims that the freeze is
 > mechanical and enforced by tests seen to fail without it, over three overlapping scopes:
-> a normalised syntax digest covering **171 modules** — every file in `src/nemesis`, so literals
+> a normalised syntax digest covering **173 modules** — every file in `src/nemesis`, so literals
 > in function bodies, class defaults and pure logic are all inside it; a derived digest of
-> **608 dials** with no list to be absent from; and **43 constants frozen by imported value**
+> **707 dials** with no list to be absent from; and **43 constants frozen by imported value**
 > for a named diagnostic. Plus golden vectors that run real inputs through the attribution and
 > resolution engines to their published bands. It claims nothing about whether the frozen values
 > are **right** — freezing a choice does not validate it — and nothing about milestones 2–6.
@@ -111,7 +111,7 @@ each is a dial, and each moves a number somebody is about to grade.
   exists only in the copy and requires its dial and its path by name; another asks the syntax
   tree of `freeze.py` whether any function accepts `tree` and never reads it, because an
   argument that exists and is never read is a promise in a signature.
-- **Every dial in the tree, hashed by normalised syntax** (`discovered_constants`), **419 of
+- **Every dial in the tree, hashed by normalised syntax** (`discovered_constants`), **491 of
   them holding no numeric literal at all** — which is the whole lesson in one number: most of
   what decides a published figure here is not a number, and four scans that looked for digits
   found four different subsets of nothing. **A dial is any module-level upper-case assignment,
@@ -129,7 +129,7 @@ each is a dial, and each moves a number somebody is about to grade.
   the digest depend on CPython's per-process hash randomisation: five seeds gave five different
   digests. CI would have gone red at random, and an intermittently red tripwire teaches a reader
   that a red tripwire means nothing.
-- **A normalised syntax digest covering 171 modules** — every file in the tree — docstrings
+- **A normalised syntax digest covering 173 modules** — every file in the tree — docstrings
   stripped, one digest per module so a failure names which files moved. This covers what no value-based mechanism can: literals
   inside function bodies, dataclass field defaults, and pure logic changes that touch no
   constant at all. It was narrowed to fourteen hand-picked modules on the argument that hashing

@@ -1046,6 +1046,223 @@ def memory(
     )
 
 
+@app.command()
+def trace(
+    stage: Annotated[
+        str | None,
+        typer.Option(
+            help="Render one stage only. One of: detect, pursue, cluster, standing, "
+            "attribute, evidence."
+        ),
+    ] = None,
+    workspace: Annotated[
+        Path | None, typer.Option(help="Directory for the evidence vault and the audit trail.")
+    ] = None,
+) -> None:
+    """Follow an IP address from a firewall log up to an attribution. Operation IRON TIDE.
+
+    The reference `demo` starts from a domain somebody clicked, which is the easy seed: a domain
+    carries a registration, a certificate and a resolution history, so the rule policy has four
+    questions to ask before it has to think. This starts from the seed an incident actually
+    starts from — an address — where the only thing available is *what else is on it*, and that
+    is worth everything or nothing depending on a tenant count nobody has taken yet.
+
+    It reports three tiers of agency separately: what the deterministic policy chose, what an
+    external pilot chose and the engine executed, and the one leap a human made because no
+    connector can answer it at any price.
+
+    Everything is SIMULATED. Every connector reads a fixture; nothing is contacted.
+    """
+    from nemesis.slice.iron_tide import STAGE_NAMES as TRACE_STAGES
+    from nemesis.slice.iron_tide import run_iron_tide
+
+    console = Console()
+    if stage is not None and stage not in TRACE_STAGES:
+        console.print(
+            Text(f"unknown stage {stage!r}; expected one of {', '.join(TRACE_STAGES)}", style="red")
+        )
+        raise typer.Exit(code=2)
+
+    result = run_iron_tide(workspace=Path(workspace) if workspace else None)
+    _render_trace(console, result, stage=stage)
+    console.print()
+    console.print(Text(f"  workspace {result.stores.workspace}", style="dim"))
+
+
+def _render_trace(console: Console, result: object, *, stage: str | None = None) -> None:
+    """Render the IRON TIDE run. Imports locally so the module stays importable without it."""
+    from nemesis.attribute.dimensions import AttributionDimension
+    from nemesis.slice.iron_tide import IronTideResult
+
+    assert isinstance(result, IronTideResult)
+    wanted = {stage} if stage else set(dict(result.stages()))
+
+    if "detect" in wanted:
+        detect = result.detect
+        _heading(console, "1. detect")
+        _field(
+            console, "incident seed", f"{detect.seed_entity_type.value}:{detect.seed_entity_key}"
+        )
+        _field(console, "detected at", detect.detected_at.isoformat())
+        _field(console, "proposition", detect.proposition)
+        table = _table("sensor", "class", "reliability", "independence key")
+        for sensor in detect.sensors:
+            table.add_row(
+                sensor.sensor,
+                sensor.source_class.value,
+                sensor.reliability.value,
+                sensor.independence_key,
+            )
+        console.print(table)
+        _field(
+            console,
+            "sources after collapsing",
+            f"{detect.fusion.independent_source_count} independent of "
+            f"{detect.fusion.total_sources} feed(s)",
+        )
+        _field(
+            console,
+            "unplantable facts",
+            f"{detect.fusion.unplantable_facts} of {detect.fusion.facts_established}",
+        )
+        console.print(Text("  what the seed does not say", style="dim"))
+        _bullets(console, detect.what_the_seed_does_not_say, marker="!", style="yellow")
+
+    if "pursue" in wanted:
+        pursue = result.pursue
+        _heading(console, "2. pursue")
+        _field(console, "chosen by the policy", f"{len(pursue.autonomous)} pivot(s)")
+        _field(console, "chosen by the pilot", f"{len(pursue.pilot)} pivot(s)")
+        _field(console, "chosen by an analyst", f"{len(pursue.analyst)} pivot(s)")
+        _field(
+            console,
+            "budget",
+            f"{pursue.budget_spent:.1f} of {pursue.investigation.total_budget:.0f}",
+        )
+        _field(console, "branches opened", len(pursue.investigation.branches))
+        table = _table("chosen by", "pivot", "on", "claims", "cost")
+        for record in (*pursue.autonomous, *pursue.pilot, *pursue.analyst):
+            table.add_row(
+                record.chosen_by,
+                record.pivot_type.value,
+                _elide(record.entity_key, 34),
+                str(record.claim_count) if record.succeeded else "failed",
+                f"{record.cost:.1f}",
+            )
+        console.print(table)
+        failures = [
+            f"{r.pivot_type.value} on {_elide(r.entity_key, 24)}: {r.error}"
+            for r in (*pursue.autonomous, *pursue.pilot)
+            if r.error
+        ]
+        if failures:
+            console.print(Text("  could not look (not evidence of absence)", style="dim"))
+            _bullets(console, failures, marker="!", style="yellow")
+        console.print(Text("  why the pilot, and not the policy", style="dim"))
+        _bullets(console, (pursue.pilot_because,))
+        console.print(Text("  why an analyst, and not the pilot", style="dim"))
+        _bullets(console, (pursue.analyst_because,))
+
+    if "cluster" in wanted:
+        cluster = result.cluster
+        _heading(console, "3. cluster")
+        _field(console, "entities", cluster.entity_count)
+        _field(console, "edges", cluster.edge_count)
+        _field(
+            console,
+            "counted pivots",
+            f"{len(cluster.selective_edges)} selective, {len(cluster.worthless_edges)} worthless",
+        )
+        _field(console, "direct observations", cluster.direct_observations)
+        table = _table("from", "relation", "to", "population", "weight", "band")
+        for edge in (*cluster.selective_edges, *cluster.worthless_edges):
+            table.add_row(
+                _elide(edge.source_key, 28),
+                edge.relation.value,
+                _elide(edge.target_key, 26),
+                f"{edge.population_size:,}" if edge.population_size else "uncounted",
+                f"{edge.evidential_weight:.2f}",
+                edge.band.value.replace("_", " "),
+            )
+        console.print(table)
+        console.print(Text("  the control", style="dim"))
+        _bullets(console, (cluster.the_control,))
+        if cluster.bystanders:
+            console.print(
+                Text(
+                    f"  {cluster.bystander_pivots} pivot(s) spent on {len(cluster.bystanders)} "
+                    "uninvolved co-tenant(s), now in the graph",
+                    style="dim",
+                )
+            )
+            _bullets(console, cluster.bystanders, marker="!", style="yellow")
+
+    if "standing" in wanted:
+        standing = result.standing
+        _heading(console, "4. standing")
+        table = _table("node", "type", "role", "confidence", "facets")
+        for node in standing.records:
+            table.add_row(
+                _elide(node.entity_key, 28),
+                node.entity_type.value,
+                node.role.value,
+                f"{node.projected_probability:.0%}",
+                ", ".join(facet.value for facet in node.facets) or "none",
+            )
+        console.print(table)
+        if standing.refused_to_call_adversary:
+            console.print(
+                Text("  not the adversary's, whatever the traffic looked like", style="dim")
+            )
+            _bullets(console, standing.refused_to_call_adversary)
+
+    if "attribute" in wanted:
+        attribute = result.attribute
+        _heading(console, "5. attribute")
+        for dimension in AttributionDimension:
+            assessment = attribute.dimension(dimension)
+            _confidence_line(
+                console,
+                dimension.value,
+                assessment.opinion,
+                assessment.band,
+            )
+            diversity = assessment.source_diversity
+            console.print(
+                Text(
+                    f"{'':<34}{diversity.independent_source_count} origin(s), "
+                    f"{diversity.adversary_influenceable_sources} of "
+                    f"{diversity.total_signals} signal(s) plantable",
+                    style="dim",
+                )
+            )
+        console.print()
+        console.print(Text("  robustness margin", style="dim"))
+        _bullets(console, attribute.what_the_margin_removed)
+        console.print(Text("  recorded, offered to no dimension", style="dim"))
+        _bullets(console, attribute.weak_markers_not_scored)
+        _field(
+            console,
+            "names a natural person",
+            str(attribute.result.names_a_person),
+            style="green" if not attribute.result.names_a_person else "red",
+        )
+
+    if "evidence" in wanted:
+        evidence = result.evidence
+        _heading(console, "6. evidence")
+        _field(console, "objects sealed", evidence.sealed_objects)
+        _field(console, "vault intact", evidence.vault_intact)
+        _field(console, "audit events", evidence.audit_events)
+        _field(console, "audit chain intact", evidence.audit_chain_intact)
+        console.print(Text("  what this cannot defend against", style="dim"))
+        _bullets(console, evidence.cannot_defend, marker="!", style="yellow")
+
+    console.print()
+    console.print(Text("  where this run stops", style="dim"))
+    _bullets(console, (result.actor_gap,), marker="!", style="yellow")
+
+
 @app.command(name="standing-demo")
 def standing_demo(
     workspace: Annotated[
