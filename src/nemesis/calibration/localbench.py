@@ -1,7 +1,7 @@
 """Controlled operations on a loopback range, where the linkage is real because we made it.
 
 Milestone 3 is *controlled operations on infrastructure we own* — the protocol's only path to
-ground truth for this project — and it was costed at ~283 operations and declined (ADR-0012).
+ground truth for this project — and it was costed at ~510 operations and declined (ADR-0012).
 This is the part of it that needs no funding, no registrar and no third party: a range on
 127.0.0.1, where the operations are ours and the linkage is known because this module minted it.
 
@@ -326,7 +326,24 @@ class PairOutcome:
 
     @property
     def called_linked(self) -> bool:
+        """The IDENTITY verdict: does the engine say the same operator is behind both."""
         return self.assessment.is_actionable
+
+    @property
+    def shares_a_real_artifact(self) -> bool:
+        """Ground truth for the *recurrence* half, which the operator column cannot supply.
+
+        A pair shares a real artifact exactly when this range minted one for both — which is
+        what having any signal at all means here, since every signal comes from a key, a kit or
+        a drop the module created rather than from a label attached beside the evidence. The
+        framer shares real artifacts too; that is the whole point of it, and why this column and
+        ``truly_linked`` disagree on precisely the adversarial pairs.
+        """
+        return bool(self.signals)
+
+    @property
+    def continuity_established(self) -> bool:
+        return self.assessment.continuity_established
 
 
 @dataclass(frozen=True)
@@ -335,6 +352,22 @@ class BenchResult:
 
     operations: int
     outcomes: tuple[PairOutcome, ...]
+
+    @property
+    def artifact_sharing_pairs(self) -> tuple[PairOutcome, ...]:
+        """Pairs where the range really did mint one artifact for both ends."""
+        return tuple(o for o in self.outcomes if o.shares_a_real_artifact)
+
+    @property
+    def continuity_recognised(self) -> int:
+        return sum(1 for o in self.artifact_sharing_pairs if o.continuity_established)
+
+    @property
+    def continuity_false(self) -> int:
+        """Continuity established on a pair that shares nothing. Must be zero."""
+        return sum(
+            1 for o in self.outcomes if not o.shares_a_real_artifact and o.continuity_established
+        )
 
     @property
     def linked_pairs(self) -> tuple[PairOutcome, ...]:
@@ -386,6 +419,7 @@ class BenchResult:
         planted = self.planted_pairs
         planted_called = sum(1 for o in planted if o.called_linked)
         false_rate = self.false_positives / len(unlinked) if unlinked else 0.0
+        sharing = self.artifact_sharing_pairs
         lines = [
             "Local bench — controlled operations on a loopback range",
             "",
@@ -404,6 +438,15 @@ class BenchResult:
             "and are refused trivially",
             f"  ADVERSARIAL: {planted_called}/{len(planted)} pairs where a *different* operator "
             "copied the observables were called a finding",
+            "",
+            f"  RECURRENCE (the other conclusion): established on {self.continuity_recognised}/"
+            f"{len(sharing)} pairs that really do share an artifact, and on "
+            f"{self.continuity_false} of the {len(self.outcomes) - len(sharing)} that share none",
+            "  Scored against a *different* ground truth from the line above: whether the range "
+            "minted the",
+            "  same artifact for both, which is true of the framer as well. That is the split — "
+            "the values",
+            "  recur and the operator is not the same, and the platform can now say both.",
             "",
             "  Kinds exercised with real material: "
             + ", ".join(sorted(k.value for k in EXERCISED_KINDS)),

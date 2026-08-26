@@ -353,6 +353,13 @@ def test_c2_migration_through_a_reused_key_is_a_lead_not_a_finding() -> None:
     assert result.band is not ConfidenceBand.INSUFFICIENT_BASIS, (
         "the refusal must be the framer-cost veto, not a collapse of the estimate"
     )
+    # And the half the platform *can* say, which is why the split exists: the key and the
+    # beacon config really are back. What it declines to say is whose hands they are in.
+    assert result.continuity_established
+    assert {item.kind for item in result.recurrences} == {
+        ResurgenceSignalKind.SHARED_PRIVATE_KEY,
+        ResurgenceSignalKind.SHARED_TOOLING_ARTIFACT,
+    }
 
 
 def test_wallet_reuse_is_a_financial_signal_and_stays_deliverable() -> None:
@@ -594,3 +601,102 @@ def test_the_framer_costly_table_is_total_and_defaults_to_cheap() -> None:
         "the module's own docstring says a thief 'produces the same observation'"
     )
     assert ResurgenceSignalKind.NAMING_PATTERN not in FRAMER_COSTLY_KINDS
+
+
+# -- the conclusion, split: what recurred, and who is behind it ----------------------
+
+
+def test_the_assessment_reports_what_recurred_separately_from_who_is_behind_it() -> None:
+    """Two questions the engine used to answer with one sentence.
+
+    For a framer the two come apart: the values really do recur (true) and the operator is not
+    the same (false). Until the split the engine could only say the false one, because
+    ``SHARED_ORIGIN`` — "these artifacts share a controller" — was the only proposition it
+    scored.
+    """
+    result = assess(
+        signal(
+            ResurgenceSignalKind.SHARED_PRIVATE_KEY,
+            attribute="cert:3f8a1c7d9e4b2a6058c31df24e97b0a5",
+            globally_unique=True,
+            observed_by=unplantable("tls-honeypot"),
+        ),
+        signal(
+            ResurgenceSignalKind.SHARED_TOOLING_ARTIFACT,
+            attribute="build:pdb-path-D:\\anvil\\loader",
+            population=3,
+            observed_by=unplantable("malware-sandbox"),
+        ),
+    )
+    assert [item.shared_attribute for item in result.recurrences] == [
+        "cert:3f8a1c7d9e4b2a6058c31df24e97b0a5",
+        "build:pdb-path-D:\\anvil\\loader",
+    ]
+    assert result.continuity_established
+    # And the other half is refused, on the same evidence, for the ADR-0013 reason.
+    assert not result.is_actionable
+    assert not result.has_framer_costly_signal
+
+
+def test_a_recurrence_nobody_could_have_observed_is_reported_not_established() -> None:
+    """A blog saying two domains share a key is not an observation of them sharing one.
+
+    Continuity asks only whether the *record* is authentic — which is precisely the question
+    ``is_adversary_influenceable`` answers, and the one place in this engine where reading the
+    source class is the right thing to do. A recurrence attested only by channels an adversary
+    can write into is carried, and is not established.
+    """
+    result = assess(
+        signal(
+            ResurgenceSignalKind.SHARED_PRIVATE_KEY,
+            attribute="cert:3f8a1c7d9e4b2a6058c31df24e97b0a5",
+            globally_unique=True,
+            observed_by=open_source("threat-blog"),
+        ),
+    )
+    assert result.recurrences
+    assert all(item.attestation_is_plantable for item in result.recurrences)
+    assert not result.continuity_established
+
+
+def test_no_signals_establishes_no_continuity() -> None:
+    """The vacuous case, pinned because the obvious idiom gets it backwards.
+
+    ``not fusion.rests_only_on_plantable_evidence`` is True on an empty fusion — that property
+    is ``facts_established > 0 and unplantable_facts == 0``, so its negation holds when there
+    is nothing at all. Reusing it here would have established continuity on every pair that
+    shares nothing, which on a 30-operation bench run is 432 of them.
+    """
+    result = assess()
+    assert result.recurrences == ()
+    assert not result.continuity_established
+    assert not result.is_actionable
+
+
+def test_continuity_carries_no_probability_of_its_own() -> None:
+    """Measured, and the reason the split is a list rather than a second number.
+
+    Fusing the same signals against ``OBSERVATION`` instead of ``SHARED_ORIGIN`` returns the
+    *identical* opinion whenever the margin removed nothing — which is every pair on the local
+    bench, 33 of 33, because every attestation there is unplantable and the margin only bites on
+    a plantable one. A second figure would have printed the same float under a second heading,
+    and a reader would have taken the agreement for corroboration.
+
+    The prior is wrong for it too: ``base_rate_for_campaign_population`` is "the share of new
+    malicious infrastructure attributable to any campaign we already follow", divided by which
+    campaign. That is the prior for identity. Continuity needs no prior at all — the values
+    either recurred or did not.
+    """
+    result = assess(
+        signal(
+            ResurgenceSignalKind.SHARED_PRIVATE_KEY,
+            attribute="cert:3f8a1c7d9e4b2a6058c31df24e97b0a5",
+            globally_unique=True,
+            observed_by=unplantable("tls-honeypot"),
+        ),
+    )
+    for item in result.recurrences:
+        for value in item.model_dump().values():
+            assert not isinstance(value, float), (
+                f"{item.kind.value} carries a float; continuity must not be scoreable"
+            )

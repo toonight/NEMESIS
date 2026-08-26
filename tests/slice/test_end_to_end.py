@@ -867,6 +867,15 @@ def test_the_resurgence_stage_is_scored_and_the_score_is_a_lead(
     assert assessment.fusion.rests_only_on_plantable_evidence
     assert any("plant" in warning for warning in assessment.fusion.warnings)
 
+    # The recurrence half, which the split added, and it refuses here too. Every attestation on
+    # this run is an internet scan or a dark-web post — channels an adversary can write into —
+    # so the platform cannot even establish that the values recur. It was *told* the certificate
+    # came back; it did not see it. Asserted because a test that named only the identity half
+    # would keep passing while the run gained a second conclusion it never checked.
+    assert assessment.recurrences, "the narrated assessment offers signals to describe"
+    assert all(item.attestation_is_plantable for item in assessment.recurrences)
+    assert not assessment.continuity_established
+
     # The PGP fingerprint names a persona, and persona linkage is an investigative lead under
     # founder decision D1. The wrapper takes the classification of its most restricted part.
     assert assessment.disclosure is DisclosureClass.INTERNAL_LEAD
