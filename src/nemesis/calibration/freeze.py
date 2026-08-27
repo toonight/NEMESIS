@@ -1299,7 +1299,7 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/evidence/escalation.py": "a577b5bd2f866902",
         "nemesis/evidence/export.py": "e5fda643d253682c",
         "nemesis/evidence/lineage.py": "fa84c77e043f97a4",
-        "nemesis/evidence/standalone_verifier.py": "4d53ea09d2d94424",
+        "nemesis/evidence/standalone_verifier.py": "3b47cc2f940a0673",
         "nemesis/evidence/vault.py": "a5ffab61b1e01ef1",
         "nemesis/evolution/__init__.py": "ad2e13b69c4fc1fd",
         "nemesis/evolution/controller.py": "c642efbbe2d030be",

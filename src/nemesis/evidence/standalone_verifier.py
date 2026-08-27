@@ -140,9 +140,17 @@ def artifact_path(bundle: Path, evidence_id: str) -> Path | None:
     """
     if not evidence_id or "/" in evidence_id or "\\" in evidence_id or evidence_id in (".", ".."):
         return None
-    candidate = bundle / ARTIFACTS / evidence_id
-    root = (bundle / ARTIFACTS).resolve()
+    directory = bundle / ARTIFACTS
+    # The root is resolved from the BUNDLE, not through the directory. Resolving
+    # `(bundle / ARTIFACTS)` moved the root along with a symlinked `artifacts/`, so the
+    # confinement check compared a path against itself and passed. An adversarial review shipped
+    # a package whose `artifacts/` pointed at a directory on the recipient's machine and had this
+    # program hash and name the files in it.
+    if directory.is_symlink():
+        return None
     try:
+        root = bundle.resolve() / ARTIFACTS
+        candidate = directory / evidence_id
         resolved = candidate.resolve()
     except OSError:
         return None
@@ -293,18 +301,47 @@ def verify(bundle: Path) -> tuple[bool, list[str]]:
 
     # 4. Both directions. A package can be gutted by *removing* things, and a check that only
     #    walks the manifest cannot see what is no longer in it.
-    withheld = manifest.get("withheld_restricted", 0)
-    withheld = withheld if isinstance(withheld, int) and withheld >= 0 else 0
-    if len(sealed) != len(seen) + withheld:
+    #
+    #    **The manifest's own number must not balance the log's equation.** This used to read
+    #    `len(sealed) != len(seen) + withheld`, where `withheld` is a *manifest* field — the
+    #    attacker's own copy. An adversarial review popped one entry, deleted its artifact and
+    #    incremented `withheld_restricted` by one: `verify()` returned True with zero findings,
+    #    and the program printed "nothing was added or removed" about a package one exhibit
+    #    short. That breaks this module's own stated rule — the log is the authority inside a
+    #    package and the manifest is an index.
+    #
+    #    The log cannot distinguish withheld from deleted, so it is no longer asked to. A
+    #    shortfall is reported as a shortfall, and the withholding claim is reported as
+    #    something this program cannot check. A recipient who needs it checked compares the
+    #    object count against the one in the notice they were given out of band.
+    shortfall = len(sealed) - len(seen)
+    if shortfall > 0:
+        withheld = manifest.get("withheld_restricted", 0)
+        withheld = withheld if isinstance(withheld, int) and withheld >= 0 else 0
         findings.append(
-            "the log seals {} object(s); the manifest accounts for {} ({} listed, {} declared "
-            "withheld). Objects were removed from this package after it was written.".format(
-                len(sealed), len(seen) + withheld, len(seen), withheld
-            )
+            "the log seals {} object(s) and {} are present. The manifest says {} were withheld "
+            "as restricted, and THIS PROGRAM CANNOT CHECK THAT: the count is a manifest field, "
+            "so a package with objects removed in transit looks identical to one with objects "
+            "lawfully withheld. Confirm the number with the sender through a channel that is "
+            "not this package.".format(len(sealed), len(seen), withheld)
+        )
+    elif shortfall < 0:
+        findings.append(
+            "the package holds {} object(s) the log does not seal; it was added to after it "
+            "was written.".format(-shortfall)
         )
 
     directory = bundle / ARTIFACTS
-    if directory.is_dir():
+    if directory.is_symlink():
+        # Reported without listing what is behind it. The stray-file walk leaked a full
+        # directory listing off the recipient's machine with no log or manifest forgery at all —
+        # it iterated the symlinked directory unconditionally. A refusal must not carry the
+        # measurement it refused to make.
+        findings.append(
+            "{} is a symbolic link, not a directory. This package will not be read: a link "
+            "here points this program at files that are not part of it.".format(ARTIFACTS)
+        )
+    elif directory.is_dir():
         for path in sorted(directory.iterdir()):
             if path.name not in seen:
                 findings.append(

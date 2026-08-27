@@ -47,7 +47,7 @@ from nemesis.evidence.export import (
     write_sealed_export,
 )
 from nemesis.evidence.standalone_verifier import SEALED_FILES as VERIFIER_MAP
-from nemesis.evidence.standalone_verifier import check_seal
+from nemesis.evidence.standalone_verifier import check_seal, verify
 from nemesis.evidence.vault import FileSystemEvidenceVault
 
 pytestmark = pytest.mark.invariant
@@ -455,19 +455,36 @@ def test_every_artifact_cannot_be_deleted_by_emptying_the_manifest(tmp_path: Pat
 
     done = _doctor(_export(tmp_path), gut)
     assert done.returncode == 1
-    assert "Objects were removed from this package" in done.stdout
+    assert "the log seals" in done.stdout and "are present" in done.stdout
 
 
 def test_a_single_document_cannot_be_suppressed_in_transit(tmp_path: Path) -> None:
-    """The disclosure case: removing the one exculpatory document and its manifest entry."""
+    """The disclosure case: removing the one exculpatory document and its manifest entry.
+
+    **This test passed for the wrong reason until an adversarial review noticed.** The
+    reconciliation read ``len(sealed) != len(seen) + withheld``, where ``withheld`` is a
+    *manifest* field — the doctorer's own copy. This ``suppress()`` simply forgot to touch it,
+    so the arithmetic stayed unbalanced and the finding fired. A doctorer that incremented it by
+    one made ``verify()`` return True with zero findings, and the program printed "nothing was
+    added or removed" about a package one exhibit short.
+
+    So the test now does what the attacker would: it bumps the count. The log is the authority
+    inside a package, and the manifest's own number no longer balances the log's equation.
+    """
 
     def suppress(bundle: Path, manifest: dict[str, object]) -> None:
         item = manifest["entries"].pop(0)  # type: ignore[attr-defined]
         (bundle / ARTIFACTS_DIR / item["evidence_id"]).unlink()
+        # The half that used to be missing.
+        manifest["withheld_restricted"] = int(manifest.get("withheld_restricted", 0)) + 1  # type: ignore[arg-type]
 
     done = _doctor(_export(tmp_path), suppress)
     assert done.returncode == 1
-    assert "Objects were removed from this package" in done.stdout
+    assert "the log seals" in done.stdout
+    assert "CANNOT CHECK THAT" in done.stdout, (
+        "the shortfall must be reported as unverifiable rather than balanced away by a number "
+        "the sender chose"
+    )
 
 
 def test_an_empty_manifest_is_not_a_package_with_nothing_to_check(tmp_path: Path) -> None:
@@ -826,3 +843,58 @@ def test_a_missing_sealed_file_is_a_finding_not_a_crash(tmp_path: Path) -> None:
     _, verdict, findings = check_seal(bundle)
     assert verdict == "FAILED"
     assert any("anchors.jsonl is missing" in finding for finding in findings), findings
+
+
+def test_the_verifier_does_not_read_through_a_symlinked_artifacts_directory(
+    tmp_path: Path,
+) -> None:
+    """The read oracle an adversarial review opened, and what a refusal must not carry.
+
+    ``artifact_path`` confined the leaf name and then computed the confinement root by
+    resolving ``bundle / "artifacts"`` — *through the same untrusted directory*. Make
+    ``artifacts/`` itself a symlink and the root moves with it, so the check compared a path
+    against itself and passed. Worse, the stray-file walk iterated the linked directory
+    unconditionally, with no log or manifest forgery at all.
+
+    Measured before the fix: a package whose ``artifacts/`` pointed at a directory on the
+    recipient's machine had this program print those private filenames back — and the module's
+    own docstring notes recipients "are told to run this and usually send the output back".
+
+    Two assertions, and the second is the one that matters. It must fail, and it must fail
+    without naming or measuring anything behind the link: a refusal that carries the
+    measurement it refused to make is not a refusal.
+    """
+    import shutil
+
+    bundle = _export(tmp_path)
+    private = tmp_path / "recipient-private"
+    private.mkdir()
+    (private / "merger-terms.txt").write_bytes(b"CONFIDENTIAL")
+    (private / "id_ed25519").write_bytes(b"-----BEGIN PRIVATE KEY-----")
+
+    shutil.rmtree(bundle / ARTIFACTS_DIR)
+    (bundle / ARTIFACTS_DIR).symlink_to(private, target_is_directory=True)
+
+    ok, findings = verify(bundle)
+    assert ok is False
+    blob = " ".join(findings)
+    for secret in ("merger-terms.txt", "id_ed25519"):
+        assert secret not in blob, (
+            f"the verifier echoed {secret!r} off the recipient's machine: {findings}"
+        )
+    assert any("symbolic link" in finding for finding in findings), findings
+
+
+def test_an_artifact_that_is_a_symlink_is_still_refused(tmp_path: Path) -> None:
+    """The leaf case, kept: the directory fix must not have replaced the file check."""
+    bundle = _export(tmp_path)
+    entries = sorted((bundle / ARTIFACTS_DIR).iterdir())
+    victim = entries[0]
+    elsewhere = tmp_path / "elsewhere.txt"
+    elsewhere.write_bytes(b"not the sealed bytes")
+    victim.unlink()
+    victim.symlink_to(elsewhere)
+
+    ok, findings = verify(bundle)
+    assert ok is False
+    assert any("no ordinary file" in finding for finding in findings), findings
