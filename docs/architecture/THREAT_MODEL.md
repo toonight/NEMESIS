@@ -425,6 +425,45 @@ monotonic-not-honest distinction are its, the measurements are ours.
 
 ---
 
+## Open findings from the 2026-08-27 effects and vault reviews
+
+Two adversarial reviews were run against the planes the agent-collective pass had not reached.
+They produced roughly thirty findings between them; twelve were fixed on the branch that
+followed, each with a test constructing the original reproduction. **The rest are recorded here
+rather than closed**, because a finding nobody wrote down is a finding that gets rediscovered by
+somebody who is not on our side.
+
+Every row below was reproduced by executed code against this tree.
+
+| Finding | Consequence | Status |
+|---|---|---|
+| **Two vault instances on one root fork the chain irrecoverably.** The lock is per-instance (`threading.Lock`), `_append` reads the tip and writes with no file lock, and `_write_atomic` uses a fixed `.partial` name. | 3/3 reproductions. The store then reports tampering where there was only concurrency, and there is no repair path: `_chain_tip()` raises, so no seal, no recorded read and no anchor can ever be appended again. An accident produces a report that reads as deliberate. | `PROPOSED` — needs an `flock` held across read-tip-and-append, per-writer temp names, and a documented recovery procedure. |
+| **A replaceable analyser can downgrade MANDATORY_REPORT to ROUTINE before the vault sees it.** The monotonicity rule lives inside `StructuralAnalyser` — the component documented as a deployment extension point, which by design parses hostile bytes. | Material carrying a statutory reporting duty reaches an append-only store as routine and cannot be removed. `AnalysisReport.confined` is also self-asserted by the analyser. | `PROPOSED` — the check belongs in `seal_when_released`, outside the analyser, and needs an explicit partial order over `ContentSafety` since the enum is not a ladder. |
+| **The reporting-obligation register is wired to nothing.** `Register.incur` has zero callers in `src/`. | When quarantine refuses MANDATORY_REPORT material, no obligation opens, no deadline starts, and nothing reads `Quarantine.held()`. The module's own thesis — "the dangerous obligation is the one that lands in a queue nobody reads" — describes the state the platform is in. It is also in-memory, so it would not survive a restart. | `PROPOSED`. This is the missing human gate for the one class of material carrying a legal clock. |
+| **The shipped verifier's size ceiling covers artifacts only.** `read_jsonl`, the manifest read and both `read_bytes()` in `check_seal` are unbounded. | Measured ~6.4× amplification: a 109 MB log peaked at 702 MB RSS. An OOM kill is not an `Exception` and escapes the handler, so a recipient sees a killed process. This also bites *honest* packages from a large vault. | `PROPOSED` — stream the log with byte and line ceilings. |
+| **The lineage derivation walk is exponential in fan-out.** `_evidence_backed` bounds depth and keeps no visited set. | 108 claims produced 3.26M store lookups. Against an I/O-backed claim store each is a round trip, and `resolve_sources` is wired into the resurgence watch — the bound's own docstring says it exists to stop exactly this. | `PROPOSED` — a visited set and a total-node budget. |
+| **Lineage reports evidence backing for a claim that has none.** Any non-empty `supported_by_evidence` counts, whatever the claim's kind, and nothing checks the evidence is *about* the claim. | A HYPOTHESIS naming a person, citing an unrelated TLS capture, resolved to an unplantable own-sensor origin with no `UNRESOLVED_SOURCE` recorded. This feeds the robustness margin. | `PROPOSED` — weight the origin by the citing claim's epistemic strength, which is computed and unused here. |
+| **`embedded_hash` is a witness the forger opts into.** The identifier check is skipped when an id is not content-addressed, and nothing requires one to be. | The "three independent witnesses" the verifier leans on silently becomes two, with no line of output saying so. | `PROPOSED` — report a non-content-addressed identifier as a finding in its own right. |
+| **The autonomous path is the unconfined one.** `IsolatedEffectsExecutor` has one production caller — the demonstration. The mediator calls `registry.execute` directly. | The plane the safety argument rests on runs with no separate process, no sandbox profile, no deadline and no import seal on the one path an untrusted model drives. Confinement was confirmed to work where it *is* applied. | **Decision needed, not a defect to patch.** Either route the pilot through the executor, or state in `PROJECT_STATE.md` that isolation is `IMPLEMENTED` for the demonstration path and `PROPOSED` for the pilot path. |
+| **The runtime import seal and `.importlinter` disagree in both directions.** `nemesis.audit` is in neither, while the sandbox profile's own docstring names the audit trail as material the plane must not reach. | A worker can import the audit trail. | `PROPOSED` — derive one list from the other and test that they agree. |
+| **A stop condition's meaning is its name.** Nothing constrains `condition` to a vocabulary at issuance, and duplicates within one capability are permitted. | A condition named `target_ownership_contested` whose description means something else is cleared by an ownership observation. | `PROPOSED` — a closed vocabulary, validated at issuance. |
+| **`external_contact_made=False` is asserted where nothing knows.** A killed worker's detail says "nothing can say how far it got" in the same record where the field asserts safety. The `IsolationReport` never reaches the trail despite its port docstring saying it does. | A field that cannot express "unknown" reads as a positive finding. | `PROPOSED` — three-valued, and carry the report into the audit event. |
+| **`allow_unsandboxed` defaults to `True`.** On Linux this is a plain subprocess with full network and filesystem reach, recorded `simulated` with an honest but overlookable `network=NOT DENIED`. | A deployment default and a test default should not be the same value. | `PROPOSED`. |
+
+**Two tests were found to assert their own opposite** and are recorded here because the pattern
+matters more than either instance: `test_collected_content_cannot_inject_markup` passes with the
+HTML escaping deleted (no fixture string contains markup, so it tests the template rather than
+the escaping), and `test_a_lying_analyser_cannot_release_mandatory_report_material` asserts in
+its body that the analyser *can*. The docstring is honest; the name is what a coverage claim
+reads.
+
+**Also worth stating: the evidence vault has no row in the invariant register.** `INVARIANTS.md`
+maps CLAUDE.md invariant 10 to the audit trail only, so the vault's controls — content
+addressing, the chain, quarantine, the export seal — appear in no identifier. That is why these
+findings had no `EVID-*` to violate, and it is the next thing to fix in that document.
+
+---
+
 ## Review triggers
 
 Revisit this document when any of these happens, not on a calendar:

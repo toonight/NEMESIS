@@ -472,6 +472,24 @@ def check_seal(bundle: Path) -> tuple[str, str, list[str]]:
 
 
 def anchor_note(bundle: Path) -> str:
+    """See :func:`_anchor_note`. Wrapped so a damaged file cannot follow a verdict with a stack.
+
+    ``anchor_note`` is called after the verdict lines are printed and, until an adversarial
+    review pointed it out, outside ``main``'s handler: making ``anchors.jsonl`` a *directory*
+    printed ``INTERNALLY CONSISTENT: YES`` and then an ``IsADirectoryError`` traceback. The exit
+    status was still 1, so automation failed closed — but a human saw the outcome line this
+    program exists to make unambiguous, and grep-based automation keying on that line accepted.
+    """
+    try:
+        return _anchor_note(bundle)
+    except OSError as exc:
+        return (
+            "anchors.jsonl could not be read ({}), so nothing here says whether this package "
+            "was anchored at all.".format(type(exc).__name__)
+        )
+
+
+def _anchor_note(bundle: Path) -> str:
     """What the anchors in a package are worth, which is never more than a pointer.
 
     An anchor carried inside a package cannot establish its own independence: the file is as

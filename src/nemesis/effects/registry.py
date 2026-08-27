@@ -575,6 +575,21 @@ class EffectsRegistry:
                 "nothing it was wired with; an adapter that cannot name its authorizer "
                 "cannot refuse a capability from anyone else"
             )
+        if not isinstance(adapter, EffectsAdapter):
+            # `EffectsAdapter` is `runtime_checkable` and this check was simply never made, so
+            # an object with no `name` and no `execute` registered without complaint and the
+            # failure surfaced later — inside the crash handler that exists to *guarantee* a
+            # record, which then raised on `adapter.name`. A registry that accepts anything is a
+            # registry whose other guards run on objects that cannot satisfy them.
+            #
+            # Ordered after the anchor check deliberately: an adapter missing only its anchor
+            # fails both, and "declares no trust anchor" tells a wirer what to fix while "does
+            # not satisfy the protocol" tells them to go looking.
+            raise ValueError(
+                f"{type(adapter).__name__} does not satisfy the EffectsAdapter protocol; an "
+                "object that cannot execute an effect cannot be registered to perform one"
+            )
+
         # Key material, not a self-reported label. `key_id` is a property on the object
         # being registered, so comparing key ids let an adapter carrying a verifier that
         # merely *claimed* the right id — and accepted everything — pass this guard. keys.py
