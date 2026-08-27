@@ -9,11 +9,19 @@ is named rather than absorbed.
 The last group asserts the limit honestly: the chain the vault computes itself does not
 make it defensible against the person who computes it, and an anchor we signed ourselves
 does not change that.
+
+Covers **EVID-01** (an artifact's identity is its content), **EVID-02** (modification,
+insertion, deletion and reordering each detectable and distinctly reported), **EVID-03**
+(nothing is released from a chain that does not verify), **EVID-04** (quarantined material is
+held, never indexed, and its refusal is itself recorded) and **EVID-08** (the vault reports that
+it is not defensible against its own operator, and cannot be made to say otherwise) from
+`docs/security/INVARIANTS.md`.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from collections.abc import Coroutine
 from datetime import UTC, datetime
@@ -388,6 +396,62 @@ def test_relabelled_metadata_is_caught_and_never_enumerated(tmp_path: Path) -> N
         run(vault.list_evidence())
     with pytest.raises(MetadataCorruptedError):
         run(vault.export_bundle(requested_by="analyst-1", reason="referral package"))
+
+
+def test_a_forged_chain_releases_nothing_even_when_the_metadata_hash_agrees(
+    tmp_path: Path,
+) -> None:
+    """EVID-03. The construction the neighbouring test does not perform.
+
+    ``test_relabelled_metadata_is_caught_and_never_enumerated`` edits the metadata file alone, so
+    the committed ``metadata_hash`` stops matching and the release paths refuse on *that*. An
+    adversarial review did the two-file version: relabel the metadata **and** patch the seal
+    entry's ``metadata_hash`` to agree, leaving ``entry_hash`` untouched.
+
+    The chain caught it — ``verify_integrity()`` named the entry precisely — and
+    ``list_evidence()`` handed the object over anyway, summary included, because every reader
+    parsed the chain and discarded the verdict: ``entries, _ = _parse_chain(...)``, in three
+    places. Checking a metadata hash against a log line already known to be forged is not a
+    check; it is a check read out of a compromised source.
+
+    That is *below* this module's stated position — "careless tampering is caught" — because the
+    operator here recomputed nothing beyond one field.
+    """
+    vault = _vault(tmp_path)
+    artifact = b"content carrying a reporting obligation"
+    restricted = _evidence(artifact, safety=ContentSafety.MANDATORY_REPORT)
+    run(vault.seal(restricted, artifact))
+
+    metadata_path = vault.root / "metadata" / f"{restricted.evidence_id}.json"
+    record = json.loads(metadata_path.read_text(encoding="utf-8"))
+    record["content_safety"] = ContentSafety.ROUTINE.value
+    relabelled = json.dumps(record).encode()
+    _overwrite(metadata_path, relabelled)
+
+    # Make the log agree with the forgery, without recomputing the entry hash.
+    log_path = vault.root / "log.jsonl"
+    lines = log_path.read_text(encoding="utf-8").splitlines()
+    forged = []
+    for line in lines:
+        entry = json.loads(line)
+        if entry.get("evidence_id") == restricted.evidence_id and "metadata_hash" in entry:
+            entry["metadata_hash"] = hashlib.sha256(relabelled).hexdigest()
+        forged.append(json.dumps(entry, separators=(",", ":"), sort_keys=True))
+    _overwrite(log_path, ("\n".join(forged) + "\n").encode())
+
+    report = run(vault.verify_integrity())
+    assert not report.is_intact, "the chain no longer notices the forgery; this tests nothing"
+    assert report.log_defects, report
+
+    # Every release path refuses, and refuses on the chain rather than on the metadata hash —
+    # which now agrees, which was the whole point of the construction.
+    for release in (
+        lambda: run(vault.list_evidence()),
+        lambda: run(vault.get(restricted.evidence_id)),
+        lambda: run(vault.export_bundle(requested_by="analyst-1", reason="referral")),
+    ):
+        with pytest.raises(VaultChainError):
+            release()
 
 
 # --- anchors, and what they are worth ------------------------------------------

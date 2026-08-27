@@ -207,6 +207,51 @@ the verdict so "anchored" cannot be read as the tier above.
 
 ---
 
+## EVID — evidence somebody else can check
+
+**Added 2026-08-27**, after two adversarial reviews of the vault and the effects plane. Their
+findings had no identifier to violate, because this register mapped CLAUDE.md invariant 10 to the
+audit trail alone — so the vault's controls, which are most of what "tamper-evident" means here,
+appeared in no row at all. That omission is why this section exists.
+
+The governing property, and it is not the one people expect:
+
+> **The vault operator is inside the threat model.**
+> An internal hash chain proves nothing against whoever can rewrite the whole store. What the
+> evidence plane can honestly promise is that *careless* tampering is caught, that a package can
+> be checked by its recipient without trusting us, and that where it cannot promise more it
+> **says so** rather than presenting a clean internal chain as proof.
+
+That last clause does real work. EVID-08 is the only invariant in this document whose
+`IMPLEMENTED` status is a promise to keep reporting a *failure*.
+
+| ID | Property | Status | Enforced by | Tested by |
+|---|---|---|---|---|
+| **EVID-01** | An artifact's identity is its content. | `IMPLEMENTED` | `evidence_id` is `content_id(IdPrefix.EVIDENCE, artifact)` — derived from the SHA-256 of the bytes, not assigned. Sealing bytes that do not hash to the declared `content_hash` is refused; re-sealing over substituted stored bytes raises `EvidenceSubstitutionError`; and a genuine collision is named as voiding *every* content address in the platform rather than handled quietly. | `test_evidence_vault.py`, `test_evidence_export.py` |
+| **EVID-02** | Modification, insertion, deletion, reordering and truncation of the vault log are all detectable. | `IMPLEMENTED` | Every entry hashes its canonical encoding with its predecessor's. `_parse_chain` separates an **in-place edit** ("log entry N was altered after it was written") from a **break in the sequence** ("entries were reordered, inserted or removed" — one message for those three, which is as precise as a link check can be), and `_check_recorded_head` compares the tip against the head stored beside it, which is what catches truncation. A chain that only caught in-place edits would be defeated by an editor that drops a line. | `test_evidence_vault.py`, `test_evidence_export.py` |
+| **EVID-03** | Nothing is released from a vault whose chain does not verify. | `IMPLEMENTED` | `_verify_metadata_against_chain`, `_enumerable_objects` and `_quarantined_count` each raise `VaultChainError` on any chain defect. **New in this pass:** all three previously did `entries, _ = _parse_chain(...)` and discarded the verdict, so a two-file edit released quarantined material — relabel the metadata, patch the seal entry's `metadata_hash` to agree, leave `entry_hash` alone. `verify_integrity()` named the forgery and `list_evidence()` handed the object over anyway. | `test_evidence_vault.py` (`test_a_forged_chain_releases_nothing_even_when_the_metadata_hash_agrees`) |
+| **EVID-04** | Material carrying a reporting obligation is held, never indexed, and never exported through an ordinary path. | `IMPLEMENTED` (the vault gate) / `PROPOSED` (analyser monotonicity) | `must_not_be_indexed` excludes it from every bulk read and from `export_bundle`; an ordinary read raises `RestrictedContentError` **and appends a `REFUSED_ACCESS` entry**; the only way through is `retrieve_quarantined_artifact` with a non-empty escalation reference, which appends a `QUARANTINED_ACCESS` entry no bulk read produces. **The gap, stated:** the monotonicity rule that stops a *downgrade* lives inside `StructuralAnalyser` — a documented deployment extension point — so a replaceable analyser can relabel material before the vault ever sees it. See the threat model. | `test_quarantine.py`, `test_evidence_vault.py` |
+| **EVID-05** | A recipient can verify a package without trusting us and without this codebase. | `IMPLEMENTED` | `verify.py` ships inside the bundle, imports nothing from `nemesis`, is excluded from the `UP` lint rules so it keeps running on whatever interpreter the recipient has, and computes the same chain hash as the vault — asserted against the real implementation rather than against a copy of the algorithm. | `test_evidence_export.py` (imports, oldest interpreter on this machine, chain-hash agreement) |
+| **EVID-06** | A doctored package does not verify, and the seal covers every file in it. | `IMPLEMENTED` | An explicit filename→key map, duplicated in the shipped verifier and asserted identical by a test. **New in this pass:** the verifier derived the key from the filename, producing one the sealer never wrote — the log's check was dead code, `anchors.jsonl` was never in the loop, and `verify.py` was not in the seal at all, so a signed package could ship an attacker's verifier under a byte-identical digest. `README.txt` is bound the other way round, because it quotes the digest and cannot contain it. | `test_evidence_export.py` (every sealed file parametrised, verifier substitution, detached notice, suppression, swap, reorder) |
+| **EVID-07** | The verifier reads nothing outside the package, and a refusal carries no measurement. | `IMPLEMENTED` | `artifact_path` refuses a leaf name containing a separator, refuses a symlinked leaf, refuses a symlinked `artifacts/` outright, and resolves the confinement root from the **bundle** rather than through the directory it is confining. **New in this pass:** resolving through the directory moved the root along with a symlink, and the stray-file walk then listed a private directory off the recipient's machine with no forgery at all. A refusal now names nothing behind the link. | `test_evidence_export.py` (symlinked directory, symlinked leaf, read-oracle) |
+| **EVID-08** | The vault reports that it is **not** defensible against its own operator, and cannot be made to say otherwise. | `IMPLEMENTED` | `is_externally_held` is an allowlist of anchor types this build can *verify*, and that set is **empty** — so `externally_anchored` is 0 and `is_defensible_against_insider` is False for every package this build can produce. **New in this pass:** it was a denylist of authority *strings*, so an anchor reading `authority="Totally Independent Notary AG"`, `proof="not-even-base64"` flipped the verdict to True. Filling the allowlist requires a verifier for that anchor type, not a better name. | `test_evidence_vault.py`, `test_evidence_export.py` (an appended anchor cannot flip the verdict) |
+
+**What has no row yet, and why that is deliberate.** `resolve_lineage` reports evidence backing
+for a claim that has none: any non-empty `supported_by_evidence` counts, whatever the claim's
+kind, and nothing checks the evidence is *about* the claim. A HYPOTHESIS naming a person, citing
+an unrelated TLS capture, resolves to an unplantable own-sensor origin. That feeds the robustness
+margin, so it matters — and a row here would be a promise that something enforces it. Nothing
+does. It is recorded in the threat model as an open finding until it is fixed, which is the
+honest place for it.
+
+**What EVID does not promise, restated because the temptation is to read a green table as more.**
+Two vault instances on one root fork the chain irrecoverably; the shipped verifier's size ceiling
+covers artifacts but not the log; and the reporting-obligation register has no callers, so the
+`REFUSED_ACCESS` entry EVID-04 appends is currently the *only* trace a statutory obligation was
+incurred. All three are reproduced and open.
+
+---
+
 ## PROBE — reaching for a capability is itself information
 
 | ID | Property | Status | Enforced by | Tested by |
@@ -255,6 +300,10 @@ the boundary the real controls defend, and it refuses nothing on its own.
 | EFFECT-01, EFFECT-02, EFFECT-03 | 7, 8, 9 |
 | DARKWEB-01, DARKWEB-02 | 5, 15 |
 | SAFEFAIL-01, SAFEFAIL-02 | 4 (explicit uncertainty), 9, 14 (disruption closes no case) |
+| EVID-01 … EVID-03 | 2 (intelligence ≠ evidence), 10 (tamper-evident evidence) |
+| EVID-04 | 5 (external content is hostile), 10 |
+| EVID-05 … EVID-07 | 3 (provenance), 10, 12 (NEMESIS must explain why) |
+| EVID-08 | 4 (confidence and uncertainty are explicit), 10 |
 | AUDIT-01, AUDIT-02 | 10 (tamper-evident evidence), 11 |
 | PROBE-01, PROBE-02 | 11 |
 

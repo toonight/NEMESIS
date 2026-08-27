@@ -14,6 +14,12 @@ The last group is the one that matters most, and it asserts a *refusal to overcl
 package this build can produce says ``DEFENSIBLE AGAINST THE OPERATOR: NO``, because there is
 no externally held anchor and every link is recomputable by whoever holds the vault. A test
 suite that only checked the happy path would let that sentence quietly disappear.
+
+Covers **EVID-05** (a recipient can verify without trusting us and without this codebase),
+**EVID-06** (a doctored package does not verify, and the seal covers every file including the
+verifier itself), **EVID-07** (the verifier reads nothing outside the package, and a refusal
+carries no measurement) and **EVID-08** from `docs/security/INVARIANTS.md`. EVID-01 and EVID-02
+are exercised here too, from the recipient's side rather than the vault's.
 """
 
 from __future__ import annotations

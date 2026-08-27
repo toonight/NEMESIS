@@ -7,6 +7,11 @@ control that did not exist: the word *quarantine* appeared only in fixture prose
 These tests are about the pipeline that makes those sentences true, and they are written the
 way this project writes security tests: each one constructs the shortcut somebody would take
 under deadline pressure, and asserts it is refused.
+
+Covers **EVID-04** from `docs/security/INVARIANTS.md` — with the half that is *not* covered
+named in the register and in the threat model: the monotonicity rule that stops a downgrade
+lives inside `StructuralAnalyser`, a documented deployment extension point, so a replaceable
+analyser can relabel material before the vault ever sees it.
 """
 
 from __future__ import annotations
