@@ -20,7 +20,7 @@ again — and asserts :meth:`~nemesis.authz.monotonicity.AuthoritySnapshot.widen
 empty. Where a specific refusal is *also* interesting the test asserts it as well, but the
 monotonicity assertion is the one that would survive somebody moving the control.
 
-Covers AUTH-01, AUTH-02, EFFECT-03 and MODEL-03 from `docs/security/INVARIANTS.md`.
+Covers AUTH-01, AUTH-02, EFFECT-02, EFFECT-03 and MODEL-03 from `docs/security/INVARIANTS.md`.
 """
 
 from __future__ import annotations

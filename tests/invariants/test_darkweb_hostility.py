@@ -15,7 +15,9 @@ redirect refusal, size and time bounds, and kernel confinement all live in
 `tests/planes/test_dark_web_connector.py` and `tests/invariants/test_collector_isolation.py`. This
 module covers the half those do not — what happens once hostile bytes are *inside*.
 
-Covers DARKWEB-01 and DARKWEB-02. Brief case 6.
+Covers DARKWEB-01, DARKWEB-02 and EFFECT-01 — the last because "no untrusted input can directly
+trigger an effect" is a claim about *this* input above all others: the adversary wrote it, the
+pilot read it, and the pilot obeyed. Brief case 6.
 """
 
 from __future__ import annotations
