@@ -159,7 +159,15 @@ class ArtifactAnalyser(Protocol):
     @property
     def name(self) -> str: ...
 
-    def analyse(self, artifact: bytes, handle: ArtifactHandle) -> AnalysisReport: ...
+    async def analyse(self, artifact: bytes, handle: ArtifactHandle) -> AnalysisReport:
+        """Examine the bytes and report.
+
+        Asynchronous because the implementation this extension point exists for runs the
+        examination in a confined child process, and a synchronous signature would force every
+        such implementation to smuggle an event loop into a thread. The shipped analyser does
+        no I/O and is asynchronous only to satisfy this.
+        """
+        ...
 
 
 class StructuralAnalyser:
@@ -195,7 +203,7 @@ class StructuralAnalyser:
         (b"%PDF", "PDF document — an active-content format"),
     )
 
-    def analyse(self, artifact: bytes, handle: ArtifactHandle) -> AnalysisReport:
+    async def analyse(self, artifact: bytes, handle: ArtifactHandle) -> AnalysisReport:
         observations: list[str] = []
         classification = handle.declared_safety
 
@@ -290,7 +298,7 @@ class Quarantine:
     def report(self, handle: ArtifactHandle) -> AnalysisReport | None:
         return self._reports.get(handle.artifact_id)
 
-    def analyse(self, handle: ArtifactHandle, analyser: ArtifactAnalyser) -> AnalysisReport:
+    async def analyse(self, handle: ArtifactHandle, analyser: ArtifactAnalyser) -> AnalysisReport:
         """Examine the artifact and record what came back. Failure holds.
 
         The analyser is handed the bytes; the caller is not. What is returned is a report, and
@@ -300,7 +308,7 @@ class Quarantine:
         path = self._root / handle.artifact_id
         try:
             artifact = path.read_bytes()
-            report = analyser.analyse(artifact, handle)
+            report = await analyser.analyse(artifact, handle)
         except Exception as exc:
             report = AnalysisReport(
                 artifact_id=handle.artifact_id,
@@ -380,6 +388,11 @@ def analysis_payload(handle: ArtifactHandle) -> bytes:
             "content_hash": handle.content_hash,
             "byte_length": handle.byte_length,
             "declared_safety": handle.declared_safety.value,
+            # The handle's remaining field. Included because the child reconstructs the whole
+            # handle and an analyser is entitled to know how long the material has been held —
+            # and because inventing a value on the far side would put a fabricated timestamp
+            # in front of the one component that reads hostile bytes for a living.
+            "admitted_at": handle.admitted_at.isoformat(),
         }
     ).encode()
 
@@ -439,7 +452,7 @@ async def seal_when_released(
     as routine and then not be removable.
     """
     handle = quarantine.admit(artifact, declared_safety=evidence.content_safety)
-    report = quarantine.analyse(handle, analyser)
+    report = await quarantine.analyse(handle, analyser)
     try:
         released = quarantine.release(handle)
     except QuarantineError as refusal:

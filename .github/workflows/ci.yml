@@ -139,6 +139,7 @@ jobs:
             tests/invariants/test_collector_isolation.py \
             tests/invariants/test_effects_isolation.py \
             tests/invariants/test_pilot_containment.py \
+            tests/invariants/test_analyser_isolation.py \
             | tee /tmp/confinement.txt
           if grep -q "kernel-enforced confinement needs macOS sandbox-exec" /tmp/confinement.txt; then
             echo "a confinement test skipped for want of a sandbox on a macOS runner"; exit 1
