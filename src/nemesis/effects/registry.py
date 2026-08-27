@@ -548,6 +548,28 @@ def preflight(
     return Preflight(decision=decision, approved_target=approved, granted=granted)
 
 
+def _adapter_name_or_registry(adapter: EffectsAdapter) -> str:
+    """The adapter's own name, or this registry's when asking for it is itself unsafe.
+
+    ``getattr(adapter, "name", REGISTRY_NAME)`` is not enough, and it is worth saying why: the
+    default arm answers :class:`AttributeError` alone, so a ``name`` **property** raising
+    anything else — a lazily-loaded resource that has gone away, very often the same failure
+    that just took the adapter down — propagates straight out of the crash handler and
+    destroys the record that handler exists to guarantee.
+
+    The exception is swallowed rather than reported because there is nowhere left to report
+    it: this runs while another failure is already being converted into a result, and raising
+    here would lose both. The fallback names the registry, which is the component that did
+    author the record, and is the honest answer to "who is this?" from an adapter that would
+    not say.
+    """
+    try:
+        return str(adapter.name)[:120]
+    # Deliberately unnarrowed: the point is to survive *any* answer, including none.
+    except Exception:
+        return REGISTRY_NAME
+
+
 class EffectsRegistry:
     """Maps an operation class to the one adapter that may perform it.
 
@@ -659,18 +681,22 @@ class EffectsRegistry:
             # An adapter that raises has violated the port contract, which says refusals are
             # returned and not thrown. Converting it here keeps one uncaught bug from
             # becoming an effect whose outcome nobody recorded.
+            #
+            # Read the name once, safely, and reuse it. Consulting the object whose failure
+            # this block is handling is the recurring defect here: an earlier version called
+            # `authorizes()` on the capability that had just crashed, and the repair that
+            # followed hardened `adapter_name` with a `getattr` while `detail`, a dozen lines
+            # below, still read `adapter.name` bare — so `AttributeError` escaped the very
+            # handler that `getattr` was added to protect, and anything other than
+            # `AttributeError` escaped the `getattr` too. One read, one name, no second
+            # opportunity to raise.
+            adapter_name = _adapter_name_or_registry(adapter)
             return EffectResult(
                 operation_id=request.operation_id,
                 operation=request.operation,
                 outcome=EffectOutcome.FAILED,
                 executed_at=utcnow(),
-                # `getattr`, not `adapter.name`. This handler exists so one uncaught adapter
-                # bug cannot become an effect nobody recorded — and it consulted the object it
-                # was handling the failure of, so an adapter with no `name` made the handler
-                # itself raise. Same defect class as the version that called `authorizes()` on
-                # the capability that had just crashed, reintroduced through a different
-                # attribute.
-                adapter_name=str(getattr(adapter, "name", REGISTRY_NAME))[:120],
+                adapter_name=adapter_name,
                 # Built locally. This handler exists so that one uncaught adapter bug
                 # cannot become an effect whose outcome nobody recorded — and it used to
                 # call `authorizes()` on the same untrusted object that had just caused the
@@ -684,7 +710,7 @@ class EffectsRegistry:
                     reasons=(f"adapter raised {type(exc).__name__} before any verdict",),
                 ),
                 detail=(
-                    f"adapter {adapter.name!r} raised {type(exc).__name__} instead of "
+                    f"adapter {adapter_name!r} raised {type(exc).__name__} instead of "
                     "returning a refusal; treated as a failed operation"
                 ),
                 external_contact_made=False,
