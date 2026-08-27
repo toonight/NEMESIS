@@ -60,6 +60,35 @@ class _Lying:
         )
 
 
+class _Escalating:
+    """An honest analyser that finds the material worse than it was declared."""
+
+    name = "escalating-analyser"
+
+    def analyse(self, artifact: bytes, handle: ArtifactHandle) -> AnalysisReport:
+        return AnalysisReport(
+            artifact_id=handle.artifact_id,
+            classification=ContentSafety.MANDATORY_REPORT,
+            analyser=self.name,
+            confined=True,
+        )
+
+
+class _Sideways:
+    """An analyser answering a class that neither dominates nor is dominated by the declared
+    one — a disagreement rather than a revision."""
+
+    name = "sideways-analyser"
+
+    def analyse(self, artifact: bytes, handle: ArtifactHandle) -> AnalysisReport:
+        return AnalysisReport(
+            artifact_id=handle.artifact_id,
+            classification=ContentSafety.SENSITIVE_PERSONAL_DATA,
+            analyser=self.name,
+            confined=True,
+        )
+
+
 # --- Nothing reaches the vault unexamined ------------------------------------
 
 
@@ -192,21 +221,57 @@ def test_the_held_set_is_exactly_what_it_claims() -> None:
 
 
 def test_a_lying_analyser_cannot_release_mandatory_report_material() -> None:
-    """The gate reads the *report's* classification, so a compromised analyser that declares
-    everything routine does release it — and that is worth stating rather than hiding.
+    """THE TEST THIS NAME ALWAYS CLAIMED, and did not make.
 
-    This is a real limit: the pipeline trusts its analyser's verdict. What it does not trust
-    is the absence of a verdict, which is the failure that actually happens.
+    It used to assert its own opposite: the body released the material and the docstring
+    explained why that was an acceptable limit. The threat model recorded it as one of two
+    tests found asserting the negation of their own names, and noted that a name is what a
+    coverage claim reads.
+
+    What made it possible is the part worth fixing: the rule "raising a classification is
+    allowed, lowering one never is" was written inside `StructuralAnalyser` — the component a
+    deployment is explicitly invited to replace, and the one that by design parses hostile
+    bytes. A rule enforced by the thing it constrains is not enforced. It is the gate's now.
     """
     quarantine = Quarantine()
     handle = quarantine.admit(b"x", declared_safety=ContentSafety.MANDATORY_REPORT)
     quarantine.analyse(handle, _Lying())
 
-    released = quarantine.release(handle)
-    assert released == b"x", (
-        "documented limitation: a compromised analyser can lower a classification. The "
-        "shipped analyser cannot, and a deployment wiring its own owns this boundary."
+    with pytest.raises(QuarantineError, match="less restrictive"):
+        quarantine.release(handle)
+    assert quarantine.held() == (handle.artifact_id,), (
+        "a refused release must leave the artifact visible in the backlog, not merely unsealed"
     )
+
+
+def test_an_analyser_may_still_raise_a_classification() -> None:
+    """The rule is monotonic, not frozen. An analyser that finds something worse than what was
+    declared must be able to say so — that is the direction the control exists to allow, and a
+    check that refused every disagreement would be a check somebody turns off."""
+    quarantine = Quarantine()
+    handle = quarantine.admit(b"x", declared_safety=ContentSafety.ROUTINE)
+    quarantine.analyse(handle, _Escalating())
+
+    with pytest.raises(QuarantineError, match="no automated exit"):
+        quarantine.release(handle)
+    assert quarantine.held() == (handle.artifact_id,)
+
+
+def test_a_sideways_reclassification_is_refused_rather_than_guessed() -> None:
+    """`ContentSafety` is not a ladder, and the partial order says so.
+
+    `MALICIOUS_CODE` and `SENSITIVE_PERSONAL_DATA` are both above `ROUTINE` and neither is
+    above the other, so an analyser answering one when the collector declared the other has
+    not raised or lowered anything — it has disagreed. Releasing on that would pick a winner
+    by accident. The shipped analyser never produces this: it records the second obligation as
+    an observation and leaves the class alone. A replacement can, so the gate answers for it.
+    """
+    quarantine = Quarantine()
+    handle = quarantine.admit(b"x", declared_safety=ContentSafety.MALICIOUS_CODE)
+    quarantine.analyse(handle, _Sideways())
+
+    with pytest.raises(QuarantineError, match="less restrictive"):
+        quarantine.release(handle)
 
 
 # --- Ceilings ----------------------------------------------------------------

@@ -65,7 +65,7 @@ from typing import Final, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from nemesis.core.evidence import ContentSafety, EvidenceObject
+from nemesis.core.evidence import ContentSafety, EvidenceObject, at_least_as_restrictive
 from nemesis.core.temporal import utcnow
 from nemesis.ports.storage import EvidenceVault
 
@@ -321,8 +321,9 @@ class Quarantine:
     def release(self, handle: ArtifactHandle) -> bytes:
         """Hand over the artifact for sealing, or refuse.
 
-        The only path from quarantine to the vault, and it refuses three ways: unexamined,
-        analysis failed, or a classification with no automated exit.
+        The only path from quarantine to the vault, and it refuses four ways: unexamined,
+        analysis failed, a classification less restrictive than the one declared, or a
+        classification with no automated exit.
         """
         state = self.state(handle)
         report = self._reports.get(handle.artifact_id)
@@ -336,6 +337,20 @@ class Quarantine:
             raise QuarantineError(
                 f"{handle.artifact_id} could not be analysed: {report.failure}. An adversary "
                 "who can crash the analyser must not thereby choose the classification"
+            )
+        if not at_least_as_restrictive(report.classification, handle.declared_safety):
+            # Outside the analyser deliberately. `StructuralAnalyser` already refuses to lower
+            # a classification, but it is the documented extension point — the component a
+            # deployment replaces, and the one that by design parses hostile bytes. A rule
+            # enforced by the thing it constrains is not enforced, and the test asserting this
+            # used to assert its own opposite because of it.
+            self._state[handle.artifact_id] = QuarantineState.HELD
+            raise QuarantineError(
+                f"{handle.artifact_id} was declared {handle.declared_safety.value} and "
+                f"{report.analyser!r} answered {report.classification.value}, which is less "
+                "restrictive or incomparable. A classification may be raised and never "
+                "lowered; with no order between two classes there is no honest merge, so the "
+                "disagreement is held for a human rather than resolved by whoever wrote last"
             )
         if report.classification in HELD_CLASSIFICATIONS:
             self._state[handle.artifact_id] = QuarantineState.HELD
@@ -411,7 +426,11 @@ async def seal_when_released(
     sealed has unresolvable provenance, which invariant 3 forbids.
 
     The classification the analyser returns is written onto the evidence, so what the vault
-    records is what was *examined* rather than what the collector *declared*.
+    records is what was *examined* rather than what the collector *declared*. That is safe
+    only because :meth:`Quarantine.release` now refuses any classification less restrictive
+    than the declared one: without that check this line meant a replaceable analyser chose
+    what the append-only store recorded, and material carrying a legal clock could be sealed
+    as routine and then not be removable.
     """
     handle = quarantine.admit(artifact, declared_safety=evidence.content_safety)
     report = quarantine.analyse(handle, analyser)

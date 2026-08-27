@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/toonight/NEMESIS/actions/workflows/ci.yml/badge.svg)](https://github.com/toonight/NEMESIS/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.13-1f6feb)
-![Tests](https://img.shields.io/badge/tests-2162-2ea043)
+![Tests](https://img.shields.io/badge/tests-2164-2ea043)
 ![Typing](https://img.shields.io/badge/mypy-strict-2ea043)
 ![Plane contracts](https://img.shields.io/badge/plane%20contracts-15%20enforced-ff8a3d)
 ![Status](https://img.shields.io/badge/status-default%20simulated%20%7C%20opt--in%20Tor-e5a50a)
