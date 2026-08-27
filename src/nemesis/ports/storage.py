@@ -259,6 +259,30 @@ class PublicationRecorder(Protocol):
 
 
 @runtime_checkable
+class ObligationSink(Protocol):
+    """Where the platform records a legal duty it has incurred and cannot itself discharge.
+
+    A port rather than the concrete register for the reason the vault is one: the collection
+    plane must be able to *open* an obligation without being able to reach the plane that
+    holds, ages or closes them. The one method here is the only thing a collector may do — it
+    cannot read the backlog, and it cannot discharge anything.
+
+    ``authority`` is deliberately absent. Which authority is owed a report is deployment
+    configuration — a question of jurisdiction and material, not one the code path that found
+    the bytes is in any position to answer — so the sink carries its own and the caller does
+    not get to choose it.
+    """
+
+    def incur(self, *, artifact_id: str, reason: str) -> object:
+        """Open an obligation for this artifact, or return the one already open for it.
+
+        Returns the obligation, typed as ``object`` because no caller on this side of the port
+        may read it. Must be idempotent per artifact: an obligation whose deadline restarts
+        every time the material is re-examined is one that never becomes overdue.
+        """
+        ...
+
+
 class AuditSink(Protocol):
     """Append-only, tamper-evident record of what the platform and its operators did."""
 

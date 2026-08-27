@@ -35,7 +35,10 @@ status implying otherwise would be worse than no status at all.
 1. **Quarantine holds it.** Material classified `MANDATORY_REPORT` has no automated exit. Do
    not work around this; the refusal is the control.
 2. **The register opens an obligation**, with the artifact id, the moment it was incurred, and
-   the deadline from the deployment's configured window.
+   the deadline from the deployment's configured window. This happens automatically, at the
+   hold, since 2026-08-27 — until then this step described something no code performed, and the
+   refusal in step 1 left no record that a duty had been incurred at all. Re-examining the same
+   artifact does not reopen or re-date it.
 3. **A legal reviewer assesses it.** Not the analyst who found it — the role separation exists
    because the person who found the material is the wrong person to judge the duty it creates.
 4. **They report through the channel their jurisdiction requires**, outside NEMESIS. The

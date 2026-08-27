@@ -16,6 +16,7 @@ analyser can relabel material before the vault ever sees it.
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -29,8 +30,18 @@ from nemesis.collect.quarantine import (
     QuarantineError,
     QuarantineState,
     StructuralAnalyser,
+    seal_when_released,
 )
-from nemesis.core.evidence import ContentSafety
+from nemesis.core.evidence import ArtifactKind, ContentSafety, EvidenceObject
+from nemesis.core.ids import IdPrefix, new_id
+from nemesis.core.provenance import (
+    CollectionMethod,
+    ProvenanceChain,
+    SourceClass,
+    SourceDescriptor,
+)
+from nemesis.core.temporal import TemporalExtent, utcnow
+from nemesis.evidence.escalation import UNCONFIGURED_AUTHORITY, Register
 from nemesis.evidence.vault import FileSystemEvidenceVault
 from nemesis.slice.scenario import run_glass_anvil_scenario
 
@@ -55,6 +66,35 @@ class _Lying:
         return AnalysisReport(
             artifact_id=handle.artifact_id,
             classification=ContentSafety.ROUTINE,
+            analyser=self.name,
+            confined=True,
+        )
+
+
+class _Escalating:
+    """An honest analyser that finds the material worse than it was declared."""
+
+    name = "escalating-analyser"
+
+    def analyse(self, artifact: bytes, handle: ArtifactHandle) -> AnalysisReport:
+        return AnalysisReport(
+            artifact_id=handle.artifact_id,
+            classification=ContentSafety.MANDATORY_REPORT,
+            analyser=self.name,
+            confined=True,
+        )
+
+
+class _Sideways:
+    """An analyser answering a class that neither dominates nor is dominated by the declared
+    one — a disagreement rather than a revision."""
+
+    name = "sideways-analyser"
+
+    def analyse(self, artifact: bytes, handle: ArtifactHandle) -> AnalysisReport:
+        return AnalysisReport(
+            artifact_id=handle.artifact_id,
+            classification=ContentSafety.SENSITIVE_PERSONAL_DATA,
             analyser=self.name,
             confined=True,
         )
@@ -192,21 +232,57 @@ def test_the_held_set_is_exactly_what_it_claims() -> None:
 
 
 def test_a_lying_analyser_cannot_release_mandatory_report_material() -> None:
-    """The gate reads the *report's* classification, so a compromised analyser that declares
-    everything routine does release it — and that is worth stating rather than hiding.
+    """THE TEST THIS NAME ALWAYS CLAIMED, and did not make.
 
-    This is a real limit: the pipeline trusts its analyser's verdict. What it does not trust
-    is the absence of a verdict, which is the failure that actually happens.
+    It used to assert its own opposite: the body released the material and the docstring
+    explained why that was an acceptable limit. The threat model recorded it as one of two
+    tests found asserting the negation of their own names, and noted that a name is what a
+    coverage claim reads.
+
+    What made it possible is the part worth fixing: the rule "raising a classification is
+    allowed, lowering one never is" was written inside `StructuralAnalyser` — the component a
+    deployment is explicitly invited to replace, and the one that by design parses hostile
+    bytes. A rule enforced by the thing it constrains is not enforced. It is the gate's now.
     """
     quarantine = Quarantine()
     handle = quarantine.admit(b"x", declared_safety=ContentSafety.MANDATORY_REPORT)
     quarantine.analyse(handle, _Lying())
 
-    released = quarantine.release(handle)
-    assert released == b"x", (
-        "documented limitation: a compromised analyser can lower a classification. The "
-        "shipped analyser cannot, and a deployment wiring its own owns this boundary."
+    with pytest.raises(QuarantineError, match="less restrictive"):
+        quarantine.release(handle)
+    assert quarantine.held() == (handle.artifact_id,), (
+        "a refused release must leave the artifact visible in the backlog, not merely unsealed"
     )
+
+
+def test_an_analyser_may_still_raise_a_classification() -> None:
+    """The rule is monotonic, not frozen. An analyser that finds something worse than what was
+    declared must be able to say so — that is the direction the control exists to allow, and a
+    check that refused every disagreement would be a check somebody turns off."""
+    quarantine = Quarantine()
+    handle = quarantine.admit(b"x", declared_safety=ContentSafety.ROUTINE)
+    quarantine.analyse(handle, _Escalating())
+
+    with pytest.raises(QuarantineError, match="no automated exit"):
+        quarantine.release(handle)
+    assert quarantine.held() == (handle.artifact_id,)
+
+
+def test_a_sideways_reclassification_is_refused_rather_than_guessed() -> None:
+    """`ContentSafety` is not a ladder, and the partial order says so.
+
+    `MALICIOUS_CODE` and `SENSITIVE_PERSONAL_DATA` are both above `ROUTINE` and neither is
+    above the other, so an analyser answering one when the collector declared the other has
+    not raised or lowered anything — it has disagreed. Releasing on that would pick a winner
+    by accident. The shipped analyser never produces this: it records the second obligation as
+    an observation and leaves the class alone. A replacement can, so the gate answers for it.
+    """
+    quarantine = Quarantine()
+    handle = quarantine.admit(b"x", declared_safety=ContentSafety.MALICIOUS_CODE)
+    quarantine.analyse(handle, _Sideways())
+
+    with pytest.raises(QuarantineError, match="less restrictive"):
+        quarantine.release(handle)
 
 
 # --- Ceilings ----------------------------------------------------------------
@@ -332,3 +408,148 @@ def test_material_carrying_a_reporting_obligation_never_reaches_the_vault() -> N
 
     with pytest.raises(QuarantineError):
         quarantine.release(handle)
+
+
+# --- The other half of MANDATORY_REPORT --------------------------------------
+
+
+def _reporting_evidence(artifact: bytes) -> EvidenceObject:
+    now = utcnow()
+    return EvidenceObject.seal(
+        artifact=artifact,
+        artifact_kind=ArtifactKind.DNS_RECORD,
+        provenance=ProvenanceChain(
+            collection_id=new_id(IdPrefix.COLLECTION),
+            source=SourceDescriptor(source_class=SourceClass.INTERNET_SCAN, identifier="fixture"),
+            method=CollectionMethod(
+                collector_name="fixture",
+                collector_version="1.0",
+                parameters={},
+                is_simulated=True,
+            ),
+            collected_at=now,
+        ),
+        observed_extent=TemporalExtent.at(now),
+        content_safety=ContentSafety.MANDATORY_REPORT,
+    )
+
+
+def test_holding_reporting_material_opens_an_obligation(tmp_path: Path) -> None:
+    """THE HALF THAT WAS BUILT AND WIRED TO NOTHING.
+
+    `Register.incur` had zero callers in `src/`. Quarantine refused the material correctly,
+    and then nothing opened, no deadline started and `held()` was read by nobody. The
+    escalation module's own thesis is that "the dangerous obligation is the one that lands in
+    a queue nobody reads", and a register with no producer is that queue with nothing in it —
+    which reads, to anyone auditing, exactly like a platform that has never encountered such
+    material.
+    """
+    register = Register()
+    quarantine = Quarantine()
+    artifact = b"material carrying a reporting obligation"
+
+    sealed_id, report = asyncio.run(
+        seal_when_released(
+            FileSystemEvidenceVault(tmp_path / "vault"),
+            _reporting_evidence(artifact),
+            artifact,
+            quarantine=quarantine,
+            analyser=StructuralAnalyser(),
+            obligations=register,
+        )
+    )
+
+    assert sealed_id is None, "material with a legal clock must not reach the vault"
+    assert report.classification is ContentSafety.MANDATORY_REPORT
+    (obligation,) = register.open_obligations()
+    assert obligation.artifact_id in quarantine.held()
+    assert obligation.authority == UNCONFIGURED_AUTHORITY, (
+        "an unconfigured deployment must say so on the record rather than name a plausible "
+        "authority it was never told"
+    )
+
+
+def test_an_obligation_survives_the_restart_that_used_to_discharge_it(tmp_path: Path) -> None:
+    """A duty with a clock on it, held only in memory, is discharged by a restart — silently,
+    leaving no trace the platform ever owed anything. That is the failure this module names,
+    reached by process exit rather than by anybody deciding it."""
+    path = tmp_path / "obligations.jsonl"
+    artifact = b"material carrying a reporting obligation"
+
+    first = Register(path)
+    asyncio.run(
+        seal_when_released(
+            FileSystemEvidenceVault(tmp_path / "vault"),
+            _reporting_evidence(artifact),
+            artifact,
+            quarantine=Quarantine(),
+            analyser=StructuralAnalyser(),
+            obligations=first,
+        )
+    )
+    (before,) = first.open_obligations()
+
+    # A different process, reading the same file.
+    (after,) = Register(path).open_obligations()
+    assert after == before, "the obligation did not survive the restart"
+
+
+def test_re_examining_held_material_does_not_restart_its_clock(tmp_path: Path) -> None:
+    """An obligation whose deadline moves every time the material is re-examined never becomes
+    overdue, and the collection path re-examines by construction — the same artifact arrives
+    again on the next run."""
+    path = tmp_path / "obligations.jsonl"
+    register = Register(path)
+    artifact = b"material carrying a reporting obligation"
+    evidence = _reporting_evidence(artifact)
+
+    for _ in range(3):
+        asyncio.run(
+            seal_when_released(
+                FileSystemEvidenceVault(tmp_path / "vault"),
+                evidence,
+                artifact,
+                quarantine=Quarantine(),
+                analyser=StructuralAnalyser(),
+                obligations=register,
+            )
+        )
+
+    (obligation,) = register.open_obligations()
+    assert len(path.read_text().splitlines()) == 1, (
+        "the record grew on re-examination; the deadline it carries is the first one, and a "
+        "file that appends per sighting invites a reader to believe the latest"
+    )
+    assert Register(path).open_obligations() == (obligation,)
+
+
+def test_a_lying_analyser_cannot_suppress_the_obligation_either(tmp_path: Path) -> None:
+    """One compromised component must not be able to close both doors.
+
+    `release` refuses the downgrade, so the material is held whatever the analyser says. If
+    the obligation were keyed on the *report* alone, the same lie that failed to release the
+    material would still have stopped anybody being told about it — a quieter version of the
+    same attack, and the one that survives a fix aimed only at the release path.
+    """
+    register = Register()
+    artifact = b"material carrying a reporting obligation"
+
+    sealed_id, report = asyncio.run(
+        seal_when_released(
+            FileSystemEvidenceVault(tmp_path / "vault"),
+            _reporting_evidence(artifact),
+            artifact,
+            quarantine=Quarantine(),
+            analyser=_Lying(),
+            obligations=register,
+        )
+    )
+
+    assert sealed_id is None
+    assert report.classification is ContentSafety.ROUTINE, (
+        "the analyser's answer is still recorded as what it said; the gate refuses to act on "
+        "it rather than pretending it was never given"
+    )
+    assert len(register.open_obligations()) == 1, (
+        "the obligation was keyed on the analyser's answer, so lying suppressed it"
+    )

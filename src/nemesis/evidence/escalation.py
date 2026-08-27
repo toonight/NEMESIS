@@ -34,9 +34,11 @@ placeholders rather than a claim about any regime.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from enum import StrEnum
+from pathlib import Path
 from typing import Final
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -50,6 +52,19 @@ MAY_DISCHARGE: Final[frozenset[Role]] = frozenset({Role.LEGAL_REVIEWER})
 One role, deliberately. An investigation lead can decide what to investigate; whether a legal
 duty has been met is a different competence, and letting the person who found the material
 also close the obligation removes the only second pair of eyes in the process.
+"""
+
+UNCONFIGURED_AUTHORITY: Final = "UNCONFIGURED - no reporting authority is set for this deployment"
+"""Recorded as the authority when a deployment has not named one.
+
+The alternative designs are both worse. Refusing to open the obligation would mean the one
+material class with a legal clock produces *no record at all* in exactly the deployment that
+was careless enough not to configure this — the failure this module is built against is
+silence, and that design maximises it. Naming a plausible-looking default would be a lie in a
+compliance record, which is the one place a lie is least recoverable.
+
+So the obligation opens, is visible, ages, becomes overdue, and says on its face that nobody
+told the platform who to tell. That is a loud unconfigured deployment rather than a quiet one.
 """
 
 DEFAULT_DEADLINE: Final = timedelta(hours=72)
@@ -127,30 +142,76 @@ class Register:
 
     def __init__(
         self,
+        path: Path | str | None = None,
         *,
+        authority: str = UNCONFIGURED_AUTHORITY,
         clock: Callable[[], datetime] = utcnow,
         deadline: timedelta = DEFAULT_DEADLINE,
     ) -> None:
+        """``path`` makes the register durable, and a register that is not is barely one.
+
+        An obligation is a legal duty with a clock on it. Held only in memory, it is discharged
+        by a restart — silently, leaving no trace that the platform ever owed anything, which is
+        the precise failure the module docstring names. The file is append-only and replayed on
+        construction: the last record written for an obligation id wins, so a discharge
+        supersedes the incur it closes without either being erased.
+
+        In-memory remains available and is what the tests use, but it is the exception now
+        rather than the shape.
+        """
         self._clock = clock
         self._deadline = deadline
+        self._authority = authority
+        self._path = Path(path) if path is not None else None
         self._obligations: dict[str, Obligation] = {}
+        if self._path is not None:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            self._replay()
 
-    def incur(self, *, artifact_id: str, authority: str, reason: str) -> Obligation:
-        """Record that the platform now owes a report. The only thing it may do alone."""
+    def _replay(self) -> None:
+        """Rebuild the register from its own record, in the order it was written."""
+        if self._path is None or not self._path.exists():
+            return
+        for line in self._path.read_text().splitlines():
+            if line.strip():
+                obligation = Obligation.model_validate_json(line)
+                self._obligations[obligation.obligation_id] = obligation
+
+    def _record(self, obligation: Obligation) -> None:
+        """Append and flush. An obligation acknowledged in memory and lost on the way to disk
+        would be worse than one never opened, because the caller was told it was recorded."""
+        if self._path is None:
+            return
+        with self._path.open("a", encoding="utf-8") as handle:
+            handle.write(obligation.model_dump_json() + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+
+    def incur(self, *, artifact_id: str, reason: str, authority: str | None = None) -> Obligation:
+        """Record that the platform now owes a report. The only thing it may do alone.
+
+        ``authority`` falls back to the one this register was configured with, so the code path
+        that found the material does not get to choose who is owed a report — that is a
+        question of jurisdiction, not of where in the pipeline the bytes surfaced.
+        """
         now = self._clock()
         obligation = Obligation(
             obligation_id=f"obl_{artifact_id}",
             artifact_id=artifact_id,
             incurred_at=now,
             deadline=now + self._deadline,
-            authority=authority,
+            authority=authority or self._authority,
             reason=reason,
         )
         # Re-incurring on the same artifact must not restart its clock: an obligation whose
         # deadline moves every time the material is re-examined is an obligation that never
-        # becomes overdue.
-        self._obligations.setdefault(obligation.obligation_id, obligation)
-        return self._obligations[obligation.obligation_id]
+        # becomes overdue. Nothing is appended in that case either, so the file does not grow
+        # with every re-examination of the same held artifact.
+        if obligation.obligation_id in self._obligations:
+            return self._obligations[obligation.obligation_id]
+        self._obligations[obligation.obligation_id] = obligation
+        self._record(obligation)
+        return obligation
 
     def discharge(
         self, obligation_id: str, principal: Principal, *, channel_reference: str
@@ -186,6 +247,7 @@ class Register:
             }
         )
         self._obligations[obligation_id] = discharged
+        self._record(discharged)
         return discharged
 
     def open_obligations(self) -> tuple[Obligation, ...]:

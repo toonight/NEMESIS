@@ -25,8 +25,10 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+from collections.abc import Mapping
 from datetime import datetime
 from enum import StrEnum
+from types import MappingProxyType
 from typing import Annotated, Final, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -88,6 +90,49 @@ class ContentSafety(StrEnum):
     MANDATORY_REPORT = "mandatory_report"
     """Triggers a legal reporting obligation. Quarantined, never indexed, never exported
     through ordinary channels. Escalation is a human decision, immediately."""
+
+
+SAFETY_DOMINATES: Final[Mapping[ContentSafety, frozenset[ContentSafety]]] = MappingProxyType(
+    {
+        ContentSafety.ROUTINE: frozenset({ContentSafety.ROUTINE}),
+        ContentSafety.MALICIOUS_CODE: frozenset(
+            {ContentSafety.ROUTINE, ContentSafety.MALICIOUS_CODE}
+        ),
+        ContentSafety.SENSITIVE_PERSONAL_DATA: frozenset(
+            {ContentSafety.ROUTINE, ContentSafety.SENSITIVE_PERSONAL_DATA}
+        ),
+        ContentSafety.LEGALLY_RESTRICTED: frozenset(
+            {ContentSafety.ROUTINE, ContentSafety.LEGALLY_RESTRICTED}
+        ),
+        ContentSafety.MANDATORY_REPORT: frozenset(ContentSafety),
+    }
+)
+"""Which classifications each one is at least as restrictive as. **A partial order, not a ladder.**
+
+Written out rather than derived from declaration order, because the enum is not ordered and
+reading it as though it were is the mistake this table exists to prevent. `MALICIOUS_CODE`,
+`SENSITIVE_PERSONAL_DATA` and `LEGALLY_RESTRICTED` each carry a handling obligation the others
+do not: malware must not be executed, victim data must not be indexed, regulated material must
+not be retained without a decision. None of those three implies another, so none dominates
+another, and an analyser answering one where the collector declared a different one has
+**disagreed** rather than revised. `ROUTINE` is the bottom and `MANDATORY_REPORT` the top —
+the only class with a legal clock, and the only one that dominates everything.
+
+A downgrade is what this makes expressible, and therefore refusable. The rule "raising a
+classification is allowed, lowering one never is" was previously written inside
+`StructuralAnalyser`, which is the component a deployment is invited to replace: a rule
+enforced by the thing it constrains is not enforced.
+"""
+
+
+def at_least_as_restrictive(candidate: ContentSafety, floor: ContentSafety) -> bool:
+    """Whether ``candidate`` may stand in for ``floor`` without losing a handling obligation.
+
+    False for a genuine downgrade *and* for two incomparable classes, and the second case is
+    deliberate: with no order between them there is no honest way to merge, and picking one
+    would resolve a disagreement by accident in the direction of whoever wrote last.
+    """
+    return floor in SAFETY_DOMINATES[candidate]
 
 
 VERIFIED_ANCHOR_TYPES: Final[frozenset[str]] = frozenset()
