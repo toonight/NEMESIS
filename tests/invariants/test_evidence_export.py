@@ -476,7 +476,8 @@ def test_a_single_document_cannot_be_suppressed_in_transit(tmp_path: Path) -> No
         item = manifest["entries"].pop(0)  # type: ignore[attr-defined]
         (bundle / ARTIFACTS_DIR / item["evidence_id"]).unlink()
         # The half that used to be missing.
-        manifest["withheld_restricted"] = int(manifest.get("withheld_restricted", 0)) + 1  # type: ignore[arg-type]
+        current = manifest.get("withheld_restricted", 0)
+        manifest["withheld_restricted"] = (current if isinstance(current, int) else 0) + 1
 
     done = _doctor(_export(tmp_path), suppress)
     assert done.returncode == 1

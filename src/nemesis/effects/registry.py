@@ -26,6 +26,7 @@ from __future__ import annotations
 import hmac
 import re
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Final
 
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -78,7 +79,18 @@ that whoever can observe it says so explicitly, per operation, in the request it
 to. Fail-closed is the only direction that leaves the condition meaning anything.
 """
 
-_CONTROL_CHARACTERS: Final = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+_CONTROL_CHARACTERS: Final = re.compile(
+    "["
+    "\x00-\x1f\x7f-\x9f"  # C0 and C1
+    "\u2028\u2029"  # LINE SEPARATOR, PARAGRAPH SEPARATOR
+    "\u0085"  # NEXT LINE
+    "\u000b\u000c"  # VT, FF — inside C0, named because `splitlines()` breaks on them
+    "\u200b-\u200f"  # zero-width space/joiners, LTR/RTL marks
+    "\u202a-\u202e"  # bidi embedding and override
+    "\u2066-\u2069"  # bidi isolates
+    "\ufeff"  # zero-width no-break space
+    "]"
+)
 _RUNS_OF_SPACE: Final = re.compile(r"\s{2,}")
 
 
@@ -87,6 +99,21 @@ def sanitize(value: str, *, limit: int = 400) -> str:
 
     Control characters — newlines above all — are what turn a data field into document
     structure. The layout of a draft is not negotiable by whoever supplied its parameters.
+
+    **ASCII was not enough, and an adversarial review proved it with one codepoint.** The class
+    was ``[\\x00-\\x1f\\x7f-\\x9f]``, which misses U+2028 LINE SEPARATOR — and Python's own
+    ``str.splitlines()`` breaks on U+2028, as do browsers and most editors. Substituting it for a
+    newline in this repository's own document-forgery payload produced a draft that reads, to any
+    ordinary reader, as carrying a fabricated ``Legal basis: court_order`` line. The control and
+    the test that guarded it both assumed ASCII line structure.
+
+    Three families are now covered and each is here for a different reason. The line breakers
+    (U+2028/29/85, VT, FF) forge structure. The zero-width characters (U+200B to U+200F, and
+    U+FEFF) hide text inside a field that looks short. The bidi controls (U+202A to U+202E and
+    U+2066 to U+2069) reorder what a human reads without changing what a machine compares — a
+    document whose rendered
+    meaning differs from its bytes is the same defect as a ``str`` subclass whose ``__str__``
+    lies, which this codebase has already been bitten by twice.
     """
     flattened = _RUNS_OF_SPACE.sub(" ", _CONTROL_CHARACTERS.sub(" ", value)).strip()
     if len(flattened) > limit:
@@ -679,13 +706,26 @@ class EffectsRegistry:
 
 
 def default_registry(
-    *, verifying_key: CapabilityVerifier, revocations: RevocationOracle
+    *,
+    verifying_key: CapabilityVerifier,
+    revocations: RevocationOracle,
+    draft_root: Path | None = None,
 ) -> EffectsRegistry:
     """The registry the platform wires up: every implemented class, nothing else.
 
-    Both arguments are required. There is no way to obtain a registry that will act without
-    a key to verify against and an oracle to ask, because the version that could was the
-    version that drafted a document from a capability nobody had signed.
+    ``verifying_key`` and ``revocations`` are required. There is no way to obtain a registry
+    that will act without a key to verify against and an oracle to ask, because the version
+    that could was the version that drafted a document from a capability nobody had signed.
+
+    ``draft_root`` defaults to ``None``, which means **no adapter here writes to disk** — a
+    draft comes back in the result and nothing touches the filesystem. That is the safe default
+    and it is also the honest one: an adversarial review drove a hijacked pilot through a real
+    mediator and had a NEMESIS-branded document written to a directory the *pilot* named,
+    because the ``output_directory`` parameter was passed to ``Path()`` unconstrained. The
+    filename had been hardened against traversal; the parameter choosing the directory had not.
+
+    A deployment that wants drafts on disk supplies the root, and a request may then choose a
+    subdirectory of it and nothing else.
     """
     # Imported inside the function so the adapter modules can depend on the guards above
     # without the two importing each other. The dependency runs adapters -> registry.
@@ -699,7 +739,7 @@ def default_registry(
     anchor = TrustAnchor(verifying_key=verifying_key, revocations=revocations)
     registry = EffectsRegistry(verifying_key=verifying_key, revocations=revocations)
     registry.register(SimulationEffectsAdapter(anchor))
-    registry.register(ProviderNotificationAdapter(anchor))
-    registry.register(TakedownRequestDraftAdapter(anchor))
-    registry.register(EvidenceExportAdapter(anchor))
+    registry.register(ProviderNotificationAdapter(anchor, draft_root=draft_root))
+    registry.register(TakedownRequestDraftAdapter(anchor, draft_root=draft_root))
+    registry.register(EvidenceExportAdapter(anchor, draft_root=draft_root))
     return registry

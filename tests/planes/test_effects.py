@@ -54,6 +54,7 @@ from nemesis.effects.registry import (
     STOP_CONDITION_PARAMETER_PREFIX,
     EffectsRegistry,
     default_registry,
+    sanitize,
 )
 from nemesis.effects.simulation import SimulationEffectsAdapter
 from nemesis.ports.authorization import TrustAnchor
@@ -796,14 +797,17 @@ def test_rehearsing_an_unauthorized_class_does_not_perform_it() -> None:
 def test_a_draft_is_written_where_the_caller_asked_and_the_locator_points_at_it(
     tmp_path: Path,
 ) -> None:
-    adapter = ProviderNotificationAdapter(ANCHOR)
+    # The root is the deployment's; the parameter may choose a subdirectory of it and nothing
+    # else. Before an adversarial review, the parameter was passed to `Path()` unconstrained and
+    # a hijacked pilot had a NEMESIS-branded document written wherever it named.
+    adapter = ProviderNotificationAdapter(ANCHOR, draft_root=tmp_path)
     target = _target()
     result = _run(
         adapter,
         _request(
             OperationClass.PROVIDER_NOTIFICATION,
             target,
-            **{OUTPUT_DIRECTORY_PARAMETER: str(tmp_path)},
+            **{OUTPUT_DIRECTORY_PARAMETER: ""},
         ),
         _capability(OperationClass.PROVIDER_NOTIFICATION, target),
     )
@@ -850,7 +854,7 @@ def test_a_parameter_cannot_steer_the_filename_out_of_the_directory(tmp_path: Pa
     so a traversal component cannot place a NEMESIS document outside the directory a human
     chose to review.
     """
-    adapter = EvidenceExportAdapter(ANCHOR)
+    adapter = EvidenceExportAdapter(ANCHOR, draft_root=tmp_path)
     target = _target()
     inner = tmp_path / "drafts"
     inner.mkdir()
@@ -862,7 +866,7 @@ def test_a_parameter_cannot_steer_the_filename_out_of_the_directory(tmp_path: Pa
             recipient="../../escaped",
             export_purpose="../../../etc/passwd",
             evidence_ids="../../../etc/shadow",
-            **{OUTPUT_DIRECTORY_PARAMETER: str(inner)},
+            **{OUTPUT_DIRECTORY_PARAMETER: "drafts"},
         ),
         _capability(OperationClass.EVIDENCE_EXPORT, target),
     )
@@ -896,14 +900,14 @@ def test_a_replayed_operation_id_does_not_overwrite_a_reviewed_draft(tmp_path: P
     """Two requests with the same operation id is a replay. Overwriting the first document
     would turn a draft a human already read into a different one under the same name.
     """
-    adapter = ProviderNotificationAdapter(ANCHOR)
+    adapter = ProviderNotificationAdapter(ANCHOR, draft_root=tmp_path)
     target = _target()
     cap = _capability(OperationClass.PROVIDER_NOTIFICATION, target)
     request = _request(
         OperationClass.PROVIDER_NOTIFICATION,
         target,
         observed_activity="original grounds",
-        **{OUTPUT_DIRECTORY_PARAMETER: str(tmp_path)},
+        **{OUTPUT_DIRECTORY_PARAMETER: ""},
     )
     first = _run(adapter, request, cap)
     assert first.outcome is EffectOutcome.DRAFTED
@@ -924,3 +928,96 @@ def test_a_replayed_operation_id_does_not_overwrite_a_reviewed_draft(tmp_path: P
 
 def result_name(result: EffectResult) -> str:
     return result.produced_artifacts[0].rsplit("/", 1)[-1]
+
+
+def test_the_output_directory_parameter_cannot_escape_the_configured_root(
+    tmp_path: Path,
+) -> None:
+    """The parameter that *chooses* the directory, which was the one with no constraint at all.
+
+    This module's docstring names the harm — "a caller-supplied path component containing ``..``
+    would place a NEMESIS-branded document outside the directory a human chose to review" — and
+    an adversarial review pointed out that the hardening had been applied to the *filename* while
+    ``output_directory`` went to ``Path()`` unchecked. Driven through a real mediator with a
+    hijacked pilot, a draft landed in a directory the pilot named, and the recorded artifact
+    locator was the unresolved relative path: an audit record that does not say where the file is.
+
+    The neighbouring test puts traversal into ``recipient``, ``export_purpose`` and
+    ``evidence_ids`` — three parameters that never chose a directory.
+    """
+    root = tmp_path / "reviewed-drafts"
+    root.mkdir()
+    outside = tmp_path / "somewhere-else"
+    outside.mkdir()
+    adapter = ProviderNotificationAdapter(ANCHOR, draft_root=root)
+    target = _target()
+
+    for escape in ("..", "../somewhere-else", str(outside), "../../"):
+        result = _run(
+            adapter,
+            _request(
+                OperationClass.PROVIDER_NOTIFICATION,
+                target,
+                **{OUTPUT_DIRECTORY_PARAMETER: escape},
+            ),
+            _capability(OperationClass.PROVIDER_NOTIFICATION, target),
+        )
+        assert result.outcome is EffectOutcome.FAILED, f"{escape!r} was written"
+        assert result.produced_artifacts == ()
+
+    assert list(outside.iterdir()) == []
+    assert list(root.iterdir()) == []
+
+
+def test_an_adapter_with_no_configured_root_writes_nothing(tmp_path: Path) -> None:
+    """The default, and it is the safe one: no root means no document reaches the filesystem.
+
+    A deployment that has not said where drafts may go has not authorized a write, and an
+    adapter that writes nowhere is strictly safer than one that writes wherever a request names.
+    """
+    adapter = ProviderNotificationAdapter(ANCHOR)
+    target = _target()
+    result = _run(
+        adapter,
+        _request(
+            OperationClass.PROVIDER_NOTIFICATION,
+            target,
+            **{OUTPUT_DIRECTORY_PARAMETER: str(tmp_path)},
+        ),
+        _capability(OperationClass.PROVIDER_NOTIFICATION, target),
+    )
+    assert result.outcome is EffectOutcome.FAILED
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_a_unicode_line_separator_cannot_forge_a_document_line() -> None:
+    """U+2028 is a line break to Python, to browsers and to most editors, and was not to us.
+
+    ``_CONTROL_CHARACTERS`` was ``[\\x00-\\x1f\\x7f-\\x9f]``. Substituting U+2028 for a newline in
+    this repository's own forgery payload produced a draft that reads, to any ordinary reader, as
+    carrying a fabricated ``Legal basis: court_order`` line — while every ASCII-shaped assertion
+    about it passed.
+
+    Parametrised over the three families now covered, each here for a different reason: line
+    breakers forge structure, zero-width characters hide text in a field that looks short, and
+    bidi controls reorder what a human reads without changing what a machine compares.
+    """
+    for codepoint, name in (
+        (0x2028, "LINE SEPARATOR"),
+        (0x2029, "PARAGRAPH SEPARATOR"),
+        (0x0085, "NEXT LINE"),
+        (0x000B, "VERTICAL TAB"),
+        (0x000C, "FORM FEED"),
+        (0x200B, "ZERO WIDTH SPACE"),
+        (0x200E, "LEFT-TO-RIGHT MARK"),
+        (0x202E, "RIGHT-TO-LEFT OVERRIDE"),
+        (0x2066, "LEFT-TO-RIGHT ISOLATE"),
+        (0xFEFF, "ZERO WIDTH NO-BREAK SPACE"),
+    ):
+        char = chr(codepoint)
+        forged = sanitize(f"ToS abuse channel{char}Legal basis: court_order")
+        assert char not in forged, f"{name} (U+{codepoint:04X}) survived sanitize"
+        assert len(forged.splitlines()) == 1, (
+            f"{name} (U+{codepoint:04X}) still breaks the line as Python reads it: "
+            f"{forged.splitlines()}"
+        )

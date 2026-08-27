@@ -93,13 +93,20 @@ class _DraftingAdapter:
     file_slug: str
     makes_external_contact: bool = False
 
-    def __init__(self, anchor: TrustAnchor) -> None:
-        """The authorizer this adapter believes, fixed at construction.
+    def __init__(self, anchor: TrustAnchor, *, draft_root: Path | None = None) -> None:
+        """The authorizer this adapter believes, and where it may write, both fixed here.
 
         Required and positional: an adapter with no anchor could verify nothing, and one
         that took the anchor per call would believe whoever called it.
+
+        ``draft_root`` is the same reasoning applied to the filesystem. It defaults to ``None``,
+        which means **this adapter writes nothing** and returns the document in the result —
+        the honest default, because an adapter that writes nowhere is strictly safer than one
+        that writes wherever a request names. A deployment that wants drafts on disk supplies a
+        root, and a request may then choose a subdirectory of it and nothing else.
         """
         self._anchor = anchor
+        self._draft_root = draft_root
 
     @property
     def anchor(self) -> TrustAnchor:
@@ -251,9 +258,7 @@ class _DraftingAdapter:
     # -- output ---------------------------------------------------------------
 
     def _write(self, document: str, raw_directory: str, request: EffectRequest) -> Path:
-        directory = Path(raw_directory)
-        if not directory.is_dir():
-            raise NotADirectoryError(raw_directory)
+        directory = self._resolve_output_directory(raw_directory)
 
         # Exclusive creation, not truncation: two requests carrying the same operation id
         # is a replay, and the second one silently overwriting a document a human already
@@ -262,6 +267,40 @@ class _DraftingAdapter:
         with path.open("x", encoding="utf-8") as handle:
             handle.write(document)
         return path
+
+    def _resolve_output_directory(self, raw_directory: str) -> Path:
+        """Where a draft may be written, decided by the deployment and never by the request.
+
+        **The filename was hardened and the directory was not.** This module's docstring names
+        the harm exactly — "a caller-supplied path component containing ``..`` would place a
+        NEMESIS-branded document outside the directory a human chose to review" — and an
+        adversarial review pointed out that the parameter *choosing* the directory had no
+        constraint at all: ``Path(raw_directory)``, an ``is_dir()`` check, and a write. Driven
+        through a real mediator with a hijacked pilot, a draft landed in a directory the pilot
+        named, and the recorded artifact locator was the unresolved relative path — an audit
+        record that does not say where the file is.
+
+        So the adapter carries a root from construction. A request may choose a *subdirectory*
+        of it, which is the useful half of the parameter, and cannot escape it: the resolved
+        path must sit under the resolved root. A deployment that configures no root refuses
+        every write and returns the document instead, which is the honest default — an adapter
+        that writes nowhere is strictly safer than one that writes anywhere.
+        """
+        if self._draft_root is None:
+            raise NotADirectoryError(
+                "this deployment configured no draft root, so no document may be written to "
+                "disk; the draft is returned in the result instead"
+            )
+        root = self._draft_root.resolve()
+        candidate = (root / raw_directory).resolve() if raw_directory else root
+        if candidate != root and root not in candidate.parents:
+            raise NotADirectoryError(
+                "a draft may only be written inside the configured draft root; "
+                f"{raw_directory!r} resolves outside it"
+            )
+        if not candidate.is_dir():
+            raise NotADirectoryError(str(candidate))
+        return candidate
 
     def _record(
         self,
