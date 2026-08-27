@@ -92,6 +92,11 @@ jobs:
   # enforcement it has is macOS `sandbox-exec`, so on Linux every confinement test skips and
   # the suite still goes green. Twelve tests across three modules were never executed by CI.
   #
+  # `test_pilot_containment.py` joined the list when the pilot was routed through the
+  # executor: the test that proves a pilot-driven effect reaches the kernel is gated on the
+  # same sandbox, and leaving it out of this job would have reproduced the defect the job
+  # exists to prevent — a control reported as tested that no runner ever executed.
+  #
   # This job exists to run them, and its first step is the important one. A macOS job that
   # silently skips the same tests is worse than no job at all — it reports a control as tested
   # when nothing exercised it, which is the exact defect this repository keeps finding in
@@ -133,6 +138,7 @@ jobs:
             tests/invariants/test_read_confinement.py \
             tests/invariants/test_collector_isolation.py \
             tests/invariants/test_effects_isolation.py \
+            tests/invariants/test_pilot_containment.py \
             | tee /tmp/confinement.txt
           if grep -q "kernel-enforced confinement needs macOS sandbox-exec" /tmp/confinement.txt; then
             echo "a confinement test skipped for want of a sandbox on a macOS runner"; exit 1

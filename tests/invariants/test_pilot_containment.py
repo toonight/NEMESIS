@@ -553,7 +553,11 @@ def test_a_pilot_driven_effect_records_the_confinement_it_actually_ran_under() -
 
 @pytest.mark.skipif(
     not sandbox_available(),
-    reason="kernel-enforced confinement is macOS-only here; the fallback is a plain subprocess",
+    # Worded to match the string the `confinement` CI job greps for. A skip here on a macOS
+    # runner must fail that job rather than pass as a dot — the reason this test exists is
+    # that a control everybody believed was exercised was not.
+    reason="kernel-enforced confinement needs macOS sandbox-exec; the fallback is a plain "
+    "subprocess and would not prove the pilot path reaches the kernel",
 )
 def test_a_pilot_driven_effect_runs_in_a_confined_child_when_wired_to_one() -> None:
     """The other half: the pilot path can now reach the confinement, and says it did.
