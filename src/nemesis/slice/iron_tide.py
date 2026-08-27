@@ -129,10 +129,11 @@ from nemesis.core.provenance import (
     SourceReliability,
 )
 from nemesis.core.relationships import PivotMethod, Relationship, RelationType
+from nemesis.evidence.escalation import Register
 from nemesis.evidence.vault import FileSystemEvidenceVault, FileSystemVaultIntegrityReport
 from nemesis.graph.journal import JournalBackedClaimStore, JournalBackedGraphStore
 from nemesis.ports.collection import IntelligenceConnector, PivotRequest, PivotResult, PivotType
-from nemesis.ports.storage import GraphQuery, Subgraph
+from nemesis.ports.storage import GraphQuery, ObligationSink, Subgraph
 from nemesis.pursuit.engine import ConnectorRegistry, PursuitEngine
 from nemesis.pursuit.investigation import ExecutedPivot, IncidentSeed, Investigation
 from nemesis.pursuit.materialize import MaterializationResult, materialize
@@ -432,6 +433,10 @@ class _Context:
     claim_confidence: dict[str, Opinion] = field(default_factory=dict)
     quarantine: Quarantine = field(default_factory=Quarantine)
     analyser: ArtifactAnalyser = field(default_factory=StructuralAnalyser)
+    # Defaulted for the same reason the quarantine beside it is: a demonstration that opened
+    # an obligation only when asked would be one that does not, and the reader who most needs
+    # to see the backlog is the one who never heard of the register.
+    obligations: ObligationSink = field(default_factory=Register)
 
 
 def _reference(entity: Entity) -> str:
@@ -567,6 +572,7 @@ async def _detect(context: _Context) -> tuple[DetectionStage, IncidentSeed]:
             report.record.artifact,
             quarantine=context.quarantine,
             analyser=context.analyser,
+            obligations=context.obligations,
         )
         if sealed_id is None:
             raise IronTideError(
@@ -949,6 +955,7 @@ async def _collect(
                 artifact,
                 quarantine=context.quarantine,
                 analyser=context.analyser,
+                obligations=context.obligations,
             )
             if sealed_id is None:
                 held.append(evidence.evidence_id)

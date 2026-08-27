@@ -42,6 +42,7 @@ from nemesis.core.ids import IdPrefix, new_id
 from nemesis.core.infrastructure import InfrastructureRole
 from nemesis.core.relationships import Relationship
 from nemesis.core.temporal import TemporalExtent, utcnow
+from nemesis.evidence.escalation import Register
 from nemesis.ports.collection import (
     ConnectorCapabilities,
     IntelligenceConnector,
@@ -49,7 +50,14 @@ from nemesis.ports.collection import (
     PivotResult,
     PivotType,
 )
-from nemesis.ports.storage import AuditEvent, AuditSink, ClaimStore, EvidenceVault, GraphStore
+from nemesis.ports.storage import (
+    AuditEvent,
+    AuditSink,
+    ClaimStore,
+    EvidenceVault,
+    GraphStore,
+    ObligationSink,
+)
 from nemesis.pursuit.investigation import (
     BranchState,
     ExecutedPivot,
@@ -115,6 +123,7 @@ class PursuitEngine:
         policy: PursuitPolicy | None = None,
         quarantine: Quarantine | None = None,
         analyser: ArtifactAnalyser | None = None,
+        obligations: ObligationSink | None = None,
         actor: str | None = None,
         clock: Callable[[], datetime] = utcnow,
     ) -> None:
@@ -128,6 +137,13 @@ class PursuitEngine:
         # taking up the extension point supplies one that runs under a real sandbox.
         self._quarantine = quarantine if quarantine is not None else Quarantine()
         self._analyser = analyser if analyser is not None else StructuralAnalyser()
+        # On by default, and on the same argument. `Register.incur` had no caller in `src/` at
+        # all, so material carrying a legal clock was held and nothing opened — an engine that
+        # opened obligations only when asked would keep that state for every caller who never
+        # heard of the register. The default is in-memory: durable is a `path`, and a
+        # deployment that means it passes one, because an obligation a restart erases was
+        # never really an obligation.
+        self._obligations = obligations if obligations is not None else Register()
         self._connectors = connectors
         self._clock = clock
         self._actor = actor or new_id(IdPrefix.ACTOR)
@@ -498,6 +514,7 @@ class PursuitEngine:
                     artifact,
                     quarantine=self._quarantine,
                     analyser=self._analyser,
+                    obligations=self._obligations,
                 )
                 if sealed_id is None:
                     # Held. Failure holds rather than releases, so neither the artifact nor

@@ -251,10 +251,13 @@ claim id and any `rule_name`, still inherits that premise's origin, which costs 
 gets through, so they measure cost rather than laundering.
 
 **What EVID does not promise, restated because the temptation is to read a green table as more.**
-Two vault instances on one root fork the chain irrecoverably; the shipped verifier's size ceiling
-covers artifacts but not the log; and the reporting-obligation register has no callers, so the
-`REFUSED_ACCESS` entry EVID-04 appends is currently the *only* trace a statutory obligation was
-incurred. All three are reproduced and open.
+Two vault instances on one root fork the chain irrecoverably, and the shipped verifier's size
+ceiling covers artifacts but not the log. Both are reproduced and open. The third item here — the
+reporting-obligation register having no callers, so that EVID-04's `REFUSED_ACCESS` entry was the
+*only* trace a statutory obligation was ever incurred — is **closed as of 2026-08-27**:
+`seal_when_released` opens an obligation whenever it holds material that either the collector or
+the analyser calls `MANDATORY_REPORT`, and the register can be given a path so the duty survives
+the restart that used to discharge it silently.
 
 ---
 

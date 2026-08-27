@@ -67,7 +67,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from nemesis.core.evidence import ContentSafety, EvidenceObject, at_least_as_restrictive
 from nemesis.core.temporal import utcnow
-from nemesis.ports.storage import EvidenceVault
+from nemesis.ports.storage import EvidenceVault, ObligationSink
 
 MAX_ARTIFACT_BYTES: Final = 64 * 1_024 * 1_024
 """Ceiling on what may be admitted at all.
@@ -406,6 +406,7 @@ async def seal_when_released(
     *,
     quarantine: Quarantine,
     analyser: ArtifactAnalyser,
+    obligations: ObligationSink,
 ) -> tuple[str | None, AnalysisReport]:
     """Quarantine collected bytes, and seal them only if quarantine lets them go.
 
@@ -420,6 +421,11 @@ async def seal_when_released(
     exactly the property that makes admitting the wrong thing unrecoverable. Material carrying
     a reporting obligation cannot legally be retained and cannot be deleted — so the decision
     belongs before the seal, not after.
+
+    ``obligations`` has no default, deliberately. This function's own argument for existing is
+    that a rule implemented once per call site holds only until somebody adds a call site, and
+    an optional sink would have reintroduced exactly that: a new caller would silently hold
+    material carrying a legal clock and open nothing.
 
     Returns ``(sealed_id, report)``, with ``sealed_id`` None when the artifact is held. The
     caller drops anything citing a held artifact: a claim pointing at evidence that was never
@@ -436,7 +442,18 @@ async def seal_when_released(
     report = quarantine.analyse(handle, analyser)
     try:
         released = quarantine.release(handle)
-    except QuarantineError:
+    except QuarantineError as refusal:
+        # Refusing was only ever half of it. `Register.incur` had no caller in `src/`, so the
+        # material was held correctly and then nothing opened, no deadline started, and the
+        # backlog was read by nobody — which is indistinguishable, to anyone auditing, from a
+        # platform that has never encountered such material.
+        #
+        # Keyed on the **declared** class as well as the analysed one, and that is the point:
+        # an analyser that lowers a `mandatory_report` is already refused by `release`, and
+        # reading only the report here would have let the same lie suppress the obligation
+        # too. One compromised component should not be able to close both doors.
+        if ContentSafety.MANDATORY_REPORT in {handle.declared_safety, report.classification}:
+            obligations.incur(artifact_id=handle.artifact_id, reason=str(refusal))
         return None, report
     await vault.seal(
         evidence.model_copy(update={"content_safety": report.classification}), released

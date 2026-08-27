@@ -188,6 +188,7 @@ from nemesis.disrupt.planner import DisruptionLever, DisruptionPlan, DisruptionP
 from nemesis.effects.isolation import IsolatedEffectsExecutor
 from nemesis.effects.registry import EffectsRegistry, default_registry
 from nemesis.evidence.anchoring import LocalHeadSigner
+from nemesis.evidence.escalation import Register
 from nemesis.evidence.lineage import resolve_selectivity, resolve_sources
 from nemesis.evidence.vault import (
     AnchorRecord,
@@ -199,7 +200,7 @@ from nemesis.ports.authorization import TrustAnchor
 from nemesis.ports.collection import IntelligenceConnector, PivotRequest, PivotResult, PivotType
 from nemesis.ports.effects import EffectRequest, EffectResult
 from nemesis.ports.isolation import IsolationReport
-from nemesis.ports.storage import AuditEvent, GraphQuery, Subgraph
+from nemesis.ports.storage import AuditEvent, GraphQuery, ObligationSink, Subgraph
 from nemesis.pursuit.engine import (
     ConnectorRegistry,
     PursuitEngine,
@@ -816,6 +817,10 @@ class _Context:
 
     quarantine: Quarantine = field(default_factory=Quarantine)
     analyser: ArtifactAnalyser = field(default_factory=StructuralAnalyser)
+    # Defaulted for the same reason the quarantine beside it is: a demonstration that opened
+    # an obligation only when asked would be one that does not, and the reader who most needs
+    # to see the backlog is the one who never heard of the register.
+    obligations: ObligationSink = field(default_factory=Register)
     """Collected bytes are examined before the vault sees them. Defaults rather than
     required parameters because a scenario that quarantined only when asked would be one that
     does not: the caller who most needs it is the one who never heard of it."""
@@ -917,6 +922,7 @@ async def _collect(
                 artifact,
                 quarantine=context.quarantine,
                 analyser=context.analyser,
+                obligations=context.obligations,
             )
             if sealed_id is None:
                 held.append(evidence.evidence_id)
@@ -1054,6 +1060,7 @@ async def _detect(context: _Context) -> tuple[DetectionStage, IncidentSeed]:
             report.record.artifact,
             quarantine=context.quarantine,
             analyser=context.analyser,
+            obligations=context.obligations,
         )
         if sealed_id is None:
             raise ScenarioError(

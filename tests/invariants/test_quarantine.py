@@ -16,6 +16,7 @@ analyser can relabel material before the vault ever sees it.
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -29,8 +30,18 @@ from nemesis.collect.quarantine import (
     QuarantineError,
     QuarantineState,
     StructuralAnalyser,
+    seal_when_released,
 )
-from nemesis.core.evidence import ContentSafety
+from nemesis.core.evidence import ArtifactKind, ContentSafety, EvidenceObject
+from nemesis.core.ids import IdPrefix, new_id
+from nemesis.core.provenance import (
+    CollectionMethod,
+    ProvenanceChain,
+    SourceClass,
+    SourceDescriptor,
+)
+from nemesis.core.temporal import TemporalExtent, utcnow
+from nemesis.evidence.escalation import UNCONFIGURED_AUTHORITY, Register
 from nemesis.evidence.vault import FileSystemEvidenceVault
 from nemesis.slice.scenario import run_glass_anvil_scenario
 
@@ -397,3 +408,148 @@ def test_material_carrying_a_reporting_obligation_never_reaches_the_vault() -> N
 
     with pytest.raises(QuarantineError):
         quarantine.release(handle)
+
+
+# --- The other half of MANDATORY_REPORT --------------------------------------
+
+
+def _reporting_evidence(artifact: bytes) -> EvidenceObject:
+    now = utcnow()
+    return EvidenceObject.seal(
+        artifact=artifact,
+        artifact_kind=ArtifactKind.DNS_RECORD,
+        provenance=ProvenanceChain(
+            collection_id=new_id(IdPrefix.COLLECTION),
+            source=SourceDescriptor(source_class=SourceClass.INTERNET_SCAN, identifier="fixture"),
+            method=CollectionMethod(
+                collector_name="fixture",
+                collector_version="1.0",
+                parameters={},
+                is_simulated=True,
+            ),
+            collected_at=now,
+        ),
+        observed_extent=TemporalExtent.at(now),
+        content_safety=ContentSafety.MANDATORY_REPORT,
+    )
+
+
+def test_holding_reporting_material_opens_an_obligation(tmp_path: Path) -> None:
+    """THE HALF THAT WAS BUILT AND WIRED TO NOTHING.
+
+    `Register.incur` had zero callers in `src/`. Quarantine refused the material correctly,
+    and then nothing opened, no deadline started and `held()` was read by nobody. The
+    escalation module's own thesis is that "the dangerous obligation is the one that lands in
+    a queue nobody reads", and a register with no producer is that queue with nothing in it —
+    which reads, to anyone auditing, exactly like a platform that has never encountered such
+    material.
+    """
+    register = Register()
+    quarantine = Quarantine()
+    artifact = b"material carrying a reporting obligation"
+
+    sealed_id, report = asyncio.run(
+        seal_when_released(
+            FileSystemEvidenceVault(tmp_path / "vault"),
+            _reporting_evidence(artifact),
+            artifact,
+            quarantine=quarantine,
+            analyser=StructuralAnalyser(),
+            obligations=register,
+        )
+    )
+
+    assert sealed_id is None, "material with a legal clock must not reach the vault"
+    assert report.classification is ContentSafety.MANDATORY_REPORT
+    (obligation,) = register.open_obligations()
+    assert obligation.artifact_id in quarantine.held()
+    assert obligation.authority == UNCONFIGURED_AUTHORITY, (
+        "an unconfigured deployment must say so on the record rather than name a plausible "
+        "authority it was never told"
+    )
+
+
+def test_an_obligation_survives_the_restart_that_used_to_discharge_it(tmp_path: Path) -> None:
+    """A duty with a clock on it, held only in memory, is discharged by a restart — silently,
+    leaving no trace the platform ever owed anything. That is the failure this module names,
+    reached by process exit rather than by anybody deciding it."""
+    path = tmp_path / "obligations.jsonl"
+    artifact = b"material carrying a reporting obligation"
+
+    first = Register(path)
+    asyncio.run(
+        seal_when_released(
+            FileSystemEvidenceVault(tmp_path / "vault"),
+            _reporting_evidence(artifact),
+            artifact,
+            quarantine=Quarantine(),
+            analyser=StructuralAnalyser(),
+            obligations=first,
+        )
+    )
+    (before,) = first.open_obligations()
+
+    # A different process, reading the same file.
+    (after,) = Register(path).open_obligations()
+    assert after == before, "the obligation did not survive the restart"
+
+
+def test_re_examining_held_material_does_not_restart_its_clock(tmp_path: Path) -> None:
+    """An obligation whose deadline moves every time the material is re-examined never becomes
+    overdue, and the collection path re-examines by construction — the same artifact arrives
+    again on the next run."""
+    path = tmp_path / "obligations.jsonl"
+    register = Register(path)
+    artifact = b"material carrying a reporting obligation"
+    evidence = _reporting_evidence(artifact)
+
+    for _ in range(3):
+        asyncio.run(
+            seal_when_released(
+                FileSystemEvidenceVault(tmp_path / "vault"),
+                evidence,
+                artifact,
+                quarantine=Quarantine(),
+                analyser=StructuralAnalyser(),
+                obligations=register,
+            )
+        )
+
+    (obligation,) = register.open_obligations()
+    assert len(path.read_text().splitlines()) == 1, (
+        "the record grew on re-examination; the deadline it carries is the first one, and a "
+        "file that appends per sighting invites a reader to believe the latest"
+    )
+    assert Register(path).open_obligations() == (obligation,)
+
+
+def test_a_lying_analyser_cannot_suppress_the_obligation_either(tmp_path: Path) -> None:
+    """One compromised component must not be able to close both doors.
+
+    `release` refuses the downgrade, so the material is held whatever the analyser says. If
+    the obligation were keyed on the *report* alone, the same lie that failed to release the
+    material would still have stopped anybody being told about it — a quieter version of the
+    same attack, and the one that survives a fix aimed only at the release path.
+    """
+    register = Register()
+    artifact = b"material carrying a reporting obligation"
+
+    sealed_id, report = asyncio.run(
+        seal_when_released(
+            FileSystemEvidenceVault(tmp_path / "vault"),
+            _reporting_evidence(artifact),
+            artifact,
+            quarantine=Quarantine(),
+            analyser=_Lying(),
+            obligations=register,
+        )
+    )
+
+    assert sealed_id is None
+    assert report.classification is ContentSafety.ROUTINE, (
+        "the analyser's answer is still recorded as what it said; the gate refuses to act on "
+        "it rather than pretending it was never given"
+    )
+    assert len(register.open_obligations()) == 1, (
+        "the obligation was keyed on the analyser's answer, so lying suppressed it"
+    )
