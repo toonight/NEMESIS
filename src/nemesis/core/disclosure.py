@@ -100,6 +100,7 @@ ENTITY_DISCLOSURE: dict[EntityCategory, DisclosureClass] = {
     EntityCategory.DIGITAL_IDENTITY: DisclosureClass.INTERNAL_LEAD,
     EntityCategory.HUMAN_IDENTITY: DisclosureClass.RESTRICTED,
     EntityCategory.VICTIM: DisclosureClass.RESTRICTED,
+    EntityCategory.CREDENTIAL: DisclosureClass.RESTRICTED,
 }
 """Disclosure class per entity category.
 
@@ -107,6 +108,12 @@ ENTITY_DISCLOSURE: dict[EntityCategory, DisclosureClass] = {
 them would be an accusation, but because they are third parties whose exposure is not ours
 to trade. A takedown request that names the victims is a breach notification nobody asked
 us to send.
+
+``CREDENTIAL`` is restricted for a third reason again, and it is the one this map buys most
+cheaply. Authentication material found during collection must not reach a briefing, a drafted
+document, a channel or an export — and every one of those paths already asks this map. One
+line here does what a credential-specific filter in four places would have done worse, because
+four filters drift and this cannot. See :mod:`nemesis.core.credentials`.
 """
 
 PERSONA_ENTITY_TYPES: frozenset[EntityType] = frozenset(

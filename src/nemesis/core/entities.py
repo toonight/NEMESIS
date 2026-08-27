@@ -54,6 +54,15 @@ class EntityCategory(StrEnum):
     ECOSYSTEM = "ecosystem"
     VICTIM = "victim"
     INDICATOR = "indicator"
+    CREDENTIAL = "credential"
+    """Authentication material found during collection.
+
+    Its own category rather than a kind of ``CRYPTOGRAPHIC_MATERIAL``, because the two need
+    opposite treatment. A TLS certificate or a PGP key is a deliverable identifier — publishing
+    its fingerprint is how attribution is checked. A credential is the opposite: it belongs to
+    somebody, it is frequently a natural person's, and NEMESIS finding one must never be a step
+    towards NEMESIS using one. See :mod:`nemesis.core.credentials`.
+    """
 
 
 class EntityType(StrEnum):
@@ -118,6 +127,9 @@ class EntityType(StrEnum):
     # Impact
     VICTIM = "victim"
 
+    # Authentication material found in collected content. Never usable, see credentials.py.
+    CREDENTIAL_INDICATOR = "credential_indicator"
+
     # Analytic indicators
     GEOGRAPHIC_INDICATOR = "geographic_indicator"
     LANGUAGE_INDICATOR = "language_indicator"
@@ -163,6 +175,7 @@ CATEGORY_OF: dict[EntityType, EntityCategory] = {
     EntityType.MARKETPLACE: EntityCategory.ECOSYSTEM,
     EntityType.FORUM: EntityCategory.ECOSYSTEM,
     EntityType.VICTIM: EntityCategory.VICTIM,
+    EntityType.CREDENTIAL_INDICATOR: EntityCategory.CREDENTIAL,
     EntityType.GEOGRAPHIC_INDICATOR: EntityCategory.INDICATOR,
     EntityType.LANGUAGE_INDICATOR: EntityCategory.INDICATOR,
     EntityType.BEHAVIORAL_PATTERN: EntityCategory.INDICATOR,
@@ -194,6 +207,21 @@ graph layer enforces this rather than trusting analysts to remember it.
 
 class NormalizationError(ValueError):
     """The observed value cannot be normalized into a natural key."""
+
+
+KEYED_BY_CONSTRUCTION_TYPES: frozenset[EntityType] = frozenset({EntityType.CREDENTIAL_INDICATOR})
+"""Types whose natural key must be *built*, never observed — so the normalizer may only refuse.
+
+Most entity types normalize an observed form into a key, and a form that will not normalize is
+allowed through on a caller-supplied key, because personas and campaigns have no syntax. That
+escape hatch is right for them and wrong here: a credential indicator's normalizer exists solely
+to refuse anything that is not ``kind:credfp-…``, so falling through it accepts the raw
+credential it just rejected.
+
+Membership therefore means: the key is re-validated even when the observed form could not be
+normalized. Add a type here only when its normalizer has no success path from a raw observation —
+otherwise this closes a door that was supposed to be open.
+"""
 
 
 _DOMAIN_RE = re.compile(r"^(?!-)[a-z0-9-]{1,63}(?<!-)(\.(?!-)[a-z0-9-]{1,63}(?<!-))*$")
@@ -279,6 +307,24 @@ def normalize_identifier(entity_type: EntityType, value: str) -> str:
             # let the blockchain adapter supply a chain-qualified key in `qualifiers`.
             return raw
 
+        case EntityType.CREDENTIAL_INDICATOR:
+            # The one entity type whose observed form must never be its natural key. A
+            # credential node keyed on the credential would put the secret into every edge,
+            # every audit line and every projection that names the node — and a natural key is
+            # the most widely copied string in this system. So the key is `kind:fingerprint`
+            # from `CredentialIndicator.natural_key`, and anything else is refused rather than
+            # lowercased and stored, which is what the default branch below would have done.
+            from nemesis.core.credentials import CredentialKind, is_fingerprint
+
+            kind, _, fingerprint = raw.partition(":")
+            if not is_fingerprint(fingerprint) or kind not in set(CredentialKind):
+                raise NormalizationError(
+                    "a credential indicator is keyed on 'kind:credfp-...', never on the "
+                    "credential. Build the key with CredentialIndicator.natural_key so the "
+                    "material stays in the vault and out of the graph"
+                )
+            return raw
+
         case _:
             return raw.lower()
 
@@ -323,6 +369,17 @@ class Entity(BaseModel):
         except NormalizationError:
             # An unnormalizable observed form is allowed only if the caller supplied the
             # key explicitly — some entity types (personas, campaigns) have no syntax.
+            #
+            # **Except where the refusal IS the rule.** For a type in
+            # `KEYED_BY_CONSTRUCTION_TYPES` the normalizer's only job is to raise on anything
+            # that is not the required shape, so falling through here accepts exactly what it
+            # refused. An adversarial review walked straight through it: `Entity.create` refused
+            # a raw credential and `Entity(...)` and `Entity.model_validate(...)` — the
+            # deserialization path every storage adapter uses — both accepted it as a natural
+            # key. The claim "a credential cannot be a graph key" was true of the function and
+            # false of the graph.
+            if self.entity_type in KEYED_BY_CONSTRUCTION_TYPES:
+                normalize_identifier(self.entity_type, self.natural_key)
             return self
         if self.natural_key != expected:
             raise ValueError(

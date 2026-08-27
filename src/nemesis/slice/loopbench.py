@@ -84,6 +84,7 @@ from nemesis.graph.memory import InMemoryClaimStore, InMemoryGraphStore
 from nemesis.pilot.challenger import ChallengePolicy, MoveChallenger
 from nemesis.pilot.mediator import PilotMediator, PilotSession
 from nemesis.pilot.moves import Briefing, Conclude, PilotMove, RunPivot
+from nemesis.pilot.stagnation import SessionStagnationDetector, SessionStagnationPolicy
 from nemesis.ports.collection import PivotType
 from nemesis.pursuit.engine import ConnectorRegistry, PursuitEngine
 from nemesis.pursuit.investigation import IncidentSeed
@@ -442,6 +443,11 @@ async def _build_world(
         max_moves=max_moves,
         challenger=challenger,
         challenge_policy=challenge_policy,
+        # A measurement harness, not a production session: it drives deliberately pathological
+        # pilots and must run them to the end to characterise what the limiter does. The stall
+        # is still detected and still recorded on the session — only the stopping is declined.
+        # See `SessionStagnationPolicy.halt_on_stall`.
+        stagnation=SessionStagnationDetector(SessionStagnationPolicy(halt_on_stall=False)),
     )
     seed = IncidentSeed(
         entity_type=EntityType.DOMAIN,

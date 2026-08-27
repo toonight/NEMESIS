@@ -6,9 +6,9 @@
 
 [![CI](https://github.com/toonight/NEMESIS/actions/workflows/ci.yml/badge.svg)](https://github.com/toonight/NEMESIS/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.13-1f6feb)
-![Tests](https://img.shields.io/badge/tests-1954-2ea043)
+![Tests](https://img.shields.io/badge/tests-2128-2ea043)
 ![Typing](https://img.shields.io/badge/mypy-strict-2ea043)
-![Plane contracts](https://img.shields.io/badge/plane%20contracts-13%20enforced-ff8a3d)
+![Plane contracts](https://img.shields.io/badge/plane%20contracts-15%20enforced-ff8a3d)
 ![Status](https://img.shields.io/badge/status-default%20simulated%20%7C%20opt--in%20Tor-e5a50a)
 
 **N**etworked **E**ngine for **M**alicious **E**ntity **S**urveillance, **I**dentification &amp; **S**uppression
@@ -58,7 +58,19 @@ hosting termination are declared operation classes with **no adapter at all** �
 asserts the registry has nothing to call. What the platform produces is the evidence package
 a registrar, host or court acts on, and a human authorizes before it goes out.
 
-See [ADR-0008](docs/adr/0008-the-pilot-seam-and-envelope-bounded-autonomy.md).
+**And the model is not the only threat the model creates.** After OpenAI's August 2026 Hugging
+Face incident, the threat model gained an *autonomous agent collective* — hundreds of frontier
+models, running continuously, sharing what each finds. What that incident established is that
+the interesting failures belong to the **composition**: every component behaved as designed, and
+the reachability, the coordination and the capability were all properties of how they fitted
+together. So NEMESIS now analyses its own import graph for a path from any model-controlled
+context to anything that can reach the network *or start a process*; a stalled investigation ends
+with a typed reason instead of looking for another route; a discovered credential has no
+representable form that holds material; and reaching for a capability that does not exist is
+itself a recorded event. See
+[ADR-0008](docs/adr/0008-the-pilot-seam-and-envelope-bounded-autonomy.md),
+[ADR-0014](docs/adr/0014-authority-monotonicity-and-the-agent-collective.md) and
+[`docs/security/INVARIANTS.md`](docs/security/INVARIANTS.md).
 
 ## What makes it different
 
@@ -149,6 +161,17 @@ vendor unless a deployment wires it deliberately — and `pilot-preview` exists 
 can be made by *reading what would leave the building* rather than imagining it. See
 [`docs/pilot/MULTI_PROVIDER.md`](docs/pilot/MULTI_PROVIDER.md).
 
+And to point an adversary at the platform rather than a reviewer:
+
+```bash
+uv run nemesis breaker                     # ten attacks, each bound to a named invariant
+uv run nemesis breaker --attack peer-says-go
+```
+
+Offline, deterministic, no production credential and no production effect. It reports three
+verdicts, not two: a run holding any `INCONCLUSIVE` is not clean, because "we could not check
+it" must never print as "it held". See [`docs/security/BREAKER.md`](docs/security/BREAKER.md).
+
 ## What the demo actually shows
 
 | | |
@@ -188,7 +211,7 @@ them are the investigation pipeline; the twelfth sits above it and drives it.
 
 The arrows that **do not** exist matter as much as those that do. Collection holds hostile
 content and Effects holds outward reach; if those two could talk, planted content could
-steer a real-world action. 13 `import-linter` contracts enforce that in CI.
+steer a real-world action. 15 `import-linter` contracts enforce that in CI.
 
 Plane 12 is the one that most needs its absences stated. It decides what the untrusted model is
 *asked* next across hundreds of moves — and every action it causes is that model proposing one of
@@ -258,6 +281,9 @@ numbers rather than below them.
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | what is welcome, and the terms a patch carries |
 | [`docs/calibration/PROTOCOL.md`](docs/calibration/PROTOCOL.md) | how the confidence figures will be validated, written before the corpus exists |
 | [`docs/pilot/MULTI_PROVIDER.md`](docs/pilot/MULTI_PROVIDER.md) | which models may drive, how one is chosen, and why the choice changes no limit |
+| [`docs/security/INVARIANTS.md`](docs/security/INVARIANTS.md) | the security properties with stable ids, what enforces each, and where each one stops |
+| [`docs/security/2026-08-27-agent-collective-hardening.md`](docs/security/2026-08-27-agent-collective-hardening.md) | what the Hugging Face incident changed here, including what was rejected |
+| [`docs/security/BREAKER.md`](docs/security/BREAKER.md) | the offline adversary, and how to write an attack for it |
 
 Every artifact carries its epistemic status, and these labels are never silently upgraded:
 `IMPLEMENTED` · `SIMULATED` · `PROPOSED` · `REQUIRES_EXTERNAL_DATA` ·
