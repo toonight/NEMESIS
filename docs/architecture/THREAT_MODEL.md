@@ -459,10 +459,14 @@ the escaping), and `test_a_lying_analyser_cannot_release_mandatory_report_materi
 its body that the analyser *can*. The docstring is honest; the name is what a coverage claim
 reads.
 
-**Also worth stating: the evidence vault has no row in the invariant register.** `INVARIANTS.md`
-maps CLAUDE.md invariant 10 to the audit trail only, so the vault's controls — content
-addressing, the chain, quarantine, the export seal — appear in no identifier. That is why these
-findings had no `EVID-*` to violate, and it is the next thing to fix in that document.
+**The evidence vault had no row in the invariant register when these findings were written**,
+which is why not one of them names an `EVID-*` it violates: `INVARIANTS.md` mapped CLAUDE.md
+invariant 10 to the audit trail alone, so content addressing, the chain, quarantine and the export
+seal appeared under no identifier. **That gap is now closed** — `INVARIANTS.md` carries `EVID-01`
+through `EVID-10`, and `EVID-04` and `EVID-09` above carry the split labels these findings argued
+for. The findings in this table have *not* been re-indexed against those rows, so the absence of an
+`EVID-*` here means the row did not exist yet, not that no invariant is at stake. Re-reading this
+table against the register is the next thing to do in this document.
 
 ---
 
