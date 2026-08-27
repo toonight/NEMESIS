@@ -25,7 +25,7 @@ guarantee, and it is the only one that sees a bare literal inside a function bod
 field default, or a two-line logic change that touches no constant at all. `engine_drifted()`
 names the modules that moved.
 
-**Every module-level constant**, by normalised syntax, in `CONSTANT_DIGESTS` — 768 of them,
+**Every module-level constant**, by normalised syntax, in `CONSTANT_DIGESTS` — 771 of them,
 with no classification whatsoever. A dial does not have to hold a digit and does not have to
 look like a table; four rules for deciding what counted were tried and all four excluded
 something load-bearing. `constants_drifted()` names what moved, appeared or vanished.
@@ -135,7 +135,7 @@ CALIBRATION_CONSTANTS: Final[tuple[str, ...]] = (
 """The curated epistemic subset, named as ``module:NAME`` and frozen by **imported value**.
 
 Not "every number": most of what decides a published figure here is not a number at all — of the
-768 dials `discovered_constants()` covers, 537 hold no numeric literal. And not the completeness
+771 dials `discovered_constants()` covers, 540 hold no numeric literal. And not the completeness
 guarantee either, which is the job of the two syntactic digests; this list is deliberately
 curated, so it is allowed to be incomplete in a way they are not.
 
@@ -669,6 +669,9 @@ CONSTANT_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis.evidence.export:SIGNED_SEAL": "5e85d41c2734fd55",
         "nemesis.evidence.export:UNSIGNED_SEAL": "5b2fff43ed0e15b5",
         "nemesis.evidence.export:VERIFIER_FILE": "ccf1e6b24996a44c",
+        "nemesis.evidence.lineage:ASSERTED_BACKING_PREFIX": "83bdb7694fd0b714",
+        "nemesis.evidence.lineage:COLLECTING_DERIVATIONS": "a704f7d43b9fb17f",
+        "nemesis.evidence.lineage:INHERITING_DERIVATIONS": "ddd5d70e320a579d",
         "nemesis.evidence.lineage:MAX_DERIVATION_DEPTH": "4132a0bc86cdf2a5",
         "nemesis.evidence.lineage:UNRESOLVED_SOURCE": "5369158fe8f973da",
         "nemesis.evidence.standalone_verifier:ANCHORS": "a8b22497da12d0e8",
@@ -1076,7 +1079,7 @@ def discovered_constants(tree: Path | None = None) -> dict[str, str]:
     `EXCLUDED_CONCLUSIONS`, four security tables made of plain strings. The module digest covered
     them, so it was never a bypass; the claim that every dial was *named* was simply false.
 
-    So there is no rule now. Every module-level upper-case assignment is a dial, 768 of them,
+    So there is no rule now. Every module-level upper-case assignment is a dial, 771 of them,
     and the cost of including the genuine prose is nothing: rewording a message already moves
     that module's syntax digest, so no new failure mode is introduced by naming it too.
 
@@ -1299,7 +1302,7 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/evidence/anchoring.py": "8b974a38aea73244",
         "nemesis/evidence/escalation.py": "a577b5bd2f866902",
         "nemesis/evidence/export.py": "e5fda643d253682c",
-        "nemesis/evidence/lineage.py": "fa84c77e043f97a4",
+        "nemesis/evidence/lineage.py": "9c9b075a9d8db30c",
         "nemesis/evidence/standalone_verifier.py": "c88365918a7606c8",
         "nemesis/evidence/vault.py": "64d740a35168647f",
         "nemesis/evolution/__init__.py": "ad2e13b69c4fc1fd",

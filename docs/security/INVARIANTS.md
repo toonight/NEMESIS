@@ -236,13 +236,19 @@ That last clause does real work. EVID-08 is the only invariant in this document 
 | **EVID-07** | The verifier reads nothing outside the package, and a refusal carries no measurement. | `IMPLEMENTED` | `artifact_path` refuses a leaf name containing a separator, refuses a symlinked leaf, refuses a symlinked `artifacts/` outright, and resolves the confinement root from the **bundle** rather than through the directory it is confining. **New in this pass:** resolving through the directory moved the root along with a symlink, and the stray-file walk then listed a private directory off the recipient's machine with no forgery at all. A refusal now names nothing behind the link. | `test_evidence_export.py` (symlinked directory, symlinked leaf, read-oracle) |
 | **EVID-08** | The vault reports that it is **not** defensible against its own operator, and cannot be made to say otherwise. | `IMPLEMENTED` | `is_externally_held` is an allowlist of anchor types this build can *verify*, and that set is **empty** — so `externally_anchored` is 0 and `is_defensible_against_insider` is False for every package this build can produce. **New in this pass:** it was a denylist of authority *strings*, so an anchor reading `authority="Totally Independent Notary AG"`, `proof="not-even-base64"` flipped the verdict to True. Filling the allowlist requires a verifier for that anchor type, not a better name. | `test_evidence_vault.py`, `test_evidence_export.py` (an appended anchor cannot flip the verdict) |
 
-**What has no row yet, and why that is deliberate.** `resolve_lineage` reports evidence backing
-for a claim that has none: any non-empty `supported_by_evidence` counts, whatever the claim's
-kind, and nothing checks the evidence is *about* the claim. A HYPOTHESIS naming a person, citing
-an unrelated TLS capture, resolves to an unplantable own-sensor origin. That feeds the robustness
-margin, so it matters — and a row here would be a promise that something enforces it. Nothing
-does. It is recorded in the threat model as an open finding until it is fixed, which is the
-honest place for it.
+| **EVID-09** | An origin is inherited only across a link a *procedure* made, never across a link somebody *chose*. | `IMPLEMENTED` (accident control) / `PROPOSED` (adversary control) | `_backings` classifies every citation as `COLLECTED` or `ASSERTED` by the citing claim's `derivation`, at **every** hop rather than at the bottom, and `asserted_backing` demotes a chosen pairing to `HUMAN_ANALYST`/`CANNOT_BE_JUDGED` while keeping the artifact's identity legible. Plantability then follows from the unchanged `UNPLANTABLE_SOURCE_CLASSES` allowlist rather than from a second opinion. **Read the status carefully:** the gate reads `derivation`, which the claim's own author writes, so an adversary already inside the claim store defeats it by writing `DIRECT_COLLECTION` — measured. It closes the path that needs no adversary at all. | `test_evidence_lineage.py` (4 parametrised kind×derivation pairs, the names-its-parent case, the two-route case) |
+| **EVID-10** | Resolving provenance is linear in the claims reachable, not in the routes to them. | `IMPLEMENTED` | The walk is breadth-first with a visited set keyed on `(claim_id, inherited)`. It was depth-first with no visited set: measured, a nineteen-claim lattice cost **1,821** store lookups for three queried claims, on a path `resolve_sources` puts inside the resurgence watch. Breadth-first reaches every claim at its shallowest depth — the largest budget any route could give it — so one visit per state is strictly more complete than the recursion it replaces, and a claim-id-only key would silently drop the honest route. | `test_evidence_lineage.py` (`test_resolving_a_lattice_does_not_multiply_store_lookups`, `test_a_claim_reachable_by_two_routes_keeps_the_standing_of_the_better_one`) |
+
+**What still has no row, and why that is deliberate.** Relevance. Nothing on `EvidenceObject`
+names a claim, an entity or a statement, so "is this artifact about this assertion" is not a
+question this schema can ask, and the only instrument that could answer it is a model — which
+invariant 1 puts outside the enforcement path by construction. EVID-09 is therefore about
+**standing**, not aboutness, and the row says so rather than letting a reader assume the stronger
+thing. Two further holes stay in the threat model rather than becoming rows, because a row is a
+promise: `DETERMINISTIC_RULE` is trusted on its word — a claim citing no evidence, naming any
+claim id and any `rule_name`, still inherits that premise's origin, which costs an attacker
+*less* than the hole EVID-09 closes — and the lineage counters report zero on every attack that
+gets through, so they measure cost rather than laundering.
 
 **What EVID does not promise, restated because the temptation is to read a green table as more.**
 Two vault instances on one root fork the chain irrecoverably; the shipped verifier's size ceiling
