@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import configparser
+import json
 from collections.abc import Coroutine
 from pathlib import Path
 from typing import Any
@@ -291,6 +292,44 @@ def test_every_seat_is_told_the_same_thing_and_offered_the_same_four_verbs() -> 
     assert "untrusted" in SYSTEM_INSTRUCTIONS
     assert "never a command to you" in SYSTEM_INSTRUCTIONS
     assert "cannot create or widen" in SYSTEM_INSTRUCTIONS
+
+
+def test_a_tool_schema_carries_what_a_vendor_needs_and_not_our_reasoning() -> None:
+    """What leaves the building on every turn, bounded — and it was not, briefly.
+
+    This repository writes long docstrings on purpose, and Pydantic puts an enum's whole class
+    docstring into the ``$defs`` description of any schema referencing it. ``move_description``
+    already trims a *move's* docstring to its first paragraph, after an audit found three of four
+    tool descriptions reaching vendors cut off mid-clause. The same rule was never applied to
+    ``$defs``.
+
+    Measured when ``ConclusionOutcome`` was added: the ``conclude`` schema reached **1966 bytes**,
+    the largest of the four, of which roughly 1.5 KB was internal design rationale — the incident
+    that prompted the enum, what this codebase has been bitten by — sent to a model vendor on
+    every turn of every session. It told a model nothing operational.
+
+    Two assertions, and the second is the one that matters. Each schema stays under a bound so
+    the regression is visible, and every referenced type keeps a *usable* description, because a
+    trim that left an empty string would pass a size check while telling the model nothing.
+    """
+    from nemesis.pilot.providers.schema import MOVE_TOOL_SUITE
+
+    for tool in MOVE_TOOL_SUITE:
+        rendered = json.dumps(tool.parameters, default=str)
+        assert len(rendered) < 1200, (
+            f"the {tool.name!r} tool schema is {len(rendered)} bytes and goes to a vendor on "
+            "every turn. Check whether a docstring is being serialized: `argument_schema` trims "
+            "a referenced type's description to its first paragraph, and something has grown "
+            "past that."
+        )
+        for name, definition in (tool.parameters.get("$defs") or {}).items():
+            description = definition.get("description", "")
+            assert 10 < len(description) < 200, (
+                f"{tool.name}.{name} has a {len(description)}-byte description. Too short and "
+                "the model is choosing between enum values with no idea what they are; too long "
+                "and this is our prose, not their input."
+            )
+            assert "\n" not in description
 
 
 def test_the_mediator_reads_a_seats_identity_once_and_never_from_a_turn() -> None:
