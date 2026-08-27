@@ -58,7 +58,17 @@ that exists, because there is nothing to get wrong.
 
 **The envelope is the limiter.** Every `request_effect` is routed through
 `registry.execute(request, envelope)`; the refusal of anything outside the envelope is the
-*capability's*, reached by asking it, never a judgement the mediator substituted. The mediator
+*capability's*, reached by asking it, never a judgement the mediator substituted.
+
+> **Amended 2026-08-27 (PR #13).** The call is now
+> `effects.perform(request, envelope, operation=...)`, against an `EffectsExecutor` port the
+> mediator is required to be handed. The decision this ADR records is unchanged — the refusal
+> is still the capability's, reached by asking it — but the sentence above described a
+> mechanism that had one consequence this ADR did not anticipate: holding the concrete
+> registry meant the pilot path ran every effect in-process, so the plane's confinement
+> applied everywhere except the one place an untrusted model drives. Recorded here rather
+> than edited away, because the gap between "the refusal is correct" and "the execution is
+> confined" is the thing this ADR was read as covering and did not. The mediator
 observes the target's current state from the graph, never from the pilot, so a pilot cannot
 forge target state to spend a stale approval. A `record_belief` becomes a claim of kind
 HYPOTHESIS derived from MODEL_ASSERTION — which the core forbids from ever being an observation

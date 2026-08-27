@@ -178,7 +178,7 @@ the effects registry.
 
 | Attack | Control |
 |---|---|
-| A hijacked pilot requests an out-of-envelope effect ("suspend this domain now") | The mediator routes every effect through `registry.execute(request, envelope)`; the pre-signed capability refuses anything it does not authorize. Proven by a test where the pilot does not resist injection — it tries — and nothing leaves. |
+| A hijacked pilot requests an out-of-envelope effect ("suspend this domain now") | The mediator routes every effect through `effects.perform(request, envelope, operation=...)` — an `EffectsExecutor` port required at construction, so the confinement the plane claims is reached on this path and not only on the demonstration's; the pre-signed capability refuses anything it does not authorize. Proven by a test where the pilot does not resist injection — it tries — and nothing leaves. |
 | The pilot reaches for authority it lacks (mint a capability, widen the envelope, export) | The move vocabulary is closed: there is no such verb to emit. An unknown `kind` does not validate. |
 | A hijacked pilot clears the stop condition that constrains it | Found at merge review and fixed: the preflight reads stop-condition clearances out of `request.parameters`, and the mediator copied the pilot's parameters there verbatim — one entry defeated the innocent-third-party abort. The mediator now strips the whole `stop_condition.` prefix. An untrusted model attests to nothing about the world. |
 | The pilot forges the target's current state to spend a stale approval | `RequestEffect` has no field for target state; the mediator observes it from the graph, never from the pilot. |

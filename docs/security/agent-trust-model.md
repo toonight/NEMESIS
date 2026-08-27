@@ -306,7 +306,7 @@ flowchart TD
     A["AuthorizationGateway.approve(IdentityAssertion)<br/>PrincipalVerifier → Principal<br/>rbac: role + assurance + dual control"]
     S["AuthorizationGateway.issue()<br/>signs with CapabilitySigner"]
     K["AuthorizationCapability<br/>targets · class · jurisdiction · expiry ≤ 24h"]
-    E["EffectsRegistry.execute(request, envelope)"]
+    E["EffectsExecutor.perform(request, envelope, operation)"]
     F{"preflight:<br/>capability → target state → stop conditions"}
     W["Isolated worker process<br/>no key · sealed imports · no socket · deadline"]
     R["EffectResult → audit trail (hash-chained)"]

@@ -248,7 +248,7 @@ What it broke, in one line each:
 | An allowance that could grow | Closing an overspent branch set its allowance to what it spent, so `allocated` could exceed `total_steps` |
 
 One finding is a **limitation rather than a defect** and is recorded as such: the controller holds a
-mediator, and the mediator holds the engine, the envelope and the registry — so
+mediator, and the mediator holds the engine, the envelope and the effects executor — so
 `controller._mediator._envelope` reaches them by attribute traversal. Python has no object-capability
 enforcement. What the contracts and tests establish is the import graph and the declared API, and
 nothing here claims more than that.
