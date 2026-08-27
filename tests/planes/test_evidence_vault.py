@@ -410,25 +410,63 @@ def test_a_locally_signed_anchor_does_not_make_the_vault_defensible(tmp_path: Pa
     assert not report.is_defensible_against_insider
 
 
-def test_only_an_externally_held_anchor_closes_the_insider_gap(tmp_path: Path) -> None:
+def test_no_anchor_this_build_can_produce_closes_the_insider_gap(tmp_path: Path) -> None:
+    """The claim the platform must be *unable* to make falsely, asserted as unmakeable.
+
+    **This test enshrined the hole it was named for.** It recorded an anchor with
+    ``proof="SIMULATED-token"`` and asserted ``is_defensible_against_insider`` was True — and it
+    passed, because ``is_externally_held`` was a denylist of authority *strings*: anything not
+    called "nemesis", "self" or "internal" counted as external. An adversarial review flipped the
+    verdict to YES with ``authority="Totally Independent Notary AG"`` and
+    ``proof="not-even-base64"``. Nothing validated either field.
+
+    A string somebody typed decided whether this platform claimed its evidence was defensible
+    against itself. That is the single claim it most needs to be unable to make falsely, and
+    `export.py` says as much: "False for every package this build can produce."
+
+    So the check is now an allowlist of anchor types this build can actually *verify*, and that
+    set is empty. The assertion inverted with it, and inverting it is the point: a test that can
+    only be made to pass by implementing a real verifier is a test that cannot be satisfied by
+    typing a better authority name.
+    """
     vault, _ = _sealed(tmp_path)
     head = run(vault.head())
-    run(
-        vault.record_anchor(
-            IntegrityAnchor(
-                anchor_type="rfc3161_timestamp_token",
-                anchored_at=T0,
-                authority="synthetic-timestamping-authority",
-                proof="SIMULATED-token",
-                covers_hash=head,
+    for authority, proof in (
+        ("synthetic-timestamping-authority", "SIMULATED-token"),
+        ("Totally Independent Notary AG", "not-even-base64"),
+        ("some-transparency-log", "x" * 64),
+    ):
+        run(
+            vault.record_anchor(
+                IntegrityAnchor(
+                    anchor_type="rfc3161_timestamp_token",
+                    anchored_at=T0,
+                    authority=authority,
+                    proof=proof,
+                    covers_hash=head,
+                )
             )
         )
-    )
 
     report = run(vault.verify_integrity())
 
-    assert report.externally_anchored == 1
-    assert report.is_defensible_against_insider
+    assert report.anchors_verified == 3, "the anchors were not recorded; this tests nothing"
+    assert report.externally_anchored == 0, (
+        "an unvalidated authority string was counted as an external anchor"
+    )
+    assert not report.is_defensible_against_insider
+
+
+def test_making_an_anchor_external_requires_a_verifier_and_not_a_better_name() -> None:
+    """The allowlist is empty, and what filling it costs is stated rather than left implied."""
+    from nemesis.core.evidence import VERIFIED_ANCHOR_TYPES
+
+    assert frozenset() == VERIFIED_ANCHOR_TYPES, (
+        "an anchor type was allowlisted. That is a commitment to two things: a verifier that "
+        "validates `proof` against the named authority, and a registry mapping an authority to "
+        "the key that authenticates it. Without both, this restores the defect the allowlist "
+        "replaced."
+    )
 
 
 def test_an_anchor_over_a_head_this_chain_never_had_is_refused(tmp_path: Path) -> None:

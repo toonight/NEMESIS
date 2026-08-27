@@ -46,6 +46,8 @@ from nemesis.evidence.export import (
     VaultNotExportableError,
     write_sealed_export,
 )
+from nemesis.evidence.standalone_verifier import SEALED_FILES as VERIFIER_MAP
+from nemesis.evidence.standalone_verifier import check_seal, verify
 from nemesis.evidence.vault import FileSystemEvidenceVault
 
 pytestmark = pytest.mark.invariant
@@ -453,19 +455,37 @@ def test_every_artifact_cannot_be_deleted_by_emptying_the_manifest(tmp_path: Pat
 
     done = _doctor(_export(tmp_path), gut)
     assert done.returncode == 1
-    assert "Objects were removed from this package" in done.stdout
+    assert "the log seals" in done.stdout and "are present" in done.stdout
 
 
 def test_a_single_document_cannot_be_suppressed_in_transit(tmp_path: Path) -> None:
-    """The disclosure case: removing the one exculpatory document and its manifest entry."""
+    """The disclosure case: removing the one exculpatory document and its manifest entry.
+
+    **This test passed for the wrong reason until an adversarial review noticed.** The
+    reconciliation read ``len(sealed) != len(seen) + withheld``, where ``withheld`` is a
+    *manifest* field — the doctorer's own copy. This ``suppress()`` simply forgot to touch it,
+    so the arithmetic stayed unbalanced and the finding fired. A doctorer that incremented it by
+    one made ``verify()`` return True with zero findings, and the program printed "nothing was
+    added or removed" about a package one exhibit short.
+
+    So the test now does what the attacker would: it bumps the count. The log is the authority
+    inside a package, and the manifest's own number no longer balances the log's equation.
+    """
 
     def suppress(bundle: Path, manifest: dict[str, object]) -> None:
         item = manifest["entries"].pop(0)  # type: ignore[attr-defined]
         (bundle / ARTIFACTS_DIR / item["evidence_id"]).unlink()
+        # The half that used to be missing.
+        current = manifest.get("withheld_restricted", 0)
+        manifest["withheld_restricted"] = (current if isinstance(current, int) else 0) + 1
 
     done = _doctor(_export(tmp_path), suppress)
     assert done.returncode == 1
-    assert "Objects were removed from this package" in done.stdout
+    assert "the log seals" in done.stdout
+    assert "CANNOT CHECK THAT" in done.stdout, (
+        "the shortfall must be reported as unverifiable rather than balanced away by a number "
+        "the sender chose"
+    )
 
 
 def test_an_empty_manifest_is_not_a_package_with_nothing_to_check(tmp_path: Path) -> None:
@@ -724,3 +744,160 @@ def test_the_seal_never_makes_the_package_defensible_against_us(tmp_path: Path) 
 
     assert "DEFENSIBLE AGAINST THE OPERATOR:  NO" in done.stdout
     assert "establishes nothing against us" in (bundle / NOTICE_FILE).read_text()
+
+
+# --- the seal covers the package, not one file of it --------------------------------------
+
+
+def test_the_seal_covers_every_file_in_the_package(tmp_path: Path) -> None:
+    """One digest per file, checked against an explicit map rather than a derived name.
+
+    The verifier used to derive the seal key from the filename —
+    ``name.split(".")[0].replace("-", "_") + "_sha256"`` — which turns ``vault-log.jsonl`` into
+    ``vault_log_sha256``, a key the sealer never wrote. The lookup returned ``None``, the
+    comparison was skipped, and the log's digest check was **dead code**. Only ``manifest.json``
+    happened to round-trip. ``anchors.jsonl`` was never in the loop, and ``verify.py`` was not in
+    the seal document at all.
+    """
+    from nemesis.evidence.export import SEALED_FILES
+
+    assert SEALED_FILES == VERIFIER_MAP, (
+        "the sealer and the shipped verifier disagree about which digest covers which file. "
+        "They are separate maps because the verifier ships standalone and cannot import "
+        "nemesis; this assertion is what keeps them from drifting, and drift is exactly what "
+        "produced the dead-code check."
+    )
+
+    bundle = _signed_export(tmp_path)[0]
+    seal = json.loads((bundle / "seal.json").read_text())
+    for name, key in SEALED_FILES.items():
+        assert key in seal, f"{name} has no digest in the seal"
+        actual = hashlib.sha256((bundle / name).read_bytes()).hexdigest()
+        assert seal[key] == actual, f"the seal's {key} does not match {name} as written"
+
+
+@pytest.mark.parametrize(
+    "target", ["manifest.json", "vault-log.jsonl", "anchors.jsonl", "verify.py"]
+)
+def test_altering_any_sealed_file_fails_the_seal(tmp_path: Path, target: str) -> None:
+    """Each covered file, mutated on its own, must fail. Parametrised so none can go quiet.
+
+    A single test that altered one file would have passed throughout the period when three of
+    the four checks were dead.
+    """
+    bundle = _signed_export(tmp_path)[0]
+    before_digest, before_verdict, _ = check_seal(bundle)
+    assert before_verdict in {"VERIFIED", "UNSIGNED"}
+
+    path = bundle / target
+    path.write_bytes(path.read_bytes() + b"\n# appended by somebody\n")
+
+    digest, verdict, findings = check_seal(bundle)
+    assert digest == before_digest, "the seal digest is computed from seal.json and must not move"
+    assert verdict == "FAILED", f"altering {target} did not fail the seal: {findings}"
+    assert any(target in finding for finding in findings), findings
+
+
+def test_substituting_the_verifier_fails_the_seal(tmp_path: Path) -> None:
+    """The attack that made this a HIGH rather than a tidiness finding.
+
+    ``README.txt`` tells the recipient to run ``verify.py``. Before the fix, ``verify.py`` was
+    not covered by the seal — so a signed package could ship an eleven-line program that prints
+    a clean verdict, and the *genuine* ``check_seal()`` still returned VERIFIED with a
+    byte-identical digest. A seal that does not cover the verifier is a seal the recipient
+    checks with a program the seal does not vouch for.
+    """
+    bundle = _signed_export(tmp_path)[0]
+    digest, _, _ = check_seal(bundle)
+    (bundle / "verify.py").write_text(
+        "import sys\n"
+        f"print('PACKAGE SEAL: {digest}')\n"
+        "print('INTERNALLY CONSISTENT:            YES')\n"
+        "sys.exit(0)\n"
+    )
+    after_digest, verdict, findings = check_seal(bundle)
+    assert after_digest == digest
+    assert verdict == "FAILED"
+    assert any("verify.py" in finding for finding in findings), findings
+
+
+def test_a_notice_from_another_package_is_caught(tmp_path: Path) -> None:
+    """The notice quotes the seal digest, so it cannot be inside the seal — bind it the other way.
+
+    Sealing ``README.txt`` would require the digest of a document containing that digest. So the
+    verifier checks the converse: the digest the notice *quotes* must be the digest it
+    *computes*. A notice lifted from a different package, or rewritten to quote a different
+    digest, is caught; prose edits that keep the digest are not, and that limit is stated rather
+    than papered over.
+    """
+    bundle = _signed_export(tmp_path)[0]
+    (bundle / "README.txt").write_text("Seal: " + "0" * 64 + "\nNothing to see here.\n")
+    _, verdict, findings = check_seal(bundle)
+    assert verdict == "FAILED"
+    assert any("does not quote" in finding for finding in findings), findings
+
+
+def test_a_missing_sealed_file_is_a_finding_not_a_crash(tmp_path: Path) -> None:
+    """Deleting a covered file must be reported, not raise — a crash is a denial of verification."""
+    bundle = _signed_export(tmp_path)[0]
+    (bundle / "anchors.jsonl").unlink()
+    _, verdict, findings = check_seal(bundle)
+    assert verdict == "FAILED"
+    assert any("anchors.jsonl is missing" in finding for finding in findings), findings
+
+
+def test_the_verifier_does_not_read_through_a_symlinked_artifacts_directory(
+    tmp_path: Path,
+) -> None:
+    """The read oracle an adversarial review opened, and what a refusal must not carry.
+
+    ``artifact_path`` confined the leaf name and then computed the confinement root by
+    resolving ``bundle / "artifacts"`` — *through the same untrusted directory*. Make
+    ``artifacts/`` itself a symlink and the root moves with it, so the check compared a path
+    against itself and passed. Worse, the stray-file walk iterated the linked directory
+    unconditionally, with no log or manifest forgery at all.
+
+    Measured before the fix: a package whose ``artifacts/`` pointed at a directory on the
+    recipient's machine had this program print those private filenames back — and the module's
+    own docstring notes recipients "are told to run this and usually send the output back".
+
+    Two assertions, and the second is the one that matters. It must fail, and it must fail
+    without naming or measuring anything behind the link: a refusal that carries the
+    measurement it refused to make is not a refusal.
+    """
+    import shutil
+
+    bundle = _export(tmp_path)
+    private = tmp_path / "recipient-private"
+    private.mkdir()
+    (private / "merger-terms.txt").write_bytes(b"CONFIDENTIAL")
+    # NEMESIS-SYNTHETIC-CREDENTIAL: a private-key header shape, not a key. The fixture must
+    # look like the thing whose leakage is being tested, or it tests the fixture.
+    (private / "id_ed25519").write_bytes(b"-----BEGIN PRIVATE KEY-----")
+
+    shutil.rmtree(bundle / ARTIFACTS_DIR)
+    (bundle / ARTIFACTS_DIR).symlink_to(private, target_is_directory=True)
+
+    ok, findings = verify(bundle)
+    assert ok is False
+    blob = " ".join(findings)
+    for secret in ("merger-terms.txt", "id_ed25519"):
+        assert secret not in blob, (
+            f"the verifier echoed {secret!r} off the recipient's machine: {findings}"
+        )
+    assert any("symbolic link" in finding for finding in findings), findings
+
+
+def test_an_artifact_that_is_a_symlink_is_still_refused(tmp_path: Path) -> None:
+    """The leaf case, kept: the directory fix must not have replaced the file check."""
+    bundle = _export(tmp_path)
+    entries = sorted((bundle / ARTIFACTS_DIR).iterdir())
+    victim = entries[0]
+    elsewhere = tmp_path / "elsewhere.txt"
+    elsewhere.write_bytes(b"not the sealed bytes")
+    victim.unlink()
+    victim.symlink_to(elsewhere)
+
+    ok, findings = verify(bundle)
+    assert ok is False
+    assert any("no ordinary file" in finding for finding in findings), findings

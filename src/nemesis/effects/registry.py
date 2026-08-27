@@ -26,9 +26,10 @@ from __future__ import annotations
 import hmac
 import re
 from datetime import datetime
-from typing import Final
+from pathlib import Path
+from typing import Any, Final
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from nemesis.authz.verification import verify_capability
 from nemesis.core.authorization import (
@@ -78,7 +79,18 @@ that whoever can observe it says so explicitly, per operation, in the request it
 to. Fail-closed is the only direction that leaves the condition meaning anything.
 """
 
-_CONTROL_CHARACTERS: Final = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+_CONTROL_CHARACTERS: Final = re.compile(
+    "["
+    "\x00-\x1f\x7f-\x9f"  # C0 and C1
+    "\u2028\u2029"  # LINE SEPARATOR, PARAGRAPH SEPARATOR
+    "\u0085"  # NEXT LINE
+    "\u000b\u000c"  # VT, FF — inside C0, named because `splitlines()` breaks on them
+    "\u200b-\u200f"  # zero-width space/joiners, LTR/RTL marks
+    "\u202a-\u202e"  # bidi embedding and override
+    "\u2066-\u2069"  # bidi isolates
+    "\ufeff"  # zero-width no-break space
+    "]"
+)
 _RUNS_OF_SPACE: Final = re.compile(r"\s{2,}")
 
 
@@ -87,6 +99,21 @@ def sanitize(value: str, *, limit: int = 400) -> str:
 
     Control characters — newlines above all — are what turn a data field into document
     structure. The layout of a draft is not negotiable by whoever supplied its parameters.
+
+    **ASCII was not enough, and an adversarial review proved it with one codepoint.** The class
+    was ``[\\x00-\\x1f\\x7f-\\x9f]``, which misses U+2028 LINE SEPARATOR — and Python's own
+    ``str.splitlines()`` breaks on U+2028, as do browsers and most editors. Substituting it for a
+    newline in this repository's own document-forgery payload produced a draft that reads, to any
+    ordinary reader, as carrying a fabricated ``Legal basis: court_order`` line. The control and
+    the test that guarded it both assumed ASCII line structure.
+
+    Three families are now covered and each is here for a different reason. The line breakers
+    (U+2028/29/85, VT, FF) forge structure. The zero-width characters (U+200B to U+200F, and
+    U+FEFF) hide text inside a field that looks short. The bidi controls (U+202A to U+202E and
+    U+2066 to U+2069) reorder what a human reads without changing what a machine compares — a
+    document whose rendered
+    meaning differs from its bytes is the same defect as a ``str`` subclass whose ``__str__``
+    lies, which this codebase has already been bitten by twice.
     """
     flattened = _RUNS_OF_SPACE.sub(" ", _CONTROL_CHARACTERS.sub(" ", value)).strip()
     if len(flattened) > limit:
@@ -122,6 +149,61 @@ class Preflight(BaseModel):
     @property
     def may_act(self) -> bool:
         return self.refusal is None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _a_refusal_is_never_recorded_as_permitted(cls, data: Any) -> Any:
+        """A refused preflight cannot carry a decision that says the operation was permitted.
+
+        **This is the third time the same defect has been found here, and the first time it is
+        fixed structurally.** :func:`refusal_record` exists because two earlier reviews found a
+        refused operation written into the hash-chained trail as ``permitted: true`` with no
+        denial reasons. It was applied to four branches. An adversarial review of this plane
+        then found the other ten — every target-binding refusal, every stop-condition refusal,
+        the D1 disclosure refusal, the role-gate refusal — each passing the *genuine*
+        ``authorizes()`` verdict straight through. That verdict is ``permitted=True``, because
+        the grant really did permit the operation class; something else refused it.
+
+        Measured before the fix: a D1 disclosure refusal reached the trail as
+        ``permitted=True, denial_reasons=[]``, and ``verify()`` returned True over it. A
+        tamper-evident record of the wrong thing.
+
+        Patching branch eleven would have left branch twelve, so the invariant lives on the
+        type: whatever a caller passes, a ``Preflight`` carrying a refusal *cannot* hold a
+        permissive decision. The refusal's own detail becomes the denial reason, which is what
+        an investigator actually reads.
+
+        ``mode="before"`` and not ``"after"``, which is a real distinction rather than a style
+        choice: an ``after`` validator that returns a new object is **ignored** on the
+        ``__init__`` path — pydantic warns and keeps the original. The first version of this fix
+        did exactly that and the defect survived it, which is a reminder that a control has to be
+        observed working rather than reasoned to.
+
+        Derived rather than raised, deliberately. Raising here would turn a refusal — the normal,
+        correct outcome — into an exception on the path whose whole job is to record that a
+        refusal happened.
+        """
+        if not isinstance(data, dict):
+            return data
+        decision = data.get("decision")
+        if data.get("refusal") is None or not isinstance(decision, AuthorizationDecision):
+            return data
+        if not decision.permitted:
+            return data
+        refusal = data["refusal"]
+        # The refusal's own vocabulary value, never the detail prose. The first version used
+        # the detail and the briefing's fail-closed disclosure backstop caught it within one
+        # run: a D1 refusal's detail *names the internal markers it caught*, so echoing it into
+        # a structured field carried them into `Ruling.authorization`, onto the next briefing,
+        # and — for a hosted seat — to a vendor. A structured field holds a structured value;
+        # the prose stays in `detail`, which the mediator already redacts on that path.
+        reason = str(getattr(refusal, "value", refusal))
+        return {
+            **data,
+            "decision": decision.model_copy(
+                update={"permitted": False, "denial_reasons": (reason,)}
+            ),
+        }
 
 
 def refusal_record(
@@ -493,6 +575,21 @@ class EffectsRegistry:
                 "nothing it was wired with; an adapter that cannot name its authorizer "
                 "cannot refuse a capability from anyone else"
             )
+        if not isinstance(adapter, EffectsAdapter):
+            # `EffectsAdapter` is `runtime_checkable` and this check was simply never made, so
+            # an object with no `name` and no `execute` registered without complaint and the
+            # failure surfaced later — inside the crash handler that exists to *guarantee* a
+            # record, which then raised on `adapter.name`. A registry that accepts anything is a
+            # registry whose other guards run on objects that cannot satisfy them.
+            #
+            # Ordered after the anchor check deliberately: an adapter missing only its anchor
+            # fails both, and "declares no trust anchor" tells a wirer what to fix while "does
+            # not satisfy the protocol" tells them to go looking.
+            raise ValueError(
+                f"{type(adapter).__name__} does not satisfy the EffectsAdapter protocol; an "
+                "object that cannot execute an effect cannot be registered to perform one"
+            )
+
         # Key material, not a self-reported label. `key_id` is a property on the object
         # being registered, so comparing key ids let an adapter carrying a verifier that
         # merely *claimed* the right id — and accepted everything — pass this guard. keys.py
@@ -567,7 +664,13 @@ class EffectsRegistry:
                 operation=request.operation,
                 outcome=EffectOutcome.FAILED,
                 executed_at=utcnow(),
-                adapter_name=adapter.name,
+                # `getattr`, not `adapter.name`. This handler exists so one uncaught adapter
+                # bug cannot become an effect nobody recorded — and it consulted the object it
+                # was handling the failure of, so an adapter with no `name` made the handler
+                # itself raise. Same defect class as the version that called `authorizes()` on
+                # the capability that had just crashed, reintroduced through a different
+                # attribute.
+                adapter_name=str(getattr(adapter, "name", REGISTRY_NAME))[:120],
                 # Built locally. This handler exists so that one uncaught adapter bug
                 # cannot become an effect whose outcome nobody recorded — and it used to
                 # call `authorizes()` on the same untrusted object that had just caused the
@@ -624,13 +727,26 @@ class EffectsRegistry:
 
 
 def default_registry(
-    *, verifying_key: CapabilityVerifier, revocations: RevocationOracle
+    *,
+    verifying_key: CapabilityVerifier,
+    revocations: RevocationOracle,
+    draft_root: Path | None = None,
 ) -> EffectsRegistry:
     """The registry the platform wires up: every implemented class, nothing else.
 
-    Both arguments are required. There is no way to obtain a registry that will act without
-    a key to verify against and an oracle to ask, because the version that could was the
-    version that drafted a document from a capability nobody had signed.
+    ``verifying_key`` and ``revocations`` are required. There is no way to obtain a registry
+    that will act without a key to verify against and an oracle to ask, because the version
+    that could was the version that drafted a document from a capability nobody had signed.
+
+    ``draft_root`` defaults to ``None``, which means **no adapter here writes to disk** — a
+    draft comes back in the result and nothing touches the filesystem. That is the safe default
+    and it is also the honest one: an adversarial review drove a hijacked pilot through a real
+    mediator and had a NEMESIS-branded document written to a directory the *pilot* named,
+    because the ``output_directory`` parameter was passed to ``Path()`` unconstrained. The
+    filename had been hardened against traversal; the parameter choosing the directory had not.
+
+    A deployment that wants drafts on disk supplies the root, and a request may then choose a
+    subdirectory of it and nothing else.
     """
     # Imported inside the function so the adapter modules can depend on the guards above
     # without the two importing each other. The dependency runs adapters -> registry.
@@ -644,7 +760,7 @@ def default_registry(
     anchor = TrustAnchor(verifying_key=verifying_key, revocations=revocations)
     registry = EffectsRegistry(verifying_key=verifying_key, revocations=revocations)
     registry.register(SimulationEffectsAdapter(anchor))
-    registry.register(ProviderNotificationAdapter(anchor))
-    registry.register(TakedownRequestDraftAdapter(anchor))
-    registry.register(EvidenceExportAdapter(anchor))
+    registry.register(ProviderNotificationAdapter(anchor, draft_root=draft_root))
+    registry.register(TakedownRequestDraftAdapter(anchor, draft_root=draft_root))
+    registry.register(EvidenceExportAdapter(anchor, draft_root=draft_root))
     return registry

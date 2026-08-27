@@ -51,6 +51,23 @@ ANCHORS = "anchors.jsonl"
 ARTIFACTS = "artifacts"
 
 GENESIS = "0" * 64
+NOTICE = "README.txt"
+VERIFIER = "verify.py"
+
+SEALED_FILES = {
+    MANIFEST: "manifest_sha256",
+    LOG: "log_sha256",
+    ANCHORS: "anchors_sha256",
+    VERIFIER: "verify_sha256",
+}
+"""Which seal key covers which file. Must match `export.SEALED_FILES`; a test asserts it does.
+
+Duplicated rather than imported because this file ships inside the bundle and runs on the
+recipient's interpreter with no `nemesis` package available. The duplication is the price of
+that, and the test is what keeps the two from drifting — which is exactly what happened when the
+key was derived from the filename instead of written down.
+"""
+
 SEAL_ENTRY = "seal"
 MAX_ARTIFACT_BYTES = 512 * 1024 * 1024
 CHUNK = 1024 * 1024
@@ -123,9 +140,17 @@ def artifact_path(bundle: Path, evidence_id: str) -> Path | None:
     """
     if not evidence_id or "/" in evidence_id or "\\" in evidence_id or evidence_id in (".", ".."):
         return None
-    candidate = bundle / ARTIFACTS / evidence_id
-    root = (bundle / ARTIFACTS).resolve()
+    directory = bundle / ARTIFACTS
+    # The root is resolved from the BUNDLE, not through the directory. Resolving
+    # `(bundle / ARTIFACTS)` moved the root along with a symlinked `artifacts/`, so the
+    # confinement check compared a path against itself and passed. An adversarial review shipped
+    # a package whose `artifacts/` pointed at a directory on the recipient's machine and had this
+    # program hash and name the files in it.
+    if directory.is_symlink():
+        return None
     try:
+        root = bundle.resolve() / ARTIFACTS
+        candidate = directory / evidence_id
         resolved = candidate.resolve()
     except OSError:
         return None
@@ -276,18 +301,47 @@ def verify(bundle: Path) -> tuple[bool, list[str]]:
 
     # 4. Both directions. A package can be gutted by *removing* things, and a check that only
     #    walks the manifest cannot see what is no longer in it.
-    withheld = manifest.get("withheld_restricted", 0)
-    withheld = withheld if isinstance(withheld, int) and withheld >= 0 else 0
-    if len(sealed) != len(seen) + withheld:
+    #
+    #    **The manifest's own number must not balance the log's equation.** This used to read
+    #    `len(sealed) != len(seen) + withheld`, where `withheld` is a *manifest* field — the
+    #    attacker's own copy. An adversarial review popped one entry, deleted its artifact and
+    #    incremented `withheld_restricted` by one: `verify()` returned True with zero findings,
+    #    and the program printed "nothing was added or removed" about a package one exhibit
+    #    short. That breaks this module's own stated rule — the log is the authority inside a
+    #    package and the manifest is an index.
+    #
+    #    The log cannot distinguish withheld from deleted, so it is no longer asked to. A
+    #    shortfall is reported as a shortfall, and the withholding claim is reported as
+    #    something this program cannot check. A recipient who needs it checked compares the
+    #    object count against the one in the notice they were given out of band.
+    shortfall = len(sealed) - len(seen)
+    if shortfall > 0:
+        withheld = manifest.get("withheld_restricted", 0)
+        withheld = withheld if isinstance(withheld, int) and withheld >= 0 else 0
         findings.append(
-            "the log seals {} object(s); the manifest accounts for {} ({} listed, {} declared "
-            "withheld). Objects were removed from this package after it was written.".format(
-                len(sealed), len(seen) + withheld, len(seen), withheld
-            )
+            "the log seals {} object(s) and {} are present. The manifest says {} were withheld "
+            "as restricted, and THIS PROGRAM CANNOT CHECK THAT: the count is a manifest field, "
+            "so a package with objects removed in transit looks identical to one with objects "
+            "lawfully withheld. Confirm the number with the sender through a channel that is "
+            "not this package.".format(len(sealed), len(seen), withheld)
+        )
+    elif shortfall < 0:
+        findings.append(
+            "the package holds {} object(s) the log does not seal; it was added to after it "
+            "was written.".format(-shortfall)
         )
 
     directory = bundle / ARTIFACTS
-    if directory.is_dir():
+    if directory.is_symlink():
+        # Reported without listing what is behind it. The stray-file walk leaked a full
+        # directory listing off the recipient's machine with no log or manifest forgery at all —
+        # it iterated the symlinked directory unconditionally. A refusal must not carry the
+        # measurement it refused to make.
+        findings.append(
+            "{} is a symbolic link, not a directory. This package will not be read: a link "
+            "here points this program at files that are not part of it.".format(ARTIFACTS)
+        )
+    elif directory.is_dir():
         for path in sorted(directory.iterdir()):
             if path.name not in seen:
                 findings.append(
@@ -339,20 +393,46 @@ def check_seal(bundle: Path) -> tuple[str, str, list[str]]:
     payload = canonical(covered)
     digest = hashlib.sha256(payload).hexdigest()
 
-    for name, actual in (
-        (MANIFEST, hashlib.sha256((bundle / MANIFEST).read_bytes()).hexdigest()),
-        (LOG, hashlib.sha256((bundle / LOG).read_bytes()).hexdigest()),
-    ):
-        claimed = covered.get(name.split(".")[0].replace("-", "_") + "_sha256")
-        if claimed is not None and claimed != actual:
+    # An explicit map, not a name derived from a filename. The derivation
+    # (`name.split(".")[0].replace("-", "_")`) turned "vault-log.jsonl" into "vault_log_sha256",
+    # a key the sealer never wrote, so `claimed` was None and the log's check was dead code —
+    # measured: a signed package whose log was replaced wholesale still returned VERIFIED.
+    # `verify.py` was not checked at all, which meant a recipient could be running an
+    # attacker's verifier under a genuine seal.
+    for name, seal_key in sorted(SEALED_FILES.items()):
+        path = bundle / name
+        if not path.is_file():
+            findings.append("{} is missing, so the seal cannot cover it".format(name))
+            mismatched = True
+            continue
+        claimed = covered.get(seal_key)
+        if claimed is None:
+            findings.append(
+                "the seal carries no {} digest, so {} is not covered by it".format(seal_key, name)
+            )
+            mismatched = True
+        elif claimed != hashlib.sha256(path.read_bytes()).hexdigest():
             findings.append(
                 "{} does not match the digest this package was sealed with".format(name)
             )
             mismatched = True
 
-    if mismatched:
-        return digest, "FAILED", findings
+    # The notice quotes the seal digest, so it cannot be inside the seal. Binding it the other
+    # way round costs nothing and catches a notice detached from its package.
+    notice = bundle / NOTICE
+    if notice.is_file() and digest not in notice.read_text(encoding="utf-8", errors="replace"):
+        findings.append(
+            "{} does not quote this package's seal digest; the notice belongs to a different "
+            "package or was rewritten".format(NOTICE)
+        )
+        mismatched = True
 
+    # Deliberately NOT an early return. The first version short-circuited here, and an existing
+    # test caught what that cost: mutating `seal.json` moves the computed digest, the notice no
+    # longer quotes it, and the recipient was told "the notice does not quote this digest" while
+    # never being told the far stronger fact that **the signature does not verify**. A verifier
+    # must report the strongest true statement, not the first one it reaches, so the content
+    # findings are kept and the signature is evaluated regardless.
     signature = envelope.get("signature")
     if not signature:
         findings.append(
@@ -360,7 +440,7 @@ def check_seal(bundle: Path) -> tuple[str, str, list[str]]:
             "opposing party, anyone it passed through — not only the party that produced it. "
             "The seal digest above is still worth comparing out of band; it is all there is."
         )
-        return digest, "ABSENT", findings
+        return digest, "FAILED" if mismatched else "ABSENT", findings
 
     try:
         from cryptography.exceptions import InvalidSignature
@@ -368,7 +448,7 @@ def check_seal(bundle: Path) -> tuple[str, str, list[str]]:
     except ImportError:
         return (
             digest,
-            "NOT CHECKED (no `cryptography` on this machine)",
+            "FAILED" if mismatched else "NOT CHECKED (no `cryptography` on this machine)",
             findings,
         )
 
@@ -388,10 +468,28 @@ def check_seal(bundle: Path) -> tuple[str, str, list[str]]:
             "signed, or was signed by a different key".format(type(exc).__name__)
         )
         return digest, "FAILED", findings
-    return digest, "VERIFIED", findings
+    return digest, "FAILED" if mismatched else "VERIFIED", findings
 
 
 def anchor_note(bundle: Path) -> str:
+    """See :func:`_anchor_note`. Wrapped so a damaged file cannot follow a verdict with a stack.
+
+    ``anchor_note`` is called after the verdict lines are printed and, until an adversarial
+    review pointed it out, outside ``main``'s handler: making ``anchors.jsonl`` a *directory*
+    printed ``INTERNALLY CONSISTENT: YES`` and then an ``IsADirectoryError`` traceback. The exit
+    status was still 1, so automation failed closed — but a human saw the outcome line this
+    program exists to make unambiguous, and grep-based automation keying on that line accepted.
+    """
+    try:
+        return _anchor_note(bundle)
+    except OSError as exc:
+        return (
+            "anchors.jsonl could not be read ({}), so nothing here says whether this package "
+            "was anchored at all.".format(type(exc).__name__)
+        )
+
+
+def _anchor_note(bundle: Path) -> str:
     """What the anchors in a package are worth, which is never more than a pointer.
 
     An anchor carried inside a package cannot establish its own independence: the file is as
