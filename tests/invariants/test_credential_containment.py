@@ -171,14 +171,21 @@ def test_the_fingerprint_is_keyed_so_it_is_not_a_password_oracle() -> None:
         fingerprint(LEAKED, key=b"x" * (MIN_FINGERPRINT_KEY_BYTES - 1))
 
 
+# Every literal below is a fixture and none of them opens anything: the AWS-shaped one is that
+# vendor's own documentation placeholder, and the rest are typed here. They are shaped exactly
+# like the thing under test on purpose — a credential test whose fixture is not
+# credential-shaped tests the fixture — so each is declared to the secret scanner rather than
+# excluded from it.
+# NEMESIS-SYNTHETIC-CREDENTIAL
 @pytest.mark.parametrize(
     "text",
     [
-        "AKIAIOSFODNN7EXAMPLE",
+        "AKIAIOSFODNN7EXAMPLE",  # NEMESIS-SYNTHETIC-CREDENTIAL
         "ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "Authorization: Bearer abcdefghijklmnopqrstuvwxyz0123456789",
         "password = correcthorsebattery",
         "postgres://user:hunter2@db.internal/prod",
+        # NEMESIS-SYNTHETIC-CREDENTIAL
         "-----BEGIN OPENSSH PRIVATE KEY-----\nabcdef\n-----END OPENSSH PRIVATE KEY-----",
     ],
 )
@@ -192,7 +199,12 @@ def test_the_backstop_redacts_credential_shaped_text(text: str) -> None:
     assert credential_shapes(text)
     redacted = redact_credential_material(text)
     assert "[redacted-credential]" in redacted
-    for secret in ("AKIAIOSFODNN7EXAMPLE", "correcthorsebattery", "hunter2"):
+    # NEMESIS-SYNTHETIC-CREDENTIAL
+    for secret in (
+        "AKIAIOSFODNN7EXAMPLE",
+        "correcthorsebattery",
+        "hunter2",
+    ):  # NEMESIS-SYNTHETIC-CREDENTIAL
         if secret in text:
             assert secret not in redacted
 

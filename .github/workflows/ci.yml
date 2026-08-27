@@ -81,6 +81,13 @@ jobs:
       - name: Documented counts match the repository
         run: uv run python scripts/check_documented_counts.py
 
+      # The offline adversary. It is not a gate on the invariants — its catalogue is mutable and
+      # a gate anyone can turn green by editing an attack is not a gate; every finding becomes an
+      # invariant test before it counts. What running it here buys is that the harness itself
+      # keeps working, so it is available on the day somebody needs to write an attack.
+      - name: The Breaker still runs and still finds nothing
+        run: uv run nemesis breaker
+
   # Ubuntu can only watch this project *refuse* to confine anything: the one kernel-level
   # enforcement it has is macOS `sandbox-exec`, so on Linux every confinement test skips and
   # the suite still goes green. Twelve tests across three modules were never executed by CI.
