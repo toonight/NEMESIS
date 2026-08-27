@@ -313,3 +313,90 @@ async def test_a_session_that_never_concludes_records_an_empty_summary_not_a_mis
     ]
     assert closes
     assert "summary" in closes[0].inputs
+
+
+# --- every refusal, not the four that were fixed ------------------------------------------
+
+
+def test_no_refusal_can_be_recorded_as_permitted() -> None:
+    """The invariant on the type, so it cannot be forgotten on branch eleven.
+
+    `refusal_record()` exists because two earlier reviews found a refused operation written into
+    the hash-chained trail as `permitted: true` with no denial reasons. It was applied to four
+    branches. An adversarial review of this plane then found the other ten — every
+    target-binding refusal, every stop-condition refusal, the D1 disclosure refusal, the
+    role-gate refusal — each passing the *genuine* `authorizes()` verdict straight through. That
+    verdict is `permitted=True`, because the grant really did permit the operation class;
+    something else refused it.
+
+    Asserted against `Preflight` directly, with a deliberately permissive decision, so it covers
+    every branch that exists now and every branch added later. A test that enumerated the ten
+    would be a test that missed the eleventh, which is how this defect reached its third review.
+    """
+    from nemesis.core.authorization import AuthorizationDecision, OperationClass
+    from nemesis.core.temporal import utcnow
+    from nemesis.effects.registry import Preflight
+    from nemesis.ports.effects import EffectOutcome
+
+    permitted = AuthorizationDecision(
+        permitted=True,
+        capability_id=new_id(IdPrefix.CAPABILITY),
+        operation=OperationClass.SIMULATION,
+        target_fingerprint="sha256:" + "0" * 64,
+        evaluated_at=utcnow(),
+        denial_reasons=(),
+    )
+    refusals = [outcome for outcome in EffectOutcome if outcome.value.startswith("refused")]
+    assert len(refusals) >= 6, "the refusal vocabulary shrank; check this still covers it"
+
+    for outcome in refusals:
+        flight = Preflight(decision=permitted, refusal=outcome, detail="because")
+        assert flight.may_act is False
+        assert flight.decision.permitted is False, (
+            f"a Preflight refusing {outcome.value} still records permitted=True; a refusal "
+            "written into the hash-chained trail as an authorization is a tamper-evident "
+            "record of the wrong thing"
+        )
+        assert flight.decision.denial_reasons == (outcome.value,)
+
+    # And the permitted case is untouched — a control that refused everything would be an
+    # outage, not a control.
+    clean = Preflight(decision=permitted)
+    assert clean.may_act is True
+    assert clean.decision.permitted is True
+
+
+def test_a_denial_reason_carries_a_vocabulary_value_and_never_the_detail_prose() -> None:
+    """The first version of the fix used the refusal's detail, and leaked within one run.
+
+    A D1 disclosure refusal's detail *names the internal markers it caught*. Putting it into a
+    structured field carried those markers into `Ruling.authorization`, onto the next briefing,
+    and — for a hosted seat — to a model vendor. The briefing's fail-closed backstop caught it,
+    which is the backstop working; the lesson is that a structured field holds a structured
+    value and the prose stays in `detail`, which the mediator already redacts on that path.
+    """
+    from nemesis.core.authorization import AuthorizationDecision, OperationClass
+    from nemesis.core.disclosure import INTERNAL_MARKERS, scan_for_internal_material
+    from nemesis.core.temporal import utcnow
+    from nemesis.effects.registry import Preflight
+    from nemesis.ports.effects import EffectOutcome
+
+    permitted = AuthorizationDecision(
+        permitted=True,
+        capability_id=new_id(IdPrefix.CAPABILITY),
+        operation=OperationClass.SIMULATION,
+        target_fingerprint="sha256:" + "0" * 64,
+        evaluated_at=utcnow(),
+        denial_reasons=(),
+    )
+    detail = f"refused: the request carries {INTERNAL_MARKERS[0]} and {INTERNAL_MARKERS[2]}"
+    flight = Preflight(
+        decision=permitted, refusal=EffectOutcome.REFUSED_UNAUTHORIZED, detail=detail
+    )
+    leaked = scan_for_internal_material(
+        {f"reason-{i}": reason for i, reason in enumerate(flight.decision.denial_reasons)}
+    )
+    assert leaked == (), (
+        f"the denial reason carries internal markers: {flight.decision.denial_reasons}"
+    )
+    assert flight.detail == detail, "the prose was lost; it belongs in the audit record"

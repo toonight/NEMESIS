@@ -25,7 +25,7 @@ guarantee, and it is the only one that sees a bare literal inside a function bod
 field default, or a two-line logic change that touches no constant at all. `engine_drifted()`
 names the modules that moved.
 
-**Every module-level constant**, by normalised syntax, in `CONSTANT_DIGESTS` — 763 of them,
+**Every module-level constant**, by normalised syntax, in `CONSTANT_DIGESTS` — 767 of them,
 with no classification whatsoever. A dial does not have to hold a digit and does not have to
 look like a table; four rules for deciding what counted were tried and all four excluded
 something load-bearing. `constants_drifted()` names what moved, appeared or vanished.
@@ -135,7 +135,7 @@ CALIBRATION_CONSTANTS: Final[tuple[str, ...]] = (
 """The curated epistemic subset, named as ``module:NAME`` and frozen by **imported value**.
 
 Not "every number": most of what decides a published figure here is not a number at all — of the
-763 dials `discovered_constants()` covers, 532 hold no numeric literal. And not the completeness
+767 dials `discovered_constants()` covers, 536 hold no numeric literal. And not the completeness
 guarantee either, which is the job of the two syntactic digests; this list is deliberately
 curated, so it is allowed to be incomplete in a way they are not.
 
@@ -663,6 +663,7 @@ CONSTANT_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis.evidence.export:NOTICE": "554e7b7378a2510b",
         "nemesis.evidence.export:NOTICE_FILE": "3e319feec63d3b91",
         "nemesis.evidence.export:NO_EXTERNAL_ANCHOR": "20bbc1bac39a522f",
+        "nemesis.evidence.export:SEALED_FILES": "189e1083148bbf80",
         "nemesis.evidence.export:SEAL_FILE": "6700b521975e1e77",
         "nemesis.evidence.export:SIGNED_SEAL": "5e85d41c2734fd55",
         "nemesis.evidence.export:UNSIGNED_SEAL": "5b2fff43ed0e15b5",
@@ -676,8 +677,11 @@ CONSTANT_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis.evidence.standalone_verifier:LOG": "3f1990744f9aabf5",
         "nemesis.evidence.standalone_verifier:MANIFEST": "35a86df7233eb954",
         "nemesis.evidence.standalone_verifier:MAX_ARTIFACT_BYTES": "50078e4fe8a0a95d",
+        "nemesis.evidence.standalone_verifier:NOTICE": "e105a44f9a993b45",
         "nemesis.evidence.standalone_verifier:SEAL": "abb612a4407733b1",
+        "nemesis.evidence.standalone_verifier:SEALED_FILES": "0a443d93f6bbd663",
         "nemesis.evidence.standalone_verifier:SEAL_ENTRY": "396c93a79e41a307",
+        "nemesis.evidence.standalone_verifier:VERIFIER": "69881d9dfcbf04fe",
         "nemesis.evidence.vault:GENESIS_HASH": "5331b8352e875673",
         "nemesis.evidence.vault:_ARTIFACT_MODE": "18489d94c4c2fbcc",
         "nemesis.evidence.vault:_EVIDENCE_ID_RE": "fc179ed3159da6e7",
@@ -1071,7 +1075,7 @@ def discovered_constants(tree: Path | None = None) -> dict[str, str]:
     `EXCLUDED_CONCLUSIONS`, four security tables made of plain strings. The module digest covered
     them, so it was never a bypass; the claim that every dial was *named* was simply false.
 
-    So there is no rule now. Every module-level upper-case assignment is a dial, 763 of them,
+    So there is no rule now. Every module-level upper-case assignment is a dial, 767 of them,
     and the cost of including the genuine prose is nothing: rewording a message already moves
     that module's syntax digest, so no new failure mode is introduced by naming it too.
 
@@ -1287,15 +1291,15 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/effects/__init__.py": "ad2e13b69c4fc1fd",
         "nemesis/effects/drafting.py": "a0e70263193ec6f2",
         "nemesis/effects/isolation.py": "05b3040ca9723d6f",
-        "nemesis/effects/registry.py": "25fd9b721bde237e",
+        "nemesis/effects/registry.py": "f897e6819b6a9aff",
         "nemesis/effects/simulation.py": "c31e9f1a36b3083e",
         "nemesis/effects/worker.py": "9bf46689e661b835",
         "nemesis/evidence/__init__.py": "ad2e13b69c4fc1fd",
         "nemesis/evidence/anchoring.py": "8b974a38aea73244",
         "nemesis/evidence/escalation.py": "a577b5bd2f866902",
-        "nemesis/evidence/export.py": "726b9261d59a3875",
+        "nemesis/evidence/export.py": "e5fda643d253682c",
         "nemesis/evidence/lineage.py": "fa84c77e043f97a4",
-        "nemesis/evidence/standalone_verifier.py": "0cf95fadd64c06fe",
+        "nemesis/evidence/standalone_verifier.py": "4d53ea09d2d94424",
         "nemesis/evidence/vault.py": "a5ffab61b1e01ef1",
         "nemesis/evolution/__init__.py": "ad2e13b69c4fc1fd",
         "nemesis/evolution/controller.py": "c642efbbe2d030be",

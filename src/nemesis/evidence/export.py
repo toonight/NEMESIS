@@ -193,23 +193,67 @@ class SealedExport:
         )
 
 
+SEALED_FILES: Final[dict[str, str]] = {
+    MANIFEST_FILE: "manifest_sha256",
+    LOG_FILE: "log_sha256",
+    ANCHORS_FILE: "anchors_sha256",
+    VERIFIER_FILE: "verify_sha256",
+}
+"""Which file each digest in the seal covers, as an explicit map.
+
+**The map is the fix.** The verifier used to derive the key from the filename —
+``name.split(".")[0].replace("-", "_") + "_sha256"`` — which turns ``vault-log.jsonl`` into
+``vault_log_sha256``, a key ``_seal_document`` never wrote. The lookup returned ``None``, the
+comparison was skipped, and the log's digest check was dead code. Only ``manifest.json``
+happened to round-trip.
+
+Measured before the fix: in a **signed** package, replacing `vault-log.jsonl` wholesale,
+rewriting `README.txt`, deleting an exhibit and substituting an eleven-line `verify.py` that
+prints a clean verdict left the seal digest byte-identical and the genuine ``check_seal()``
+returning ``VERIFIED`` with no findings.
+
+The worst omission was not a mis-keying at all: ``verify.py`` was absent from the document
+entirely — **the program the notice instructs the recipient to run.** A seal that does not cover
+the verifier is a seal a recipient checks with a program the seal does not vouch for.
+
+``README.txt`` is deliberately **not** here, and the reason is structural rather than an
+oversight: the notice quotes the seal digest, so sealing it would require the digest of a
+document containing that digest. It is bound the non-circular way instead — the verifier checks
+that the digest the notice *quotes* is the digest it *computes*, so a notice detached from its
+package is caught even though its prose is not covered.
+
+A dict rather than string-munging, because a name derived from another name is a name that can
+be derived wrongly, and this one was for a year.
+"""
+
+
 def _seal_document(
-    *, vault_head: str, manifest: bytes, log: bytes, anchors: bytes, artifacts: int
+    *,
+    vault_head: str,
+    manifest: bytes,
+    log: bytes,
+    anchors: bytes,
+    verifier: bytes,
+    artifacts: int,
 ) -> dict[str, object]:
     """What a signature over this package covers, and what a recipient can read aloud.
 
-    Digests of the three files plus the head and the object count, so one 64-character
-    string stands for the whole package. That string is the practical control: a recipient
-    who obtains it from us through a channel that is not the package — a phone call, a
-    letterhead, a signed email — can compare it without any cryptography at all.
+    Digests of every file in the package plus the head and the object count, so one
+    64-character string stands for the whole package. That string is the practical control: a
+    recipient who obtains it from us through a channel that is not the package — a phone call,
+    a letterhead, a signed email — can compare it without any cryptography at all.
+
+    "Every file" is load-bearing and was not true until an adversarial review measured it. See
+    :data:`SEALED_FILES`.
     """
     return {
-        "version": 1,
+        "version": 2,
         "vault_head": vault_head,
         "artifact_count": artifacts,
         "manifest_sha256": hashlib.sha256(manifest).hexdigest(),
         "log_sha256": hashlib.sha256(log).hexdigest(),
         "anchors_sha256": hashlib.sha256(anchors).hexdigest(),
+        "verify_sha256": hashlib.sha256(verifier).hexdigest(),
     }
 
 
@@ -301,6 +345,7 @@ async def write_sealed_export(
         manifest=(staging / MANIFEST_FILE).read_bytes(),
         log=(staging / LOG_FILE).read_bytes(),
         anchors=(staging / ANCHORS_FILE).read_bytes(),
+        verifier=(staging / VERIFIER_FILE).read_bytes(),
         artifacts=exported,
     )
     seal_bytes = canonical_bytes(seal)

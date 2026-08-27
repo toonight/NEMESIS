@@ -26,9 +26,9 @@ from __future__ import annotations
 import hmac
 import re
 from datetime import datetime
-from typing import Final
+from typing import Any, Final
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from nemesis.authz.verification import verify_capability
 from nemesis.core.authorization import (
@@ -122,6 +122,61 @@ class Preflight(BaseModel):
     @property
     def may_act(self) -> bool:
         return self.refusal is None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _a_refusal_is_never_recorded_as_permitted(cls, data: Any) -> Any:
+        """A refused preflight cannot carry a decision that says the operation was permitted.
+
+        **This is the third time the same defect has been found here, and the first time it is
+        fixed structurally.** :func:`refusal_record` exists because two earlier reviews found a
+        refused operation written into the hash-chained trail as ``permitted: true`` with no
+        denial reasons. It was applied to four branches. An adversarial review of this plane
+        then found the other ten — every target-binding refusal, every stop-condition refusal,
+        the D1 disclosure refusal, the role-gate refusal — each passing the *genuine*
+        ``authorizes()`` verdict straight through. That verdict is ``permitted=True``, because
+        the grant really did permit the operation class; something else refused it.
+
+        Measured before the fix: a D1 disclosure refusal reached the trail as
+        ``permitted=True, denial_reasons=[]``, and ``verify()`` returned True over it. A
+        tamper-evident record of the wrong thing.
+
+        Patching branch eleven would have left branch twelve, so the invariant lives on the
+        type: whatever a caller passes, a ``Preflight`` carrying a refusal *cannot* hold a
+        permissive decision. The refusal's own detail becomes the denial reason, which is what
+        an investigator actually reads.
+
+        ``mode="before"`` and not ``"after"``, which is a real distinction rather than a style
+        choice: an ``after`` validator that returns a new object is **ignored** on the
+        ``__init__`` path — pydantic warns and keeps the original. The first version of this fix
+        did exactly that and the defect survived it, which is a reminder that a control has to be
+        observed working rather than reasoned to.
+
+        Derived rather than raised, deliberately. Raising here would turn a refusal — the normal,
+        correct outcome — into an exception on the path whose whole job is to record that a
+        refusal happened.
+        """
+        if not isinstance(data, dict):
+            return data
+        decision = data.get("decision")
+        if data.get("refusal") is None or not isinstance(decision, AuthorizationDecision):
+            return data
+        if not decision.permitted:
+            return data
+        refusal = data["refusal"]
+        # The refusal's own vocabulary value, never the detail prose. The first version used
+        # the detail and the briefing's fail-closed disclosure backstop caught it within one
+        # run: a D1 refusal's detail *names the internal markers it caught*, so echoing it into
+        # a structured field carried them into `Ruling.authorization`, onto the next briefing,
+        # and — for a hosted seat — to a vendor. A structured field holds a structured value;
+        # the prose stays in `detail`, which the mediator already redacts on that path.
+        reason = str(getattr(refusal, "value", refusal))
+        return {
+            **data,
+            "decision": decision.model_copy(
+                update={"permitted": False, "denial_reasons": (reason,)}
+            ),
+        }
 
 
 def refusal_record(
