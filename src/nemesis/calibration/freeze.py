@@ -1295,7 +1295,7 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/effects/__init__.py": "ad2e13b69c4fc1fd",
         "nemesis/effects/drafting.py": "18c313df2e27a363",
         "nemesis/effects/isolation.py": "05b3040ca9723d6f",
-        "nemesis/effects/registry.py": "86e0a6dedd1252bc",
+        "nemesis/effects/registry.py": "a6107b97be3a72c5",
         "nemesis/effects/simulation.py": "c31e9f1a36b3083e",
         "nemesis/effects/worker.py": "9bf46689e661b835",
         "nemesis/evidence/__init__.py": "ad2e13b69c4fc1fd",
