@@ -166,7 +166,17 @@ the verdict so "anchored" cannot be read as the tier above.
 | ID | Property | Status | Enforced by | Tested by |
 |---|---|---|---|---|
 | **PROBE-01** | A reach for a reserved capability identifier is recorded, and sustained probing halts the session. | `IMPLEMENTED` | `nemesis.core.canaries`: ten identifiers nothing legitimate emits, matched on a normalised whole token in pilot-authored identifier fields. A hit writes a `security.control_boundary_probe` audit event; three distinct tokens end the session. | `test_control_boundary_canaries.py`; Breaker `capability-probe` |
-| **PROBE-02** | The canary cannot be fired by an adversary. | `IMPLEMENTED` | Identifier fields only — never a rationale, a summary, a belief's natural language, a parameter *value*, or anything else an adversary can write. A control an adversary can trigger is a denial of service handed to them. | `test_control_boundary_canaries.py` |
+| **PROBE-02** | The canary cannot be fired by what an adversary *writes*. | `IMPLEMENTED` | Identifier fields only — never a rationale, a summary, a belief's natural language, a parameter *value*, or anything else an adversary can write. A control an adversary can trigger is a denial of service handed to them. | `test_control_boundary_canaries.py` |
+
+**PROBE-02 is stated as "what an adversary writes" rather than "by an adversary", and the
+distinction is the control.** An adversary who successfully injects the pilot *can* have it put a
+reserved token into a parameter key, and sustained probing then ends the session. That is a
+different shape from the one refused, and it is arguably the right outcome:
+
+| Shape | Cost to the adversary | Effect | Verdict |
+|---|---|---|---|
+| Token in a collected page, matched in prose | One forum post | Halts **every** session that reads it, no model cooperation needed | Refused by design — a weapon handed to them |
+| Token in a field the *model* chose | Must get the model to obey, three distinct times | Halts one session, and flags it for human review | Accepted — a session where a model acted on instructions from collected content is one somebody should read |
 
 **What PROBE-01 does not catch, stated so nobody over-reads it.** A careful adversary will not
 say the words. This finds the copy-pasteable probe, the injected payload that names a control,

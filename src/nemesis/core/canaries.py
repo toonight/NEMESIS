@@ -36,6 +36,24 @@ words, and it is not a containment control: nothing here permits or refuses anyt
 The containment is the four verbs, the envelope and the disclosure wall. This is instrumentation
 placed at the boundary those controls defend, and it is honest about being second.
 
+**And it is reachable by an adversary indirectly, which is a different thing from the denial of
+service above and is worth separating carefully.** An adversary who successfully injects the
+pilot can have it write a reserved token into a parameter key, and a sustained run of that ends
+the session. That is not the failure mode this module is shaped against, and it is arguably the
+correct outcome:
+
+* The rejected shape is *no cooperation required*: a token in a forum post halts every
+  investigation that **reads** the page. One adversary, one post, every session that collects it.
+* The remaining shape requires the pilot to **obey**: the adversary must get a model to name
+  three distinct capabilities that do not exist, in fields the model chooses. A pilot doing that
+  is a pilot acting on instructions from collected content — and a session where that has
+  happened is one a human should read before anything in it is acted on, which is exactly what
+  the halt produces.
+
+The bar between the two is the whole value. A control that fires on what an adversary *writes*
+is a weapon handed to them; a control that fires on what a model *does after reading it* is a
+detector doing its job.
+
 Status: `IMPLEMENTED`. See `docs/security/INVARIANTS.md` (PROBE-01).
 """
 

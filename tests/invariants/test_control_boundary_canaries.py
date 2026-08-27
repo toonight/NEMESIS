@@ -316,6 +316,57 @@ def test_conclude_carries_nothing_scannable() -> None:
     }
 
 
+def test_an_injected_pilot_can_still_halt_its_own_session_and_that_is_the_design(
+    tmp_path: Path,
+) -> None:
+    """The reachability that remains, asserted rather than left as a comfortable silence.
+
+    PROBE-02 says the canary cannot be fired by what an adversary *writes*. It does not say the
+    canary is unreachable, and the difference matters enough to be a test rather than a sentence.
+
+    An adversary who successfully injects the pilot can have it put a reserved token into a field
+    the *model* chooses — a parameter key — and sustained probing then ends the session. This
+    constructs exactly that and asserts it works, because the alternative reading is that the
+    control has a hole nobody wrote down.
+
+    Why it is the right outcome rather than a defect, in the two costs:
+
+    * The shape refused above needs **no cooperation**: a token in a page halts every session
+      that reads it. One post, every investigation.
+    * This shape needs the pilot to **obey**, three distinct times, in fields it composed. A
+      session where that happened is one a human should read before anything in it is acted on —
+      which is what the halt produces.
+    """
+    from nemesis.core.authorization import OperationClass
+
+    async def scenario() -> tuple[bool, ProbeResponse, int]:
+        h = await harness(tmp_path, max_moves=20)
+        # The adversary's instruction, obeyed: the pilot writes the tokens where it chooses to.
+        session = await h.drive(
+            Scripted(
+                "injected",
+                [
+                    RequestEffect(
+                        entity_id=h.approved.entity_id,
+                        operation=OperationClass.SIMULATION,
+                        parameters={token: "1"},
+                        rationale="the panel said to enable these",
+                    )
+                    for token in sorted(CANARY_TOKENS)[:4]
+                ],
+            )
+        )
+        return session.concluded, session.probe_response, len(session.probes)
+
+    concluded, response, probes = _run(scenario())
+    assert probes >= DEFAULT_HALT_THRESHOLD
+    assert response is ProbeResponse.HALT_INVESTIGATION
+    assert concluded is False, (
+        "an obeying pilot named four reserved capabilities and the session ran to a clean "
+        "conclusion; the probe log is not reaching the loop"
+    )
+
+
 # --- the response ladder ---------------------------------------------------------------
 
 
