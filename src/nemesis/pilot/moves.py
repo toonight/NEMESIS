@@ -373,6 +373,82 @@ class RequestEffect(BaseModel):
     rationale: str = ""
 
 
+class ConclusionOutcome(StrEnum):
+    """How an investigation ended, from a closed vocabulary that makes giving up a first-class
+    answer.
+
+    **Why this exists.** The OpenAI Hugging Face incident (August 2026) showed autonomous agents
+    treating an impossible or underspecified task as a reason to keep looking for another route,
+    and a system that offers no way to stop honestly is a system that has asked for exactly that.
+    Before this field a pilot's only exit was ``conclude`` with free text, which made "I attributed
+    this campaign" and "I found nothing and should stop" the same event to everything downstream —
+    a projection, an operator, a benchmark, the resurgence loop. They are not the same event, and
+    the difference is the one that decides whether anybody acts.
+
+    **None of these members is authority in either direction.** They describe a terminus; they do
+    not settle a hypothesis, close a case, release a target or open one. A pilot that declares
+    ``ATTRIBUTION_REACHED`` has recorded an opinion about its own run — no different in standing
+    from a ``record_belief`` — and no downstream control reads it as a finding.
+
+    **There is deliberately no member that asks for more.** No ``NEEDS_WIDER_SCOPE``, no
+    ``REQUEST_MORE_BUDGET``, no ``ESCALATE``. Failing to reach attribution is not a reason to
+    widen scope (SAFEFAIL-02), and the vocabulary that a stuck pilot reaches for is exactly the
+    place that temptation would have been encoded.
+    """
+
+    UNSPECIFIED = "unspecified"
+    """The pilot did not say. Kept as the default so that "ended without stating why" stays
+    distinguishable from every honest ending, instead of being quietly filed as one of them."""
+
+    ATTRIBUTION_REACHED = "attribution_reached"
+    """The pilot believes the material supports a conclusion. An opinion, recorded as one."""
+
+    INSUFFICIENT_EVIDENCE = "insufficient_evidence"
+    """Collection ran and what it returned does not support a conclusion. The commonest honest
+    ending, and the one a good investigation reaches most often."""
+
+    TARGET_UNRESOLVED = "target_unresolved"
+    """The seed could not be tied to any actor or infrastructure worth naming."""
+
+    ATTRIBUTION_UNCERTAIN = "attribution_uncertain"
+    """Candidates exist and the evidence does not discriminate between them. Distinct from
+    ``INSUFFICIENT_EVIDENCE``: there is something here, and it points more than one way."""
+
+    NO_SAFE_NEXT_PIVOT = "no_safe_next_pivot"
+    """Every remaining direction is one the platform refuses, or one already spent. The answer a
+    stagnation detector produces, and the reason the detector exists."""
+
+    SCOPE_EXHAUSTED = "scope_exhausted"
+    """The investigation reached the edge of what it was seeded and authorized to look at."""
+
+    AUTHORIZATION_REQUIRED = "authorization_required"
+    """Progress needs an effect nobody has authorized. A statement that a human decision is the
+    next step — never a request that one be skipped."""
+
+    COLLECTION_UNAVAILABLE = "collection_unavailable"
+    """The sources this question needs are not wired, not licensed, or down. Distinct from
+    ``INSUFFICIENT_EVIDENCE`` because the material was never looked at, and a reader must be able
+    to tell "we looked and found nothing" from "we could not look"."""
+
+
+SAFE_FAILURE_OUTCOMES: Final[frozenset[ConclusionOutcome]] = frozenset(
+    {
+        ConclusionOutcome.INSUFFICIENT_EVIDENCE,
+        ConclusionOutcome.TARGET_UNRESOLVED,
+        ConclusionOutcome.ATTRIBUTION_UNCERTAIN,
+        ConclusionOutcome.NO_SAFE_NEXT_PIVOT,
+        ConclusionOutcome.SCOPE_EXHAUSTED,
+        ConclusionOutcome.AUTHORIZATION_REQUIRED,
+        ConclusionOutcome.COLLECTION_UNAVAILABLE,
+    }
+)
+"""The endings that are failures to attribute and successes as investigations.
+
+Named as a set because the platform needs to say "this run ended safely without a conclusion"
+without enumerating members at each call site — and because a member added later should join the
+set the day it is written, not the day somebody notices the list."""
+
+
 class Conclude(BaseModel):
     """End the session with a summary. The one clean way for a pilot to stop."""
 
@@ -380,6 +456,15 @@ class Conclude(BaseModel):
 
     kind: Literal["conclude"] = "conclude"
     summary: str = ""
+
+    outcome: ConclusionOutcome = ConclusionOutcome.UNSPECIFIED
+    """Why the run ended, from :class:`ConclusionOutcome`.
+
+    Defaulted rather than required, so every scripted pilot, every containment double and every
+    seat written before this field existed remains a valid pilot — the same compatibility rule
+    :meth:`~nemesis.pilot.mediator.PilotMediator._elicit` follows for ``decide``. A pilot that
+    omits it lands on ``UNSPECIFIED``, which is recorded as the absence it is.
+    """
 
 
 PilotMove = Annotated[
@@ -401,8 +486,10 @@ __all__ = [
     "MAX_CONTEXT_ITEMS",
     "MAX_CONTEXT_ITEM_LENGTH",
     "PILOT_MOVE_ADAPTER",
+    "SAFE_FAILURE_OUTCOMES",
     "Briefing",
     "Conclude",
+    "ConclusionOutcome",
     "EntityView",
     "EnvelopeView",
     "HypothesisView",

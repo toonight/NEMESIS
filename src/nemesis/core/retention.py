@@ -148,6 +148,18 @@ DEFAULT_RETENTION: Final[dict[EntityCategory, RetentionClass]] = {
             "invariant 14 requires."
         ),
     ),
+    EntityCategory.CREDENTIAL: RetentionClass(
+        category=EntityCategory.CREDENTIAL,
+        period=timedelta(days=365),
+        rationale=(
+            "A credential belongs to somebody, and often to a natural person who is a victim "
+            "rather than a suspect — a reused password in a criminal dump identifies the person "
+            "it was stolen from. Held on the same clock as a human-identity lead for the same "
+            "reason: the intelligence value is in the correlation, which the keyed fingerprint "
+            "preserves, and the material itself stops earning its risk quickly. See "
+            ":mod:`nemesis.core.credentials`."
+        ),
+    ),
 }
 """Retention per category. Anything absent has no limit and holds no personal data.
 

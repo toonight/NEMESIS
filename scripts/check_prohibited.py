@@ -81,6 +81,25 @@ NETWORK_MODULES = {
 COLLECTION_PLANE = "nemesis.collect"
 EGRESS_MARKER = "NEMESIS-EGRESS-ALLOWED"
 
+SYNTHETIC_CREDENTIAL_MARKER = "NEMESIS-SYNTHETIC-CREDENTIAL"
+"""Declares a secret-shaped literal as a fixture, on the line or in the three above it.
+
+**Why a marker and not an exclusion for `tests/`.** Adversarial tests need material that is
+shaped exactly like the thing they are testing the handling of: a credential test whose fixture
+is not credential-shaped tests the fixture. But a blanket exclusion for the test tree would make
+`tests/` the one place a real secret could be committed without the build noticing, and that is
+the file an engineer under time pressure pastes a working key into.
+
+So the scan still runs over every file, and each synthetic value is declared individually — the
+same shape as `NEMESIS-EGRESS-ALLOWED`, for the same reason: the exception is per-occurrence,
+visible in the diff, and someone had to write it down.
+
+The count of suppressed findings is printed rather than swallowed. A scan that reported nothing
+while silently skipping nine lines would be a scan whose output nobody could interpret.
+"""
+
+MARKER_LOOKBEHIND = 3
+
 SKIP_DIRS = {".venv", "node_modules", "__pycache__", ".git", ".ruff_cache", ".mypy_cache"}
 
 
@@ -94,8 +113,15 @@ def iter_files(root: Path, suffixes: tuple[str, ...]) -> list[Path]:
     ]
 
 
-def scan_secrets() -> list[str]:
+def scan_secrets() -> tuple[list[str], int]:
+    """Findings, and how many matches were declared synthetic.
+
+    The second number is returned rather than dropped so `main` can print it. "No secrets found"
+    and "no secrets found, and eleven matches were declared fixtures" are different statements
+    about how much this scan looked at, and only one of them lets a reader judge it.
+    """
     findings: list[str] = []
+    declared = 0
     self_path = Path(__file__).resolve()
     for path in iter_files(ROOT, (".py", ".toml", ".yml", ".yaml", ".json", ".md", ".ts", ".tsx")):
         if path.resolve() == self_path:
@@ -104,12 +130,17 @@ def scan_secrets() -> list[str]:
             text = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             continue
+        lines = text.splitlines()
         for label, pattern in SECRET_PATTERNS:
             for match in pattern.finditer(text):
                 line = text[: match.start()].count("\n") + 1
+                context = "\n".join(lines[max(0, line - 1 - MARKER_LOOKBEHIND) : line])
+                if SYNTHETIC_CREDENTIAL_MARKER in context:
+                    declared += 1
+                    continue
                 rel = path.relative_to(ROOT)
                 findings.append(f"{rel}:{line}: possible {label}")
-    return findings
+    return findings, declared
 
 
 def module_name(path: Path) -> str:
@@ -158,7 +189,7 @@ def scan_network_imports() -> list[str]:
 
 
 def main() -> int:
-    secrets = scan_secrets()
+    secrets, declared_synthetic = scan_secrets()
     network = scan_network_imports()
 
     if secrets:
@@ -175,6 +206,12 @@ def main() -> int:
         return 1
 
     print("No prohibited content found.")
+    if declared_synthetic:
+        print(
+            f"{declared_synthetic} secret-shaped literal(s) declared "
+            f"{SYNTHETIC_CREDENTIAL_MARKER} and skipped. Each one is a per-occurrence exception "
+            "somebody wrote down; read them in the diff that added them."
+        )
     print(
         "Note: this is a coarse backstop, not a comprehensive secret scanner. "
         "It catches known patterns and plane violations, nothing more."

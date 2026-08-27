@@ -72,7 +72,16 @@ GENESIS_HASH: Final = "0" * 64
 """The predecessor of the first entry. A distinguished value rather than ``None`` so the
 hash of entry zero is computed by the same code as every other entry."""
 
-_EVIDENCE_ID_RE: Final = re.compile(r"^evd_sha256-([0-9a-f]{64})$")
+_EVIDENCE_ID_RE: Final = re.compile(r"\Aevd_sha256-([0-9a-f]{64})\Z")
+"""The shape of an evidence id, anchored with ``\\A``/``\\Z`` rather than ``^``/``$``.
+
+``$`` matches before a trailing newline in Python, so ``"evd_sha256-" + "a"*64 + "\\n"``
+passed and came back with the newline attached. Not exploitable for traversal — the
+character class admits no separator — and pydantic's own validator refuses it upstream, so
+this was the last line of a defence that held by accident. An adversarial review pointed
+out that a control which is sound only because something else refused first is the pattern
+this repository keeps finding in itself.
+"""
 
 _ARTIFACT_MODE: Final = 0o400
 """Artifacts are written read-only. This stops a stray script, not the operator — the
@@ -745,8 +754,25 @@ class FileSystemEvidenceVault:
             )
 
     def _verify_metadata_against_chain(self, evidence_id: str) -> str:
-        """Return the metadata hash, having checked it against the chain."""
-        entries, _ = _parse_chain(self._read_log_lines())
+        """Return the metadata hash, having checked it against the chain.
+
+        **The chain's own verdict is now fatal here.** Every reader in this class parsed the
+        chain and threw the defects away — ``entries, _ = _parse_chain(...)`` in three places —
+        so a two-file edit released quarantined material: flip ``content_safety`` in the
+        metadata, set the seal entry's ``metadata_hash`` to match, and leave ``entry_hash``
+        alone. ``verify_integrity()`` named the forgery precisely ("log entry 0 was altered
+        after it was written"); ``list_evidence()`` handed the object over anyway, summary
+        included.
+
+        That is *below* this module's stated position — "careless tampering is caught" — because
+        the operator here recomputed nothing. Checking a metadata hash against a log line already
+        known to be forged is not a check; it is a check being read out of a compromised source.
+        """
+        entries, defects = _parse_chain(self._read_log_lines())
+        if defects:
+            raise VaultChainError(
+                f"the vault log does not verify, so nothing may be released from it: {defects[0]}"
+            )
         sealed = _sealed_in_order(entries).get(evidence_id)
         if sealed is None:
             raise EvidenceNotFoundError(
@@ -761,7 +787,11 @@ class FileSystemEvidenceVault:
         return actual
 
     def _enumerable_objects(self) -> tuple[EvidenceObject, ...]:
-        entries, _ = _parse_chain(self._read_log_lines())
+        entries, defects = _parse_chain(self._read_log_lines())
+        if defects:
+            raise VaultChainError(
+                f"the vault log does not verify, so nothing may be enumerated from it: {defects[0]}"
+            )
         objects: list[EvidenceObject] = []
         for evidence_id in _sealed_in_order(entries):
             stored = self._read_metadata(evidence_id)
@@ -777,7 +807,12 @@ class FileSystemEvidenceVault:
         return tuple(objects)
 
     def _quarantined_count(self) -> int:
-        entries, _ = _parse_chain(self._read_log_lines())
+        entries, defects = _parse_chain(self._read_log_lines())
+        if defects:
+            raise VaultChainError(
+                f"the vault log does not verify, so its quarantine count means nothing: "
+                f"{defects[0]}"
+            )
         return sum(
             1
             for evidence_id in _sealed_in_order(entries)
@@ -786,12 +821,23 @@ class FileSystemEvidenceVault:
         )
 
     def _unlogged_files(self, sealed: set[str]) -> list[str]:
+        """Files in the store that no seal entry accounts for.
+
+        The suffix is stripped **only in the metadata directory**, which is the only one that
+        writes ``.json``. Stripping it in both let an unlogged file hide in the object store by
+        wearing the suffix: ``evd_sha256-<64 hex>.json`` in ``objects/`` had its name reduced to
+        a sealed id and passed, so 54 unlogged bytes sat in the store while
+        ``verify_integrity()`` reported intact and ``write_sealed_export`` proceeded.
+
+        An object's name must therefore *be* a sealed id exactly, not merely reduce to one.
+        """
         found: list[str] = []
         for directory in (self._objects, self._metadata):
+            strip_suffix = directory is self._metadata
             for path in sorted(directory.iterdir()):
                 if not path.is_file():
                     continue
-                name = path.name.removesuffix(".json")
+                name = path.name.removesuffix(".json") if strip_suffix else path.name
                 if name not in sealed:
                     found.append(f"{directory.name}/{path.name}")
         return found

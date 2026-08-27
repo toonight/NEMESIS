@@ -188,7 +188,7 @@ reviewer's attention. Every row below was re-checked against the code on that da
 
 | Module | Plane | Status |
 |---|---|---|
-| `core/` | — | `IMPLEMENTED` — domain model, no I/O, no internal deps |
+| `core/` | — | `IMPLEMENTED` — domain model, no I/O, no internal deps. **New 2026-08-27:** `credentials.py` (a credential has no representable form that holds material; RESTRICTED by category, so every existing wall covers it) and `canaries.py` (reserved identifiers whose appearance in a pilot-authored field is a typed security event) |
 | `ports/` | — | `IMPLEMENTED` — protocols only |
 | `collect/` | 1 | `IMPLEMENTED` — seven fixture connectors plus one opt-in, allowlisted Tor snapshot connector; the demo remains simulated |
 | `pursuit/` | 2 | `IMPLEMENTED` — deterministic rule policy |
@@ -198,14 +198,15 @@ reviewer's attention. Every row below was re-checked against the code on that da
 | `evidence/` | 6 | `IMPLEMENTED` — hash-chained, head signed; no external anchor. **Measured 2026-08-19:** deleting a chain's *newest* row is undetected — the same blind spot the revocation and spend chains carry, since nothing follows the tail. Interior edits are caught, by the per-record signature rather than by the chaining |
 | `attribute/` | 7 | `IMPLEMENTED` — five dimensions, no collapsed score |
 | `disrupt/` | 8 | `IMPLEMENTED` — proposes what it cannot execute |
-| `authz/` | 9 | `IMPLEMENTED` — Ed25519, dual control, offline verify, verified identity assertions with per-issuer assurance ceilings |
+| `authz/` | 9 | `IMPLEMENTED` — Ed25519, dual control, offline verify, verified identity assertions with per-issuer assurance ceilings. **New 2026-08-27:** `monotonicity.py` makes "nothing untrusted widened authority" a measurable property, and `audit_anchor.py` wires the chain-anchor contract to the audit trail, which until then nothing in the running platform called |
 | `effects/` | 10 | `SIMULATED` — simulation and drafting only |
 | — resurgence | 11 | `SIMULATED` — fixtures exist; no standing monitor |
-| `pilot/` | — | `IMPLEMENTED` — the seat and the limiter an external autonomous pilot drives; closed move vocabulary, a mediator holding every handle, effects routed through the pre-signed envelope (ADR-0008). |
+| `pilot/` | — | `IMPLEMENTED` — the seat and the limiter an external autonomous pilot drives; closed move vocabulary, a mediator holding every handle, effects routed through the pre-signed envelope (ADR-0008). **New 2026-08-27:** `stagnation.py` ends a stalled session with a typed `ConclusionOutcome` from a closed safe-failure vocabulary, and never by widening anything (SAFEFAIL-02) |
 | `pilot/providers/` | — | `IMPLEMENTED` (shape), **unconfirmed on the wire** — five seats (OpenAI, Anthropic, xAI, Gemini, Ollama) plus a generic OpenAI-compatible one, behind one canonical tool suite and a frozen registry. An `import-linter` contract forbids anything here from importing the mediator or any platform plane. No transport ships wired (ADR-0009). |
 | `pilotbench/` | — | `IMPLEMENTED` harness / `SIMULATED` corpus — eight adversarial scenarios and a two-tier report: control-plane properties that stand alone, and agreement with a corpus we wrote that does not. |
-| `sandbox/` | — | `IMPLEMENTED` — one confinement launch path, two opposite policies |
-| `audit/` | — | `IMPLEMENTED` — hash-chained, denials recorded, single-writer enforced |
+| `sandbox/` | — | `IMPLEMENTED` — one confinement launch path, two opposite policies, plus `reachability.py`: a static analysis asserting no model-controlled context reaches an egress-capable module except through a declared broker (NET-02, ADR-0014) |
+| `breaker/` | — | `IMPLEMENTED` (harness, ten deterministic attacks) / `PROPOSED` (model-backed attacker) — an offline adversary that drives throwaway arenas and maps every finding to a named invariant. An `import-linter` contract forbids every plane from importing it (ADR-0014) |
+| `audit/` | — | `IMPLEMENTED` — hash-chained, denials recorded, single-writer enforced. Tail truncation is invisible to a *fresh reader* by construction and is caught by the anchor instead (AUDIT-02): measured, a trail truncated 72 → 60 entries reported `chain intact: True` |
 | `calibration/` | — | `IMPLEMENTED` (structural) — coherence laws that need no ground truth. **Not** empirical: no confidence figure has been scored against a resolved case, and no corpus exists |
 | `collaboration/` | — | `IMPLEMENTED` (local provider) / **unwired on the wire** (Buzz) — projects established findings into human channels and reads replies back as intents that authorize nothing. Default provider is a local directory and reaches no network. The Buzz seat implements the relay's wire format and ships no transport and no signer (ADR-0010). |
 | `evolution/` | 12 | `IMPLEMENTED` (single lineage) / `PROPOSED` (model-backed supervision, concurrent multi-model islands) — an AVO-inspired long-horizon research loop **above** the pilot seam: hash-chained lineage that keeps what it rejected, a gated three-tier evaluator that reads nothing a model wrote, deterministic plateau detection, and a supervisor whose whole vocabulary does nothing. Three scoring terms are computed and currently inert because nothing in the engine moves the state they read (ADR-0011). |

@@ -397,6 +397,25 @@ class AppendOnlyAuditTrail:
     async def entry_count(self) -> int:
         return self._count
 
+    async def links(self) -> tuple[str, ...]:
+        """Every entry hash on disk, in order. What an external anchor is computed over.
+
+        Read from the **file**, not from this instance's counters, and that is the whole point of
+        the method existing. :meth:`verify` catches tail truncation by comparing what it finds
+        against ``self._count`` — memory that only exists because this process happened to be the
+        one that wrote the entries. Truncate the file, restart, and the new instance's counters
+        are the truncated numbers: the chain links perfectly, the head matches, and the missing
+        entries read as never having existed. That is the blind spot
+        :mod:`nemesis.authz.anchor` was written for, and this is the input it needs.
+
+        An unreadable line yields the links up to it rather than raising, matching
+        :func:`_scan`'s contract. A caller that anchors a partial chain is anchoring a partial
+        chain; a caller that got an exception would have anchored nothing, and "we could not
+        check" is a worse outcome than "the count is short and the anchor says so".
+        """
+        scan = _scan(self._path)
+        return tuple(event.entry_hash for event in scan.events if event.entry_hash is not None)
+
     # -- recording helpers ----------------------------------------------------
 
     async def record_pivot(

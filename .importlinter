@@ -273,7 +273,7 @@ name = Plane layering
 type = layers
 layers =
     nemesis.cli : nemesis.ui
-    nemesis.pilotbench
+    nemesis.pilotbench : nemesis.breaker
     nemesis.slice : nemesis.calibration
     nemesis.api
     nemesis.evolution
@@ -285,3 +285,75 @@ layers =
     nemesis.collaboration
     nemesis.ports
     nemesis.core : nemesis.sandbox
+
+; --- MODEL-01: no seat can address another seat ---------------------------------------------
+; Each provider module is one model's seat. The incident this contract answers is the one the
+; Hugging Face analysis describes: agents that were never given a channel invented one, and the
+; collective turned out to be far more capable than any member of it. NEMESIS's answer is that
+; a seat has nowhere to send anything -- it is handed a request and returns a parsed response,
+; and every transfer between two model contexts goes through the mediator as typed data.
+;
+; The `provider-adapters-hold-no-handles` contract above already stops a seat reaching the
+; platform. It does NOT stop one seat importing another, which is how a shared queue, a common
+; mutable registry or a convenience "ask the other model" helper would arrive -- each looking
+; like a refactor rather than like a coordination channel.
+;
+; `independence` and not `forbidden`, because the property is symmetric and there is no
+; privileged direction: Anthropic must not reach OpenAI and OpenAI must not reach Anthropic.
+; Shared machinery is untouched -- `openai_dialect`, `schema`, `seat` and `transport` are
+; dependencies all of them have, and a common dependency is not a path between two modules.
+[importlinter:contract:model-seats-are-mutually-unreachable]
+name = No provider seat can reach another provider seat
+type = independence
+modules =
+    nemesis.pilot.providers.anthropic
+    nemesis.pilot.providers.openai
+    nemesis.pilot.providers.gemini
+    nemesis.pilot.providers.xai
+    nemesis.pilot.providers.ollama
+    nemesis.pilot.providers.compatible
+
+; --- The Breaker is not on the authority path ------------------------------------------------
+; `nemesis.breaker` drives NEMESIS adversarially in an isolated test environment. It must be
+; unreachable from every plane that decides anything, so no attack harness, no scripted hostile
+; pilot and no invariant probe can end up on a path that authorizes anything. Stated as
+; `forbidden` from each plane rather than as a layer, because the point is not where it sits --
+; it is that nothing consequential depends on it.
+;
+; `nemesis.cli` is deliberately NOT in the list below, and an adversarial review was right to
+; ask: the prose used to say "nothing that runs in production may import it" while `cli/main.py`
+; imports it at module top level for the `nemesis breaker` command. One of the two was wrong, and
+; it was the prose. A command-line entry point is where a human chooses to run something; it
+; holds no capability, decides no authorization and is above every plane in the layering. The
+; alternative -- a lazy import inside the command body to satisfy a contract -- would be hiding
+; the dependency rather than not having it.
+;
+; The other direction is deliberately open. A breaker that could not import the mediator, the
+; envelope or the effects registry could not attack them, and an adversarial harness that has to
+; reimplement its target is one that tests its own reimplementation.
+[importlinter:contract:nothing-depends-on-the-breaker]
+name = No plane imports the adversarial Breaker
+type = forbidden
+source_modules =
+    nemesis.core
+    nemesis.ports
+    nemesis.collect
+    nemesis.collaboration
+    nemesis.graph
+    nemesis.evidence
+    nemesis.audit
+    nemesis.authz
+    nemesis.effects
+    nemesis.resolve
+    nemesis.attribute
+    nemesis.disrupt
+    nemesis.pursuit
+    nemesis.pilot
+    nemesis.evolution
+    nemesis.api
+    nemesis.slice
+    nemesis.pilotbench
+    nemesis.calibration
+    nemesis.ui
+forbidden_modules =
+    nemesis.breaker

@@ -37,6 +37,7 @@ from nemesis.core.authorization import (
     AuthorizationDecision,
     OperationClass,
 )
+from nemesis.core.disclosure import DisclosureViolationError, scan_for_internal_material
 from nemesis.core.temporal import utcnow
 from nemesis.effects.registry import preflight, sanitize
 from nemesis.ports.authorization import TrustAnchor
@@ -93,13 +94,20 @@ class _DraftingAdapter:
     file_slug: str
     makes_external_contact: bool = False
 
-    def __init__(self, anchor: TrustAnchor) -> None:
-        """The authorizer this adapter believes, fixed at construction.
+    def __init__(self, anchor: TrustAnchor, *, draft_root: Path | None = None) -> None:
+        """The authorizer this adapter believes, and where it may write, both fixed here.
 
         Required and positional: an adapter with no anchor could verify nothing, and one
         that took the anchor per call would believe whoever called it.
+
+        ``draft_root`` is the same reasoning applied to the filesystem. It defaults to ``None``,
+        which means **this adapter writes nothing** and returns the document in the result —
+        the honest default, because an adapter that writes nowhere is strictly safer than one
+        that writes wherever a request names. A deployment that wants drafts on disk supplies a
+        root, and a request may then choose a subdirectory of it and nothing else.
         """
         self._anchor = anchor
+        self._draft_root = draft_root
 
     @property
     def anchor(self) -> TrustAnchor:
@@ -194,8 +202,16 @@ class _DraftingAdapter:
             f"Capability: {capability.capability_id}",
             f"Authorization expires: {capability.expires_at.isoformat()}",
             f"Legal basis: {capability.legal_basis.value}",
-            f"Authority reference: {capability.legal_authority_reference or _UNSPECIFIED}",
-            f"Jurisdictions: {', '.join(capability.jurisdictions)}",
+            # Sanitized, like `max_effect_description` on the next line always was. An
+            # adversarial review pointed out the asymmetry: these two were interpolated raw,
+            # which is enough to put a fabricated court order into a document under a *genuine*
+            # signature over genuinely matching bytes. ADR-0006 fixed the value-confusion form
+            # of this attack — composing from the reconstruction — and that addressed the
+            # value's provenance, not its shape. A plain signed string with newlines in it
+            # produces the identical forgery.
+            f"Authority reference: "
+            f"{sanitize(capability.legal_authority_reference or _UNSPECIFIED, limit=200)}",
+            f"Jurisdictions: {sanitize(', '.join(capability.jurisdictions), limit=200)}",
             f"Approved maximum effect: {sanitize(capability.max_effect_description)}",
             f"Target: {sanitize(request.target_natural_key, limit=120)}",
             f"Target fingerprint: {request.target_fingerprint}",
@@ -205,7 +221,27 @@ class _DraftingAdapter:
         ]
         lines.extend(self._body(request, capability))
         lines.extend((SEPARATOR, NOT_SENT_FOOTER))
-        return "\n".join(lines)
+        document = "\n".join(lines)
+
+        # The D1 wall, at the only boundary that is total. `preflight` scans
+        # `request.parameters`, and an adversarial review found that is one of four sources of
+        # text in this document: `max_effect_description`, `legal_authority_reference` and
+        # `target_natural_key` each carried persona linkage into a draft with the parameter scan
+        # passing cleanly, and `requested_by` is a fourth. `core.disclosure` claims "every value
+        # crossing that boundary is scanned"; scanning the *input dict* could never make that
+        # true, because the document is assembled from more than the dict.
+        #
+        # Raised rather than returned as a refusal: `DisclosureViolationError`'s contract is that
+        # nobody catches it to carry on, and a composed document that reached here carrying an
+        # internal marker means a leak path was opened upstream and must be closed there. The
+        # adapter's caller turns it into a recorded refusal.
+        leaked = scan_for_internal_material({"document": document})
+        if leaked:
+            raise DisclosureViolationError(
+                "the composed document would carry internal-classified material out of the "
+                "platform: " + "; ".join(leaked)
+            )
+        return document
 
     def _body(self, request: EffectRequest, capability: AuthorizationCapability) -> tuple[str, ...]:
         raise NotImplementedError
@@ -251,9 +287,7 @@ class _DraftingAdapter:
     # -- output ---------------------------------------------------------------
 
     def _write(self, document: str, raw_directory: str, request: EffectRequest) -> Path:
-        directory = Path(raw_directory)
-        if not directory.is_dir():
-            raise NotADirectoryError(raw_directory)
+        directory = self._resolve_output_directory(raw_directory)
 
         # Exclusive creation, not truncation: two requests carrying the same operation id
         # is a replay, and the second one silently overwriting a document a human already
@@ -262,6 +296,40 @@ class _DraftingAdapter:
         with path.open("x", encoding="utf-8") as handle:
             handle.write(document)
         return path
+
+    def _resolve_output_directory(self, raw_directory: str) -> Path:
+        """Where a draft may be written, decided by the deployment and never by the request.
+
+        **The filename was hardened and the directory was not.** This module's docstring names
+        the harm exactly — "a caller-supplied path component containing ``..`` would place a
+        NEMESIS-branded document outside the directory a human chose to review" — and an
+        adversarial review pointed out that the parameter *choosing* the directory had no
+        constraint at all: ``Path(raw_directory)``, an ``is_dir()`` check, and a write. Driven
+        through a real mediator with a hijacked pilot, a draft landed in a directory the pilot
+        named, and the recorded artifact locator was the unresolved relative path — an audit
+        record that does not say where the file is.
+
+        So the adapter carries a root from construction. A request may choose a *subdirectory*
+        of it, which is the useful half of the parameter, and cannot escape it: the resolved
+        path must sit under the resolved root. A deployment that configures no root refuses
+        every write and returns the document instead, which is the honest default — an adapter
+        that writes nowhere is strictly safer than one that writes anywhere.
+        """
+        if self._draft_root is None:
+            raise NotADirectoryError(
+                "this deployment configured no draft root, so no document may be written to "
+                "disk; the draft is returned in the result instead"
+            )
+        root = self._draft_root.resolve()
+        candidate = (root / raw_directory).resolve() if raw_directory else root
+        if candidate != root and root not in candidate.parents:
+            raise NotADirectoryError(
+                "a draft may only be written inside the configured draft root; "
+                f"{raw_directory!r} resolves outside it"
+            )
+        if not candidate.is_dir():
+            raise NotADirectoryError(str(candidate))
+        return candidate
 
     def _record(
         self,

@@ -27,7 +27,7 @@ import hashlib
 import hmac
 from datetime import datetime
 from enum import StrEnum
-from typing import Annotated, Self
+from typing import Annotated, Final, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -90,6 +90,20 @@ class ContentSafety(StrEnum):
     through ordinary channels. Escalation is a human decision, immediately."""
 
 
+VERIFIED_ANCHOR_TYPES: Final[frozenset[str]] = frozenset()
+"""Anchor types this build can actually *verify*, which is currently none.
+
+An allowlist rather than a denylist, and empty rather than optimistic. An anchor is external
+when a party with no obligation to us holds it, and the only evidence of that is a proof this
+platform checked against that party — not a name in a field.
+
+Adding a member here is a commitment to two things: a verifier that validates the ``proof``
+against the named authority, and a registry mapping an authority to the key or certificate that
+authenticates it. Adding one without both would restore exactly the defect this constant
+replaced. See ``docs/architecture/THREAT_MODEL.md`` on the independence ladder.
+"""
+
+
 class IntegrityAnchor(BaseModel):
     """External proof that this evidence existed, unchanged, at a point in time.
 
@@ -117,10 +131,32 @@ class IntegrityAnchor(BaseModel):
     def is_externally_held(self) -> bool:
         """Whether the anchor survives full compromise of NEMESIS.
 
-        The distinction matters: an internal hash chain detects accidental corruption,
-        an external anchor detects deliberate rewriting by someone who controls the store.
+        The distinction matters: an internal hash chain detects accidental corruption, an
+        external anchor detects deliberate rewriting by someone who controls the store.
+
+        **This is an allowlist of verified anchor types, not a denylist of authority strings.**
+        It used to be the latter — anything whose ``authority`` was not "nemesis", "self",
+        "internal" or empty counted as external — and an adversarial review flipped the vault's
+        `is_defensible_against_insider` to True by recording an anchor with
+        ``authority="Totally Independent Notary AG"`` and ``proof="not-even-base64"``. Nothing
+        validated either field. A string somebody typed decided whether this platform claimed
+        its evidence was defensible against itself, which is the single claim it most needs to
+        be unable to make falsely.
+
+        :data:`VERIFIED_ANCHOR_TYPES` is empty, deliberately, so this returns ``False`` for every
+        anchor this build can produce. Populating it means implementing a verifier for that
+        anchor type — an RFC 3161 token checked against the timestamping authority's
+        certificate, a transparency-log inclusion proof checked against a signed tree head — and
+        until such a verifier exists, "external" is a claim nothing here can check and therefore
+        one nothing here should make. `REQUIRES_EXTERNAL_DATA`, as the threat model has always
+        said, now enforced rather than described.
         """
-        return self.authority.lower() not in {"nemesis", "self", "internal", ""}
+        return self.anchor_type in VERIFIED_ANCHOR_TYPES and self.authority.lower() not in {
+            "nemesis",
+            "self",
+            "internal",
+            "",
+        }
 
 
 class AdmissibilityDefect(StrEnum):

@@ -89,6 +89,7 @@ from nemesis.evidence.vault import FileSystemEvidenceVault
 from nemesis.graph.memory import InMemoryClaimStore, InMemoryGraphStore
 from nemesis.pilot.mediator import PilotMediator
 from nemesis.pilot.moves import Briefing, PilotMove, RequestEffect, RulingStatus
+from nemesis.pilot.stagnation import SessionStagnationDetector, SessionStagnationPolicy
 from nemesis.pursuit.engine import ConnectorRegistry, PursuitEngine
 from nemesis.pursuit.investigation import IncidentSeed
 from nemesis.pursuit.standing import reassess_standing
@@ -645,6 +646,13 @@ async def run_standing_demonstration(*, workspace: Path | None = None) -> Standi
         claims=claims,
         audit=audit,
         max_moves=len(CASES) * len(OPERATIONS) + 2,
+        # A matrix probe looks exactly like a stall, because in production it would be one: the
+        # scripted pilot requests every operation against every target and most are refused. The
+        # point of this demonstration is the cell-by-cell refusal table, and stopping at the
+        # sixth cell would demonstrate the stagnation detector instead of the role gate. The
+        # stall is still detected and recorded; only the stopping is declined. See
+        # `SessionStagnationPolicy.halt_on_stall`.
+        stagnation=SessionStagnationDetector(SessionStagnationPolicy(halt_on_stall=False)),
     )
 
     pilot = _StandingProbePilot({key: entity.entity_id for key, entity in resolved.items()})

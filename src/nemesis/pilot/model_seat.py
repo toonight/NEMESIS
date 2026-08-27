@@ -143,8 +143,37 @@ def argument_schema(model: type[BaseModel]) -> dict[str, Any]:
         "additionalProperties": False,
     }
     if "$defs" in schema:
-        parameters["$defs"] = schema["$defs"]
+        parameters["$defs"] = {
+            name: _first_paragraph_description(definition)
+            for name, definition in schema["$defs"].items()
+        }
     return parameters
+
+
+def _first_paragraph_description(definition: dict[str, Any]) -> dict[str, Any]:
+    """Trim a referenced type's ``description`` to its first paragraph.
+
+    :func:`move_description` already applies this rule to a *move's* docstring, for a reason an
+    audit of the provider seam established: what a docstring says to a maintainer and what a
+    vendor needs in a tool schema are different lengths. It was never applied to ``$defs``, where
+    Pydantic puts an enum's whole class docstring — and this repository writes long docstrings on
+    purpose.
+
+    Measured when ``ConclusionOutcome`` was added: the ``conclude`` schema went from a few hundred
+    bytes to 1966, the largest of the four, and roughly 1.5 KB of that was internal design
+    rationale — the incident that prompted the enum, what this repository has been bitten by —
+    sent to a model vendor on every turn of every session. None of it tells a model anything
+    operational, and `pilot-preview` exists precisely so somebody can read what would leave the
+    building rather than imagine it.
+
+    The first paragraph is kept because it is what a caller needs: the member names carry the
+    rest. A definition with no description is returned untouched.
+    """
+    description = definition.get("description")
+    if not isinstance(description, str):
+        return definition
+    paragraph = " ".join(description.strip().split("\n\n", 1)[0].split())
+    return {**definition, "description": paragraph}
 
 
 __all__ = [

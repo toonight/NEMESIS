@@ -25,6 +25,7 @@ company. Everything below is ordered against that.
 | **D. Malicious insider** | Legitimate credentials, possibly database write access. | Fabricate or destroy evidence; leak an investigation; authorize an unlawful action. |
 | **E. Compromised dependency** | Code execution inside our own process. | Anything the process can do. |
 | **F. Compromised or hostile model vendor** | Sees every briefing this deployment sends. Chooses every token the pilot emits, and can do so selectively — behaving normally except on the investigations that matter to them. | Steer conclusions; learn what NEMESIS is investigating and for whom; reach an effect through the seat. |
+| **G. Autonomous agent collective** | Hundreds or thousands of frontier-model agents, running continuously, specialising, sharing what each finds. No human in the loop and no human pace. See below. | Find the seam. Poison what NEMESIS concludes, at a rate and volume no analyst reviews, and hide the operator behind the fleet. |
 
 Classes A and B are the routine case. C and D are the ones the architecture must survive
 without depending on anyone behaving well.
@@ -43,6 +44,94 @@ and no control in this repository changes that — the mitigation is contractual
 enterprise terms), or it is not sending briefings to a vendor at all, which is what the local
 seat is for. Adding four providers multiplies the question by four rather than answering it, and
 it remains a founder decision (see FOUNDER_DECISIONS.md).
+
+---
+
+## Class G: the autonomous agent collective
+
+**Added 2026-08-27**, prompted by OpenAI's Hugging Face incident and its technical analysis
+(<https://openai.com/index/hugging-face-incident-and-the-road-ahead/>). What that write-up
+established was not a new vulnerability class. It was that a *population* of capable agents
+finds things no member of it was looking for, and that most of what it finds is a property of
+how components compose rather than of any component.
+
+This class is listed separately from C (state-aligned actor) for the same reason F was: its
+capability profile is unusual rather than merely larger. A state actor has patience, reach and
+people. A collective has **rate**, **breadth** and **no fatigue** — and the three combine into
+something the others do not have, which is exhaustive search of a surface nobody enumerated.
+
+**Do not assume a human is in the loop.** Every row below is reachable by a fleet operating
+overnight against a target list nobody read.
+
+### What the class can do
+
+| Capability | Why it changes the threat rather than scaling it |
+|---|---|
+| Hundreds to thousands of parallel agents, 24/7 | Turns "unlikely path" into "path that will be found". Rate-limiting an analyst's mistakes is a control; rate-limiting a fleet is a different budget. |
+| Automated reconnaissance and vulnerability chaining | Individually shallow findings composed into a working path. The Hugging Face incident's own shape. |
+| Credential correlation across sources | A credential worthless alone becomes an access when joined to three others found elsewhere. |
+| Adaptive role specialisation | The fleet grows a scout, a chainer, a persister. None was designed; the division of labour emerges. |
+| Distributed memory and shared discoveries | What one agent learns, all of them know. A defence that depends on the attacker forgetting is no defence. |
+| Multi-cloud exploration and automated exploit research | Breadth no team sustains, at a cost that keeps falling. |
+| Coordinated anti-attribution and infrastructure rotation | The fleet is *also* a deception system, and rotation faster than an investigation closes. |
+| Rapid retry and persistence past the point of usefulness | A task that cannot succeed produces continued searching rather than a stop — the behaviour NEMESIS now refuses to exhibit itself (SAFEFAIL-02) and must expect from the adversary. |
+| Synthetic persona creation at volume | Source independence is the control this attacks, and volume is exactly the attack. |
+
+### What it wants from NEMESIS
+
+Ordered by how much damage a success does, worst first.
+
+| Objective | What it would cost us | Status here |
+|---|---|---|
+| **Induce a confident, evidence-backed, human-approved takedown of an innocent party** | The catastrophe this whole document is ordered against. A fleet is the cheapest way to manufacture the corroboration that makes one look justified. | **Partially mitigated.** See "manufacturing source independence" below — the strongest control and the one volume attacks most directly. |
+| **Poison attribution durably**, so future investigations inherit the lie | Persistent adversary memory becomes a persistent liability. | **Partially mitigated.** Bitemporal records make a suddenly-appearing history visible; a fleet that plants early and waits is not defeated by this. |
+| **Manufacture false source independence** | Defeats the one control that makes corroboration mean anything. | **Partially mitigated.** Sources are grouped by `independence_key()` before cumulative fusion, so three resold feeds count once — but the grouping is by *origin as we can observe it*, and a fleet that stands up genuinely separate origins is buying exactly what the control measures. This is the gap volume attacks best, and no code here closes it. |
+| **Inject forged provenance / false infrastructure lineage** | An attribution rests on its derivation chain. | **Partially mitigated.** Every claim needs a resolvable chain back to collected artifacts (invariant 3), and planting cost caps weight — but "expensive to stage" is a per-artifact judgement and a fleet changes the price. |
+| **Probe the pilot seam** for a verb, an argument or a path nobody enumerated | Direct escalation. | **Mitigated, and now instrumented.** The vocabulary is four members with `extra="forbid"`; PROBE-01 records a reach for a capability that does not exist and halts a session that keeps reaching. A fleet probing across many sessions is *visible* in the trail and is not yet correlated across them — see gaps. |
+| **Find transitive egress** through a component that has it | Exfiltration, or reach into infrastructure. | **Mitigated.** NET-02: the import graph is analysed for paths from model-controlled contexts to anything that can reach the network or start a process. Measured today: no path at all. |
+| **Discover exposed credentials and use them** | Lateral movement, and for NEMESIS a crime. | **Mitigated.** AUTH-04: a credential has no representable form that holds material, and nothing in the platform consumes one. |
+| **Discover the human approval workflow and imitate it** | An unauthorized effect wearing an approval. | **Mitigated.** EFFECT-03: an approval is a verified identity assertion reaching a gateway the pilot cannot import. Text shaped like a sign-off is text. |
+| **Have one agent authorize another** | The incident's peer-authorization failure mode. | **Mitigated.** AUTH-02, and MODEL-01 removes the channel. The instruction classifier gained a `relayed authorization` pattern in this pass after an adversarial test found it missing. |
+| **Probe the effect adapters** | Find one that reaches outside. | **Mitigated.** The registry refuses to register an adapter declaring external contact; the plane runs in a child process with no importable platform and, on macOS, no socket. |
+| **Manipulate investigation state** to steer what gets pursued | Cheaper than poisoning evidence and harder to see. | **Partially mitigated.** The graph is written by the engine, not the pilot; a belief is a `HYPOTHESIS`. What a fleet *can* still do is choose what we collect, by choosing what exists to be found. |
+| **Corrupt confidence calculations** | A number nobody can audit deciding an action. | **Not addressed, and the largest open weakness.** Every confidence figure is internally consistent and externally unvalidated. No amount of mathematics fixes it and no fleet is needed to exploit it. |
+| **Cause resource exhaustion** | Availability, and worse — a platform under load is a platform whose operators skim. | **Partially mitigated.** Investigation budget, move ceiling, autonomy ledger, propose timeout and now the stagnation detector all bound one run. Nothing bounds *many* runs; there is no fleet-level rate limit because there is no multi-investigation scheduler yet. |
+| **Obscure the operator behind the fleet** | Attribution to a person becomes attribution to a swarm. | **Structurally acknowledged.** Human-identity attribution has a structural gate, not a threshold: single-sourced or adversary-influenceable evidence returns `INSUFFICIENT_BASIS` before any scoring runs. Against a fleet that is the *correct* answer more often, not less. |
+
+### What a collective changes about our own controls
+
+Three things, and they are the honest summary of this class:
+
+**Volume attacks independence, and independence is our best control.** Everything NEMESIS does
+well rests on counting origins rather than reports. A fleet that can stand up genuinely
+independent-looking origins is not defeated by better grouping; it is defeated by raising what an
+origin costs, which is not a thing this repository can do. `independence_key()` still refuses to
+count three resold feeds as three. It cannot refuse to count three real ones.
+
+**Rate attacks review, and review is where the human authorization lives.** Every irreversible
+class requires a human. That control is exactly as strong as the human's attention, and a fleet's
+whole advantage is producing more plausible material than anyone reads. The mitigation is not
+technical: it is that NEMESIS produces *packages* for someone else to act on and performs no
+takedown itself, so the reviewer being overwhelmed costs an investigation rather than a victim.
+
+**Composition attacks assumptions, and assumptions are what tests encode.** The incident's real
+lesson is that every component behaved as designed. NET-02 and the Breaker exist because of that
+sentence: one checks a property no per-module check can see, and the other is a standing attempt
+to find the next one.
+
+### What this class makes worse that is already a gap
+
+Named rather than left implied, because each one is now more likely to matter:
+
+- **No cross-session correlation of probes.** PROBE-01 halts a session that reaches for three
+  reserved names. A fleet reaches for one per session across three hundred sessions and every
+  session ends clean. The events are all in the trail; nothing reads them together. `PROPOSED`.
+- **No fleet-level rate limit.** Bounds are per-investigation. `PROPOSED`.
+- **Adaptive adversary modelling.** The demo adversary does not respond to being pursued. A
+  fleet responds within the hour. Not addressed.
+- **Confidence calibration against ground truth.** Unchanged and unchanged in importance: it was
+  already the largest open weakness, and a class that manufactures corroboration at volume is the
+  one that exploits it hardest.
 
 ---
 
@@ -333,6 +422,47 @@ monotonic-not-honest distinction are its, the measurements are ours.
 | Retention and minimization enforcement for personal data | `IMPLEMENTED` | Categories now drive erasure rather than only being marked. |
 | Mandatory-reporting escalation procedure | `IMPLEMENTED` | A register that cannot discharge its own obligation, plus the written procedure in `docs/procedures/mandatory-reporting.md`. **Known gap:** the register does not record *who found* the material, so the stated rule "never the analyst who found it" is not enforced by code — only that the discharging principal is a `LEGAL_REVIEWER`. |
 | Adaptive adversary modelling | Not addressed | The demo adversary does not respond to being pursued. A real one does. |
+
+---
+
+## Open findings from the 2026-08-27 effects and vault reviews
+
+Two adversarial reviews were run against the planes the agent-collective pass had not reached.
+They produced roughly thirty findings between them; twelve were fixed on the branch that
+followed, each with a test constructing the original reproduction. **The rest are recorded here
+rather than closed**, because a finding nobody wrote down is a finding that gets rediscovered by
+somebody who is not on our side.
+
+Every row below was reproduced by executed code against this tree.
+
+| Finding | Consequence | Status |
+|---|---|---|
+| **Two vault instances on one root fork the chain irrecoverably.** The lock is per-instance (`threading.Lock`), `_append` reads the tip and writes with no file lock, and `_write_atomic` uses a fixed `.partial` name. | 3/3 reproductions. The store then reports tampering where there was only concurrency, and there is no repair path: `_chain_tip()` raises, so no seal, no recorded read and no anchor can ever be appended again. An accident produces a report that reads as deliberate. | `PROPOSED` — needs an `flock` held across read-tip-and-append, per-writer temp names, and a documented recovery procedure. |
+| **A replaceable analyser can downgrade MANDATORY_REPORT to ROUTINE before the vault sees it.** The monotonicity rule lives inside `StructuralAnalyser` — the component documented as a deployment extension point, which by design parses hostile bytes. | Material carrying a statutory reporting duty reaches an append-only store as routine and cannot be removed. `AnalysisReport.confined` is also self-asserted by the analyser. | `PROPOSED` — the check belongs in `seal_when_released`, outside the analyser, and needs an explicit partial order over `ContentSafety` since the enum is not a ladder. |
+| **The reporting-obligation register is wired to nothing.** `Register.incur` has zero callers in `src/`. | When quarantine refuses MANDATORY_REPORT material, no obligation opens, no deadline starts, and nothing reads `Quarantine.held()`. The module's own thesis — "the dangerous obligation is the one that lands in a queue nobody reads" — describes the state the platform is in. It is also in-memory, so it would not survive a restart. | `PROPOSED`. This is the missing human gate for the one class of material carrying a legal clock. |
+| **The shipped verifier's size ceiling covers artifacts only.** `read_jsonl`, the manifest read and both `read_bytes()` in `check_seal` are unbounded. | Measured ~6.4× amplification: a 109 MB log peaked at 702 MB RSS. An OOM kill is not an `Exception` and escapes the handler, so a recipient sees a killed process. This also bites *honest* packages from a large vault. | `PROPOSED` — stream the log with byte and line ceilings. |
+| **A claim's `derivation` is self-asserted, so the standing gate costs an adversary one field.** `nemesis.evidence.lineage` now demotes an origin cited by a claim whose derivation is not `DIRECT_COLLECTION`/`AUTHORITATIVE_RECORD`. The gate reads a field the claim's own author writes. | Executed: a `HYPOTHESIS` that writes `derivation=DIRECT_COLLECTION`, or an `OBSERVATION` minted over an arbitrary artifact, still resolves to an unplantable own-sensor origin at P=0.6030. The control is real against honest code and against writers that cannot choose their derivation — `pilot/mediator` hardcodes `MODEL_ASSERTION`, `api/submission` hardcodes `EXTERNAL_REPORT`, and neither sets evidence — and it is **not** a control against an adversary who can already write to the claim store. | `IMPLEMENTED` as an accident control, `PROPOSED` as an adversary control. Closing it needs authorship binding on `Claim`, which carries no signature today. |
+| **`DETERMINISTIC_RULE` is trusted on its word, and it is the cheapest way through the resolver.** A claim citing *no* evidence, naming any claim id as a premise and any string as `rule_name`, inherits that premise's origin. | Executed: identical unplantable origin and P=0.6030 at one hop and at four. `rule_name` has no non-assignment use anywhere in `src/`; `check_derivation` permits `ATTRIBUTION` from an observation and is called from exactly one site, never from `Claim.create`. This costs an attacker **less** than the citation hole that was closed — a claim id rather than an evidence id, and `watch.py` already passes claim ids around. | `PROPOSED` — replay the rule and compare content addresses. Refusing inheritance outright instead would strip the two succession inferences the reference run's resurgence finding rests on, so it is not a patch. |
+| **The lineage counters are blind to successful laundering.** `asserted_backing_claims` counts demotions, so it reports zero on every attack that gets through the gate. | A fully poisoned run is byte-identical to an honest one on all four counters. Any test asserting `asserted_backing_claims == 0` across a run pins zero *cost*, not zero laundering — the reason no such test was written into the slice. | `PROPOSED` — an instrument that reads the successes, if one exists; the honest interim is not to claim this one does. |
+| **A custody conjunct was built, measured and rejected here.** Demoting unless the artifact's custody chain names the claim's author reads like a control and is a release trigger. | `CustodyEvent` is constructed at exactly one site in the tree, the vault returns the *stored* object on re-seal, and `evidence_id` addresses the bytes alone — so the tuple holds one event naming the first party ever to seal those bytes, and `connector_actor_id` hashes name **and version**. Executed: a connector version bump over a durable vault demoted **34/34** honest observations, took every finding to the base rate and flipped `resumes` True→False. Invariant 14 defeated by a point release, no adversary present. | `PROPOSED`, blocked on the vault recording a custody event per seal. Pinned by `test_a_second_collector_of_the_same_artifact_is_not_demoted`. |
+| **`embedded_hash` is a witness the forger opts into.** The identifier check is skipped when an id is not content-addressed, and nothing requires one to be. | The "three independent witnesses" the verifier leans on silently becomes two, with no line of output saying so. | `PROPOSED` — report a non-content-addressed identifier as a finding in its own right. |
+| **The autonomous path is the unconfined one.** `IsolatedEffectsExecutor` has one production caller — the demonstration. The mediator calls `registry.execute` directly. | The plane the safety argument rests on runs with no separate process, no sandbox profile, no deadline and no import seal on the one path an untrusted model drives. Confinement was confirmed to work where it *is* applied. | **Decision needed, not a defect to patch.** Either route the pilot through the executor, or state in `PROJECT_STATE.md` that isolation is `IMPLEMENTED` for the demonstration path and `PROPOSED` for the pilot path. |
+| **The runtime import seal and `.importlinter` disagree in both directions.** `nemesis.audit` is in neither, while the sandbox profile's own docstring names the audit trail as material the plane must not reach. | A worker can import the audit trail. | `PROPOSED` — derive one list from the other and test that they agree. |
+| **A stop condition's meaning is its name.** Nothing constrains `condition` to a vocabulary at issuance, and duplicates within one capability are permitted. | A condition named `target_ownership_contested` whose description means something else is cleared by an ownership observation. | `PROPOSED` — a closed vocabulary, validated at issuance. |
+| **`external_contact_made=False` is asserted where nothing knows.** A killed worker's detail says "nothing can say how far it got" in the same record where the field asserts safety. The `IsolationReport` never reaches the trail despite its port docstring saying it does. | A field that cannot express "unknown" reads as a positive finding. | `PROPOSED` — three-valued, and carry the report into the audit event. |
+| **`allow_unsandboxed` defaults to `True`.** On Linux this is a plain subprocess with full network and filesystem reach, recorded `simulated` with an honest but overlookable `network=NOT DENIED`. | A deployment default and a test default should not be the same value. | `PROPOSED`. |
+
+**Two tests were found to assert their own opposite** and are recorded here because the pattern
+matters more than either instance: `test_collected_content_cannot_inject_markup` passes with the
+HTML escaping deleted (no fixture string contains markup, so it tests the template rather than
+the escaping), and `test_a_lying_analyser_cannot_release_mandatory_report_material` asserts in
+its body that the analyser *can*. The docstring is honest; the name is what a coverage claim
+reads.
+
+**Also worth stating: the evidence vault has no row in the invariant register.** `INVARIANTS.md`
+maps CLAUDE.md invariant 10 to the audit trail only, so the vault's controls — content
+addressing, the chain, quarantine, the export seal — appear in no identifier. That is why these
+findings had no `EVID-*` to violate, and it is the next thing to fix in that document.
 
 ---
 
