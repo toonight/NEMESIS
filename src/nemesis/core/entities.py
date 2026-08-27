@@ -54,6 +54,15 @@ class EntityCategory(StrEnum):
     ECOSYSTEM = "ecosystem"
     VICTIM = "victim"
     INDICATOR = "indicator"
+    CREDENTIAL = "credential"
+    """Authentication material found during collection.
+
+    Its own category rather than a kind of ``CRYPTOGRAPHIC_MATERIAL``, because the two need
+    opposite treatment. A TLS certificate or a PGP key is a deliverable identifier — publishing
+    its fingerprint is how attribution is checked. A credential is the opposite: it belongs to
+    somebody, it is frequently a natural person's, and NEMESIS finding one must never be a step
+    towards NEMESIS using one. See :mod:`nemesis.core.credentials`.
+    """
 
 
 class EntityType(StrEnum):
@@ -118,6 +127,9 @@ class EntityType(StrEnum):
     # Impact
     VICTIM = "victim"
 
+    # Authentication material found in collected content. Never usable, see credentials.py.
+    CREDENTIAL_INDICATOR = "credential_indicator"
+
     # Analytic indicators
     GEOGRAPHIC_INDICATOR = "geographic_indicator"
     LANGUAGE_INDICATOR = "language_indicator"
@@ -163,6 +175,7 @@ CATEGORY_OF: dict[EntityType, EntityCategory] = {
     EntityType.MARKETPLACE: EntityCategory.ECOSYSTEM,
     EntityType.FORUM: EntityCategory.ECOSYSTEM,
     EntityType.VICTIM: EntityCategory.VICTIM,
+    EntityType.CREDENTIAL_INDICATOR: EntityCategory.CREDENTIAL,
     EntityType.GEOGRAPHIC_INDICATOR: EntityCategory.INDICATOR,
     EntityType.LANGUAGE_INDICATOR: EntityCategory.INDICATOR,
     EntityType.BEHAVIORAL_PATTERN: EntityCategory.INDICATOR,
@@ -277,6 +290,24 @@ def normalize_identifier(entity_type: EntityType, value: str) -> str:
         case EntityType.CRYPTO_ADDRESS:
             # Casing is chain-dependent and sometimes a checksum (EIP-55). Preserve it and
             # let the blockchain adapter supply a chain-qualified key in `qualifiers`.
+            return raw
+
+        case EntityType.CREDENTIAL_INDICATOR:
+            # The one entity type whose observed form must never be its natural key. A
+            # credential node keyed on the credential would put the secret into every edge,
+            # every audit line and every projection that names the node — and a natural key is
+            # the most widely copied string in this system. So the key is `kind:fingerprint`
+            # from `CredentialIndicator.natural_key`, and anything else is refused rather than
+            # lowercased and stored, which is what the default branch below would have done.
+            from nemesis.core.credentials import CredentialKind, is_fingerprint
+
+            kind, _, fingerprint = raw.partition(":")
+            if not is_fingerprint(fingerprint) or kind not in set(CredentialKind):
+                raise NormalizationError(
+                    "a credential indicator is keyed on 'kind:credfp-...', never on the "
+                    "credential. Build the key with CredentialIndicator.natural_key so the "
+                    "material stays in the vault and out of the graph"
+                )
             return raw
 
         case _:

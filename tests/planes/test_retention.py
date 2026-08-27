@@ -134,12 +134,20 @@ def test_every_entity_type_has_a_policy() -> None:
 
 def test_the_regulated_categories_are_exactly_the_ones_touching_a_person() -> None:
     """A tripwire on the table. Adding or removing a period is a decision about personal data,
-    and this makes it a visible one."""
+    and this makes it a visible one.
+
+    ``CREDENTIAL`` joined the set with :mod:`nemesis.core.credentials`, and it belongs there for
+    a reason worth stating: a credential found in a criminal dump usually identifies the person
+    it was *stolen from*, which puts it closer to ``VICTIM`` than to any adversary node. The
+    correlation value of holding one survives erasure — the keyed fingerprint outlives the
+    material — so the period costs the platform nothing it needs.
+    """
     regulated = {category for category, rule in DEFAULT_RETENTION.items() if rule.is_regulated}
     assert regulated == {
         EntityCategory.HUMAN_IDENTITY,
         EntityCategory.VICTIM,
         EntityCategory.DIGITAL_IDENTITY,
+        EntityCategory.CREDENTIAL,
     }
 
 

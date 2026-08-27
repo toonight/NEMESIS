@@ -50,6 +50,8 @@ from pydantic import BaseModel, ValidationError
 
 from nemesis.authz.envelope import AutonomyEnvelope
 from nemesis.core.authorization import AuthorizationCapability, TargetFingerprint
+from nemesis.core.canaries import ControlBoundaryProbe, ProbeResponse, SessionProbeLog
+from nemesis.core.canonical import canonical_bytes
 from nemesis.core.claims import Claim, ClaimKind, DerivationKind, Statement
 from nemesis.core.disclosure import (
     INTERNAL_MARKERS,
@@ -78,6 +80,7 @@ from nemesis.pilot.moves import (
     PILOT_MOVE_ADAPTER,
     Briefing,
     Conclude,
+    ConclusionOutcome,
     EntityView,
     EnvelopeView,
     HypothesisView,
@@ -96,6 +99,11 @@ from nemesis.pilot.providers.contract import (
     ProviderIdentity,
 )
 from nemesis.pilot.providers.errors import PilotError
+from nemesis.pilot.stagnation import (
+    SessionStagnation,
+    SessionStagnationDetector,
+    SessionStep,
+)
 from nemesis.ports.effects import EffectRequest
 from nemesis.ports.storage import AuditEvent, AuditSink, ClaimStore, GraphStore
 from nemesis.pursuit.engine import PursuitEngine
@@ -228,6 +236,32 @@ class PilotSession:
     halted_reason: str | None
     pilot_actor: str
 
+    outcome: ConclusionOutcome = ConclusionOutcome.UNSPECIFIED
+    """How the run ended, from the closed vocabulary in :class:`~nemesis.pilot.moves.
+    ConclusionOutcome`.
+
+    Three sources, in this order of authority: the deterministic stagnation detector when it
+    ended the session, the pilot's own ``conclude`` move when it concluded, and ``UNSPECIFIED``
+    otherwise. The detector outranks the pilot deliberately — a pilot halted for going nowhere
+    does not get to file the run as an attribution — and ``UNSPECIFIED`` is kept rather than
+    guessed, because "ended without saying why" is a real and reportable thing for a run to have
+    done.
+
+    Descriptive in every case. It settles no hypothesis, closes no case and releases no target;
+    the same standing a ``record_belief`` has, and for the same reason."""
+
+    stagnation: SessionStagnation | None = None
+    """What the detector found, when it was the thing that ended the session. ``None`` when the
+    run ended some other way, which is not the same as a clean assessment and is not reported as
+    one."""
+
+    probes: tuple[ControlBoundaryProbe, ...] = ()
+    """Reserved identifiers the pilot named. Empty is the normal case, and a non-empty tuple is
+    a fact about the *pilot* rather than about the investigation — see
+    :mod:`nemesis.core.canaries`."""
+
+    probe_response: ProbeResponse = ProbeResponse.LOG
+
     identity: ProviderIdentity | None = None
     """Which provider and which model drove, read **once at session open** and used for every
     audit record in the session.
@@ -279,6 +313,58 @@ class PilotSession:
             if ruling.external_contact_made is not False:
                 return True
         return False
+
+
+_PROSE_MOVE_FIELDS: Final[frozenset[str]] = frozenset({"rationale", "summary", "natural_language"})
+"""Move fields that carry sentences rather than identifiers.
+
+Excluded from both the canary scan and the repetition digest, for two different reasons that
+happen to point the same way. The canary scan must not read prose, because prose is where an
+adversary's text ends up and a control an adversary can fire is a denial of service handed to
+them — the lesson the capability scan and the disclosure backstop each taught once. The
+repetition digest must not read prose either, because a pilot that re-proposes the identical
+pivot with a freshly worded rationale each time is repeating itself, and a digest that included
+the wording would call every one of those moves new.
+"""
+
+
+def _identifier_fields(move: PilotMove) -> dict[str, str]:
+    """The parts of a move that are names rather than sentences.
+
+    Field-agnostic on purpose, like :func:`_redacted_context`: it walks whatever the model
+    declares minus the prose fields, so a move field added later is scanned the day it appears
+    rather than the day someone notices it was not. Parameter *keys* are included and parameter
+    *values* are not — a key is an identifier the pilot chose from nothing, while a value is
+    where text it read during collection is most likely to have ended up.
+    """
+    fields: dict[str, str] = {}
+    for name, value in move:
+        if name in _PROSE_MOVE_FIELDS or name == "kind":
+            continue
+        if isinstance(value, Mapping):
+            for key in value:
+                fields[f"{move.kind}.{name}.key:{key}"] = str(key)
+        elif isinstance(value, str):
+            fields[f"{move.kind}.{name}"] = value
+        elif isinstance(value, tuple):
+            for index, item in enumerate(value):
+                fields[f"{move.kind}.{name}[{index}]"] = str(item)
+    return fields
+
+
+def _move_digest(move: PilotMove) -> str:
+    """A stable rendering of what a move actually asks for, prose excluded.
+
+    Built from the *validated* model rather than from the pilot's raw output, so two moves that
+    are the same request compare equal however the vendor's tool-call serializer spelled them —
+    key order, whitespace and absent-versus-default all normalise away in ``model_dump``.
+    """
+    payload = {
+        name: value
+        for name, value in move.model_dump(mode="json").items()
+        if name not in _PROSE_MOVE_FIELDS
+    }
+    return canonical_bytes(payload).decode("utf-8")
 
 
 OBSERVABLE_STOP_CONDITIONS: Final[frozenset[str]] = frozenset({"target_ownership_contested"})
@@ -374,6 +460,7 @@ class PilotMediator:
         propose_timeout: float = DEFAULT_PROPOSE_TIMEOUT,
         challenger: MoveChallenger | None = None,
         challenge_policy: ChallengePolicy | None = None,
+        stagnation: SessionStagnationDetector | None = None,
     ) -> None:
         self._engine = engine
         self._graph = graph
@@ -387,6 +474,12 @@ class PilotMediator:
         self._propose_timeout = propose_timeout
         self._challenger = challenger
         self._challenge_policy = challenge_policy or ChallengePolicy()
+        # Default-on, and there is no boolean that switches it off. A deployment that wants a
+        # longer leash widens the thresholds, which is a visible configuration change; a flag
+        # would be an invisible one, and this repository's own commit history records what a
+        # control nobody exercises is worth. Ending a stalled session is a *narrowing* in every
+        # case, so an over-eager detector costs an investigation nothing it could not resume.
+        self._stagnation = stagnation or SessionStagnationDetector()
 
     async def drive(
         self, pilot: AutonomousPilot, seed: IncidentSeed, *, total_budget: float = 100.0
@@ -486,12 +579,16 @@ class PilotMediator:
         """The move loop. Entered by :meth:`drive` on a new investigation and by
         :meth:`continue_session` on one already open; identical in every other respect."""
         transcript: list[TurnRecord] = []
+        steps: list[SessionStep] = []
+        probe_log = SessionProbeLog()
         conclusion = ""
         malformed_streak = 0
         last_ruling: Ruling | None = None
         concluded = False
         halted: str | None = None
         closed = False
+        stagnation: SessionStagnation | None = None
+        conclusion_outcome = ConclusionOutcome.UNSPECIFIED
 
         async def close(outcome: str, reason: str) -> None:
             """Write the session close exactly once, whatever ended the session.
@@ -539,6 +636,22 @@ class PilotMediator:
                     "effects_requested": str(
                         sum(1 for turn in transcript if turn.ruling.move_kind == "request_effect")
                     ),
+                    # The typed ending, beside the free-text one. `halted_reason` is prose a
+                    # human reads; this is the value a projection, a benchmark or the resurgence
+                    # loop keys on, and the two used to be the same string — which meant every
+                    # consumer parsed sentences to find out whether an investigation had
+                    # concluded or given up.
+                    "conclusion_outcome": conclusion_outcome.value,
+                    "stagnation_signals": ",".join(
+                        signal.value for signal in (stagnation.signals if stagnation else ())
+                    ),
+                    # Recorded on every close, including the overwhelmingly common empty one. A
+                    # field that appears only when something was found is a field whose absence
+                    # cannot be distinguished from a scan that never ran.
+                    "control_boundary_probes": ",".join(
+                        sorted({probe.token for probe in probe_log.probes})
+                    ),
+                    "probe_response": probe_log.response.value,
                 },
             )
 
@@ -649,6 +762,18 @@ class PilotMediator:
                     continue
 
                 malformed_streak = 0
+
+                # Instrumentation, not enforcement, and it runs before the move is applied so
+                # the record exists whatever the move then does. A probe changes no ruling: the
+                # move below is refused or accepted by exactly the controls that would have
+                # ruled on it anyway, because a canary that could refuse things would be a
+                # control an adversary steering the pilot could aim at an honest investigation.
+                found = probe_log.observe(_identifier_fields(move), at=self._clock())
+                if found:
+                    await self._record_probes(
+                        pilot_actor, investigation, move.kind, found, probe_log.response
+                    )
+
                 outcome = await self._challenge(briefing, move)
                 challenge = outcome.ruling if outcome is not None else None
                 if outcome is not None and self._challenge_policy.blocks(move.kind, outcome):
@@ -670,6 +795,15 @@ class PilotMediator:
                         pilot, pilot_actor, investigation, move
                     )
                 transcript.append(TurnRecord(move, ruling, metadata, challenge))
+                steps.append(
+                    SessionStep(
+                        move_kind=move.kind,
+                        move_digest=_move_digest(move),
+                        status=ruling.status,
+                        entities_discovered=len(ruling.entities_discovered),
+                        evidence_sealed=len(ruling.evidence_sealed),
+                    )
+                )
                 last_ruling = ruling
                 await self._record_move(
                     pilot, pilot_actor, investigation, identity, move, ruling, metadata, challenge
@@ -678,9 +812,40 @@ class PilotMediator:
                 if isinstance(move, Conclude) and ruling.accepted:
                     concluded = True
                     conclusion = move.summary
+                    conclusion_outcome = move.outcome
                     break
+
+                if probe_log.should_halt:
+                    # Sustained probing for capabilities that do not exist. The session ends
+                    # rather than continuing, and it ends as a halt — the pilot reached for
+                    # things no legitimate path names, and whatever it concluded afterwards is
+                    # not something to act on unread.
+                    conclusion_outcome = ConclusionOutcome.NO_SAFE_NEXT_PIVOT
+                    halted = (
+                        "the pilot named "
+                        f"{len({p.token for p in probe_log.probes})} reserved control-boundary "
+                        "identifiers; the session was stopped for human review"
+                    )
+                    break
+
+                # Assessed every turn and kept whether or not it fires, so a session that ran to
+                # its ceiling can still say it had stopped learning at move nine. Only the
+                # *stopping* is configurable; the detection is not.
+                assessment = self._stagnation.assess(steps)
+                if assessment.stagnant:
+                    stagnation = assessment
+                    if self._stagnation.policy.halt_on_stall:
+                        # Stop, and only stop. There is deliberately no branch here that asks
+                        # for a wider seed, a bigger budget or another target — a stalled run is
+                        # exactly the run that must not be able to buy itself more room
+                        # (SAFEFAIL-02), and the absence of the branch is the control rather
+                        # than a check inside one.
+                        conclusion_outcome = assessment.outcome
+                        halted = assessment.describe()
+                        break
             else:
                 halted = f"reached the {max_moves}-move ceiling without concluding"
+                conclusion_outcome = ConclusionOutcome.SCOPE_EXHAUSTED
         except BaseException as exc:
             # Recorded, then re-raised untouched. This is not handling it — nothing here
             # carries on, and `BaseException` is deliberate so that a cancellation or a
@@ -699,6 +864,10 @@ class PilotMediator:
             concluded=concluded,
             halted_reason=halted,
             pilot_actor=pilot_actor,
+            outcome=conclusion_outcome,
+            stagnation=stagnation,
+            probes=probe_log.probes,
+            probe_response=probe_log.response,
             identity=identity,
         )
 
@@ -1341,6 +1510,47 @@ class PilotMediator:
             fields["model"] = identity.model[:128]
             fields["seat"] = identity.seat[:64]
         return fields
+
+    async def _record_probes(
+        self,
+        pilot_actor: str,
+        investigation: Investigation,
+        move_kind: str,
+        probes: tuple[ControlBoundaryProbe, ...],
+        response: ProbeResponse,
+    ) -> None:
+        """Write one ``security.control_boundary_probe`` event per turn that produced probes.
+
+        Its own action name rather than a field on ``pilot.move``, because the two answer
+        different questions and are read by different people. ``pilot.move`` reconstructs an
+        investigation; this reconstructs a *pilot's* behaviour across investigations, and an
+        operator asking "has any model ever reached for a signing key here" should be able to
+        query one action rather than filter every move ever made.
+
+        One event per turn and not per probe: a single move naming three reserved identifiers is
+        one act, and three records of it would triple-count the behaviour the response threshold
+        is measured on.
+        """
+        await self._audit.record(
+            AuditEvent(
+                audit_id=new_id(IdPrefix.AUDIT),
+                occurred_at=self._clock(),
+                actor=pilot_actor,
+                actor_kind=PILOT_ACTOR_KIND,
+                action="security.control_boundary_probe",
+                subject=investigation.investigation_id,
+                outcome=response.value,
+                inputs={
+                    "move_kind": move_kind,
+                    "tokens": ",".join(sorted({probe.token for probe in probes})),
+                    "fields": ",".join(sorted({probe.field_path for probe in probes}))[:400],
+                    # The identifier as the pilot wrote it, bounded. Kept because the normalised
+                    # token alone does not show what was actually said, and an operator deciding
+                    # whether this was a probe or a hallucinated identifier needs the original.
+                    "observed": "; ".join(sorted({probe.observed_value for probe in probes}))[:400],
+                },
+            )
+        )
 
     async def _record_session(
         self,
