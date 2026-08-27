@@ -34,12 +34,29 @@ the far side policy-controlled — an allowlist, a registry, an injected transpo
 short on purpose: every entry is a place where the argument "the model does not choose the
 destination" has to be true, and a list nobody has to justify entries in is a list that grows.
 
-**What this cannot do.** It is static, so it sees imports and call names, not runtime
-composition: a module handed a callable at construction reaches whatever that callable reaches,
-and nothing here can see it. It also cannot see out of the process — a subprocess, a shared
-filesystem, a database another service reads. The honest claim is that it closes the *import*
-composition, which is the one an ordinary commit widens by accident, and it says so rather than
-implying it closes the others.
+**What this cannot do, and the part of it that is checkable.** It is static, so it sees imports
+and call names, not runtime composition: a module handed a callable at construction reaches
+whatever that callable reaches, and nothing here can see it. It also cannot see out of the
+process — a subprocess, a shared filesystem, a database another service reads. The honest claim
+is that it closes the *import* composition, which is the one an ordinary commit widens by
+accident, and it says so rather than implying it closes the others.
+
+One of those blind spots is narrow enough to bound, so it is: a **dynamic import** —
+``import_module``, ``__import__``, ``exec`` — is an edge this graph does not contain, and a
+module that resolves an import name at runtime can reach anything. :func:`dynamic_import_sites`
+enumerates them, and a test asserts the set is exactly the two that exist and no more. Both are
+benign for a specific reason rather than by luck:
+
+* ``nemesis.calibration.freeze`` imports modules to read their constants. It sits above the
+  pilot in the layering, so no model-controlled root can reach it at all.
+* ``nemesis.collect.worker`` resolves a connector factory from a ``module:function`` string,
+  which is how a confined child rebuilds the connector it replaces — a handle cannot be pickled
+  across the pipe without giving the child a deserialization surface. The string comes from a
+  connector's own registered ``ConnectorCapabilities``, which is deployment configuration; no
+  caller and no pilot supplies it.
+
+A third site appearing is not necessarily wrong. It is a place where this analysis stops seeing,
+and the test makes somebody say which.
 
 Status: `IMPLEMENTED`. Run by `scripts/check_egress_reachability.py` in CI and asserted by
 `tests/invariants/test_transitive_egress.py`.
@@ -314,6 +331,40 @@ def process_spawning_modules(graph: ImportGraph) -> tuple[str, ...]:
     return tuple(sorted(name for name, cap in graph.capabilities.items() if cap.process))
 
 
+DYNAMIC_IMPORT_CALLS: Final[frozenset[str]] = frozenset(
+    {"import_module", "__import__", "load_module", "exec_module", "exec", "eval"}
+)
+"""Calls that resolve code to run at runtime, which is an edge the import graph cannot contain.
+
+Matched on the call name alone rather than qualified by a module, unlike :data:`PROCESS_CALLS`.
+The asymmetry is deliberate: ``run`` is a common method name and ``import_module`` is not, so
+the qualification that stops the first from producing noise would only add a way for the second
+to be missed — ``from importlib import import_module`` is the ordinary spelling and has no
+module prefix at the call site at all.
+"""
+
+
+def dynamic_import_sites(src: Path) -> tuple[str, ...]:
+    """Every place the tree resolves an import at runtime, as ``module:line: call``.
+
+    Not a finding on its own, and not reported as one. A dynamic import is a **hole in this
+    analysis**: an edge the graph does not contain, so a module that has one can reach anything
+    its argument names. Enumerating them turns an unbounded caveat into a list somebody has to
+    justify, which is the only honest thing to do with a blind spot you cannot close.
+    """
+    sites: list[str] = []
+    for path in sorted(src.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
+            if name in DYNAMIC_IMPORT_CALLS:
+                sites.append(f"{_module_name(path, src)}:{node.lineno}: {name}")
+    return tuple(sites)
+
+
 def _shortest_path(
     graph: ImportGraph, root: str, targets: Iterable[str], blocked: frozenset[str]
 ) -> dict[str, tuple[str, ...]]:
@@ -356,11 +407,25 @@ def unbrokered_egress(
 ) -> tuple[ReachabilityFinding, ...]:
     """Every way a model-controlled root reaches egress without passing a declared broker.
 
-    Empty is the passing answer, and it is the answer today: the mediator has no import path to
-    either egress-capable connector at all, brokered or otherwise. That is worth stating because
-    it means the brokers are currently *slack in the contract* rather than load-bearing — the
-    property holds more strongly than it needs to, and this function is here to notice the day
-    it stops.
+    Empty is the passing answer and it is the answer today, but **not because there is nothing
+    to broker** — a first reading of this said so and was wrong, and the correction is the useful
+    part. Measured by removing each broker in turn:
+
+    * ``nemesis.collect.isolation`` is **load-bearing**. Both model-controlled roots reach
+      ``nemesis.sandbox.process`` — the confinement launcher, which starts processes — along
+      ``mediator -> pursuit.engine -> collect.isolation -> sandbox.process``, and this broker is
+      the only thing on it. That is the right module to be load-bearing: ``collect_confined`` is
+      the single gate that decides whether a connector handling hostile content runs at all and
+      puts it in a kernel-confined child. The path *should* exist and it *should* go through
+      there.
+    * ``nemesis.collect.wire`` and ``nemesis.pilot.providers.transport`` are slack: removing
+      either changes nothing today. They are declared because the property they assert is one a
+      reader should be able to check, not because a path currently runs through them.
+
+    No model-controlled root reaches either **network**-capable connector at all, brokered or
+    otherwise. The distinction between the two halves is worth keeping: the network property
+    holds more strongly than the contract requires, and the process property holds exactly
+    because of one broker.
     """
     blocked = frozenset(brokers)
     targets = graph.egress_capable - blocked
@@ -394,6 +459,7 @@ def unknown_roots_or_brokers(graph: ImportGraph) -> tuple[str, ...]:
 
 __all__ = [
     "DECLARED_BROKERS",
+    "DYNAMIC_IMPORT_CALLS",
     "MODEL_CONTROLLED_ROOTS",
     "NETWORK_MODULES",
     "PACKAGE_ROOT",
@@ -403,6 +469,7 @@ __all__ = [
     "ModuleCapability",
     "ReachabilityFinding",
     "build_graph",
+    "dynamic_import_sites",
     "process_spawning_modules",
     "unbrokered_egress",
     "unknown_roots_or_brokers",

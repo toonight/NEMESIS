@@ -37,6 +37,7 @@ from nemesis.sandbox.reachability import (
     MODEL_CONTROLLED_ROOTS,
     NETWORK_MODULES,
     build_graph,
+    dynamic_import_sites,
     process_spawning_modules,
     unbrokered_egress,
     unknown_roots_or_brokers,
@@ -91,6 +92,52 @@ def test_the_analysis_is_measuring_something() -> None:
     assert graph.egress_capable, "no module in the tree can reach out; the check tests nothing"
     assert set(MODEL_CONTROLLED_ROOTS) <= set(graph.capabilities)
     assert set(DECLARED_BROKERS) <= set(graph.capabilities)
+
+
+def test_which_brokers_are_load_bearing_is_measured_rather_than_assumed() -> None:
+    """ "No findings" does not say whether anything was brokered or whether there was nothing to.
+
+    **This test exists because the first reading of the analysis was wrong.** An empty finding
+    list — with the brokers excluded, which is how the check runs — was read as "the brokers are
+    slack, the property holds more strongly than the contract requires". Removing them one at a
+    time says otherwise: `collect.isolation` carries the only path from both model-controlled
+    roots to `sandbox.process`, the confinement launcher.
+
+    That is the right module to be load-bearing, and it is worth a reader knowing which one it
+    is. `collect_confined` is the single gate deciding whether a connector handling hostile
+    content runs at all and putting it in a kernel-confined child — the path *should* exist and
+    it *should* go through there. A future change that routed around it would leave this test
+    green only by making the broker slack, which is why the assertion is on the count and not
+    merely on the absence of findings.
+    """
+    graph = build_graph(SRC)
+    without = {
+        broker: unbrokered_egress(graph, brokers=[b for b in DECLARED_BROKERS if b != broker])
+        for broker in DECLARED_BROKERS
+    }
+
+    load_bearing = without["nemesis.collect.isolation"]
+    assert load_bearing, (
+        "removing nemesis.collect.isolation from the broker list produced no findings, so "
+        "nothing routes through the one gate that decides whether hostile collection runs at "
+        "all. Either a path was severed — check why — or one now bypasses it."
+    )
+    assert {f.target for f in load_bearing} == {"nemesis.sandbox.process"}
+    assert {f.root for f in load_bearing} == {
+        "nemesis.pilot.mediator",
+        "nemesis.evolution.controller",
+    }
+
+    slack = {
+        broker: findings
+        for broker, findings in without.items()
+        if broker != "nemesis.collect.isolation"
+    }
+    assert all(not findings for findings in slack.values()), (
+        f"a broker that carried no path now carries one: "
+        f"{ {b: [f.describe() for f in fs] for b, fs in slack.items() if fs} }. That is not "
+        "necessarily wrong, but it is a change in what this contract is holding up."
+    )
 
 
 def test_the_analysis_finds_a_path_when_one_is_planted() -> None:
@@ -166,6 +213,53 @@ def test_process_spawning_is_detected_at_the_call_and_not_at_the_import() -> Non
     assert "nemesis.effects.isolation" in spawners
     assert "nemesis.cli.main" not in spawners
     assert "nemesis.slice.scenario" not in spawners
+
+
+def test_the_holes_in_this_analysis_are_enumerated_and_justified() -> None:
+    """A dynamic import is an edge the graph does not contain. There are two, and both are named.
+
+    ``import_module`` resolves code at runtime, so a module that calls it can reach whatever its
+    argument names and the static analysis above cannot see any of it. That is a genuine blind
+    spot and it cannot be closed — what can be done is bound it, so an unbounded caveat becomes a
+    list somebody has to justify.
+
+    Both existing sites are benign for a specific reason rather than by luck:
+
+    * ``calibration.freeze`` imports modules to read their constants, and sits above the pilot in
+      the layering, so no model-controlled root reaches it at all.
+    * ``collect.worker`` resolves a connector factory from a ``module:function`` string — how a
+      confined child rebuilds the connector it replaces, because pickling a handle across the
+      pipe would hand the child a deserialization surface. The string comes from a connector's
+      registered capabilities, which is deployment configuration; no caller and no pilot
+      supplies it.
+
+    A third site is not necessarily wrong. It is a place this analysis stops seeing, and this
+    test makes somebody say which.
+    """
+    sites = dynamic_import_sites(SRC)
+    modules = sorted({site.split(":")[0] for site in sites})
+    assert modules == ["nemesis.calibration.freeze", "nemesis.collect.worker"], (
+        f"the set of dynamic-import sites changed: {sites}. Each one is an edge the reachability "
+        "analysis cannot contain — say why the new one is safe, or remove it."
+    )
+
+
+def test_no_model_controlled_root_reaches_a_dynamic_import_site() -> None:
+    """The sharper half: a hole only matters if a model-controlled context can reach it.
+
+    Run with the brokers **not** excluded, deliberately. A broker is a place the model may go
+    *through*, and a dynamic import behind one would be a runtime edge on a path the model
+    already has — so this asks the strictly harder question of whether either site is reachable
+    at all.
+    """
+    graph = build_graph(SRC)
+    sites = {site.split(":")[0] for site in dynamic_import_sites(SRC)}
+    findings = unbrokered_egress(graph, brokers=())
+    reachable = {f.target for f in findings} | {module for f in findings for module in f.path}
+    assert not (sites & reachable), (
+        f"a model-controlled context reaches a dynamic-import site: {sorted(sites & reachable)}. "
+        "That is an edge this analysis cannot follow, on a path the model can."
+    )
 
 
 # --- NET-03: a pilot cannot name a destination ---------------------------------------------

@@ -88,8 +88,15 @@ explaining what makes the far side policy-controlled rather than model-controlle
 entry is how this analysis is weakened, so it is deliberately the most conspicuous edit anyone
 can make to the file.
 
-Measured today: no path at all. The brokers are slack in the contract rather than load-bearing,
-and the check exists to notice the day that changes.
+Measured by removing each broker in turn, which is the measurement that means something — an
+empty finding list *with* the brokers excluded says nothing about what happens without them.
+`nemesis.collect.isolation` is **load-bearing**: both model-controlled roots reach
+`nemesis.sandbox.process`, the confinement launcher, and that broker is the only module on the
+path. It is the right one to be load-bearing, because `collect_confined` is the single gate
+deciding whether a connector handling hostile content runs at all. The other two are slack today
+and are declared so a reader can check the property rather than because a path runs through them.
+
+No model-controlled root reaches either network-capable connector at all.
 
 ### 3. The audit trail is anchored, at the rung it honestly occupies
 

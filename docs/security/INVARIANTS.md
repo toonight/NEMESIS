@@ -64,9 +64,22 @@ would be a control derived from the controls it is meant to check.
 | **NET-02** | Model-controlled contexts cannot obtain unauthorized **transitive** Internet access. | `IMPLEMENTED` | `nemesis.sandbox.reachability` builds the import graph, marks modules that can reach the network **or start a process**, and asserts no path from a model-controlled root to one except through a declared broker. Three brokers, each with a written reason the far side is policy-controlled. | `test_transitive_egress.py`, `scripts/check_egress_reachability.py` in CI |
 | **NET-03** | Collector network privileges are not inherited by pilots. | `IMPLEMENTED` | A pivot names an **entity id the investigation surfaced**, never a locator; the vocabulary has no field a destination fits in. The Tor connector takes a `services` allowlist and has no `url` parameter anywhere in its call path. | `test_transitive_egress.py` (8 locators), `test_darkweb_hostility.py`; Breaker `collector-as-proxy` |
 
-**Measured 2026-08-27:** four egress-capable modules in the tree, two process-spawners, and *no
-path at all* from any model-controlled root to any of them. The brokers are currently slack in
-the contract rather than load-bearing; the check exists to notice the day that changes.
+**Measured 2026-08-27**, by removing each broker in turn — because "no findings" does not by
+itself say whether anything was brokered or whether there was nothing to broker:
+
+| Broker | Removing it | Reading |
+|---|---|---|
+| `nemesis.collect.isolation` | **2 findings** | **Load-bearing.** Both model-controlled roots reach `nemesis.sandbox.process` — the confinement launcher — along `mediator → pursuit.engine → collect.isolation → sandbox.process`, and this is the only module on it. That is the right one to be load-bearing: `collect_confined` is the single gate deciding whether a connector handling hostile content runs at all. |
+| `nemesis.collect.wire` | 0 findings | Slack today. Declared because a reader should be able to check the property, not because a path runs through it. |
+| `nemesis.pilot.providers.transport` | 0 findings | Slack today, same reason. |
+
+**No model-controlled root reaches either network-capable connector at all**, brokered or
+otherwise. Keeping the two halves apart matters: the network property holds more strongly than
+the contract requires, and the process property holds exactly because of one broker.
+
+*An earlier draft of this row said the brokers were "slack rather than load-bearing" on the
+strength of an empty finding list. That was measuring the wrong thing — an empty list with the
+brokers excluded says nothing about what happens without them.*
 
 **What NET-02 does not cover, stated rather than implied.** It is a static import analysis. It
 does not see a callable handed in at construction, and it does not see out of the process — a
