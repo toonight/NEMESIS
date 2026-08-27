@@ -81,6 +81,7 @@ from nemesis.authz.audit_anchor import (
     verify_audit_trail,
 )
 from nemesis.authz.verification import CapabilityVerifyingKey
+from nemesis.breaker import ATTACKS, attack_by_id, run_breaker
 from nemesis.collaboration.demonstration import (
     CollaborationDemonstration,
     run_collaboration_demonstration,
@@ -1463,6 +1464,40 @@ def _verify_audit_anchor(workspace: Path, audit_path: Path) -> AuditIntegrityRep
             authorities=registered_authorities(local_anchor_authority(verifier)),
         )
     )
+
+
+@app.command()
+def breaker(
+    attack: Annotated[
+        str | None,
+        typer.Option(help="Run one attack by id instead of the whole catalogue."),
+    ] = None,
+) -> None:
+    """Run the offline adversarial harness against a throwaway NEMESIS, and report what held.
+
+    Every other check in this repository is written by somebody trying to show a control works.
+    This one is written by somebody trying to break it, which is a different job and finds
+    different things — twice now, on a tree where the whole suite was green.
+
+    Nothing here is production. Each attack gets its own temporary workspace, its own ephemeral
+    signing key and its own envelope; the connectors are fixtures and the effect adapters
+    simulate and draft. Exits non-zero on a confirmed finding **or** on an attack that could not
+    be staged, because "we could not check it" must not print as "it held".
+    """
+    console = Console()
+    catalogue = ATTACKS
+    if attack is not None:
+        chosen = attack_by_id(attack)
+        if chosen is None:
+            console.print(Text(f"no attack called {attack!r}", style="bold red"))
+            console.print(Text("  " + ", ".join(a.attack_id for a in ATTACKS), style="dim"))
+            raise typer.Exit(code=2)
+        catalogue = (chosen,)
+
+    report = asyncio.run(run_breaker(catalogue))
+    console.print(Text(report.render(catalogue)))
+    if not report.clean:
+        raise typer.Exit(code=1)
 
 
 __all__ = ["app", "render"]
