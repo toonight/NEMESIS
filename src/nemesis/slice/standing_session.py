@@ -84,12 +84,13 @@ from nemesis.core.infrastructure import (
 )
 from nemesis.core.relationships import PivotMethod, Relationship, RelationType
 from nemesis.core.temporal import TemporalExtent
-from nemesis.effects.registry import default_registry
+from nemesis.effects.isolation import IsolatedEffectsExecutor
 from nemesis.evidence.vault import FileSystemEvidenceVault
 from nemesis.graph.memory import InMemoryClaimStore, InMemoryGraphStore
 from nemesis.pilot.mediator import PilotMediator
 from nemesis.pilot.moves import Briefing, PilotMove, RequestEffect, RulingStatus
 from nemesis.pilot.stagnation import SessionStagnationDetector, SessionStagnationPolicy
+from nemesis.ports.authorization import TrustAnchor
 from nemesis.pursuit.engine import ConnectorRegistry, PursuitEngine
 from nemesis.pursuit.investigation import IncidentSeed
 from nemesis.pursuit.standing import reassess_standing
@@ -640,8 +641,13 @@ async def run_standing_demonstration(*, workspace: Path | None = None) -> Standi
         engine=engine,
         graph=graph,
         envelope=envelope,
-        registry=default_registry(
-            verifying_key=signer.verifying_key, revocations=RevocationRegistry()
+        effects=IsolatedEffectsExecutor(
+            TrustAnchor(verifying_key=signer.verifying_key, revocations=RevocationRegistry()),
+            # The workspace holds the evidence vault, the audit trail and the
+            # authorization ledger. Reading any of them off disk needs no import, so the
+            # import contracts alone would not keep a worker out of the investigation it
+            # is acting for.
+            read_denied=(root,),
         ),
         claims=claims,
         audit=audit,

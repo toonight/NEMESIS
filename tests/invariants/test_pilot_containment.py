@@ -44,6 +44,11 @@ from nemesis.core.evidence import EvidenceObject
 from nemesis.core.identity import Role
 from nemesis.core.ids import EvidenceId, IdPrefix, new_id
 from nemesis.core.temporal import TemporalExtent
+from nemesis.effects.isolation import (
+    InProcessEffectsExecutor,
+    IsolatedEffectsExecutor,
+    sandbox_available,
+)
 from nemesis.effects.registry import default_registry
 from nemesis.graph.memory import InMemoryClaimStore, InMemoryGraphStore
 from nemesis.pilot.mediator import (
@@ -64,7 +69,9 @@ from nemesis.pilot.moves import (
     RunPivot,
 )
 from nemesis.pilot.pilot import AutonomousPilot
+from nemesis.ports.authorization import TrustAnchor
 from nemesis.ports.collection import PivotType
+from nemesis.ports.isolation import EffectsExecutor
 from nemesis.ports.storage import AuditEvent, VaultIntegrityReport
 from nemesis.pursuit.engine import ConnectorRegistry, PursuitEngine
 from nemesis.pursuit.investigation import IncidentSeed
@@ -259,6 +266,7 @@ async def _build(
     effect_budget: int = 8,
     capability: Callable[[TargetFingerprint], AuthorizationCapability] = _envelope,
     contested: bool = False,
+    effects: EffectsExecutor | None = None,
 ) -> Harness:
     graph = InMemoryGraphStore()
     claims = InMemoryClaimStore()
@@ -297,7 +305,7 @@ async def _build(
         engine=engine,
         graph=graph,
         envelope=envelope,
-        registry=registry,
+        effects=effects or InProcessEffectsExecutor(registry),
         claims=claims,
         audit=audit,
         clock=lambda: NOW,
@@ -497,6 +505,83 @@ def test_a_permitted_simulation_against_the_approved_target_succeeds() -> None:
     effect = next(r for r in session.rulings if r.move_kind == "request_effect")
     assert effect.accepted, effect.reason
     assert effect.effect_outcome == "simulated"
+    assert session.any_effect_left_the_platform() is False
+
+
+def _rehearsal(approved_id: str) -> ScriptedPilot:
+    return ScriptedPilot(
+        "in-lane-pilot",
+        [
+            RequestEffect(
+                entity_id=approved_id,
+                operation=OperationClass.SIMULATION,
+                parameters={"stop_condition.target_ownership_contested": "cleared"},
+                rationale="Rehearse the suspension against the approved target.",
+            ),
+            Conclude(summary=""),
+        ],
+    )
+
+
+def test_a_pilot_driven_effect_records_the_confinement_it_actually_ran_under() -> None:
+    """THE TEST THIS SECTION EXISTS FOR.
+
+    The mediator used to hold an `EffectsRegistry` and call `execute` on it directly, which
+    ran every pilot-driven effect in this process: no child, no sandbox profile, no deadline,
+    no import seal. `IsolatedEffectsExecutor` existed and worked, and had exactly one caller
+    in `src/` — the demonstration — so `PROJECT_STATE.md` graded process isolation for Effects
+    `IMPLEMENTED` while the one path an untrusted model drives was the unconfined one.
+
+    A session could not even *report* this: there was no field on `Ruling` for it, so the
+    absence of confinement was indistinguishable from its presence. That is the half worth
+    pinning — not that in-process is forbidden, but that choosing it is recorded. Silence is
+    what let the label stay wrong.
+    """
+
+    async def scenario() -> PilotSession:
+        h = await _build()
+        return await h.mediator.drive(_hostile(_rehearsal(h.approved.entity_id)), h.seed)
+
+    session = _run(scenario())
+
+    effect = next(r for r in session.rulings if r.move_kind == "request_effect")
+    assert effect.accepted, effect.reason
+    # Recorded, and honest: nothing confined this.
+    assert effect.effect_egress_denied is False
+    assert effect.effect_isolation == "mechanism=none; network=NOT DENIED"
+
+
+@pytest.mark.skipif(
+    not sandbox_available(),
+    reason="kernel-enforced confinement is macOS-only here; the fallback is a plain subprocess",
+)
+def test_a_pilot_driven_effect_runs_in_a_confined_child_when_wired_to_one() -> None:
+    """The other half: the pilot path can now reach the confinement, and says it did.
+
+    Same pilot, same move, same envelope — only the executor differs. This is what the
+    threat model asked for when it said the choice was "route the pilot through the executor,
+    or say in `PROJECT_STATE.md` that isolation is `PROPOSED` for the pilot path".
+    """
+
+    async def scenario() -> PilotSession:
+        h = await _build(
+            effects=IsolatedEffectsExecutor(
+                TrustAnchor(
+                    verifying_key=SIGNING_KEY.verifying_key, revocations=RevocationRegistry()
+                )
+            )
+        )
+        return await h.mediator.drive(_hostile(_rehearsal(h.approved.entity_id)), h.seed)
+
+    session = _run(scenario())
+
+    effect = next(r for r in session.rulings if r.move_kind == "request_effect")
+    assert effect.accepted, effect.reason
+    assert effect.effect_outcome == "simulated"
+    # A child process ran it and the kernel refused that process a socket.
+    assert effect.effect_egress_denied is True
+    assert effect.effect_isolation is not None
+    assert "sandbox-exec" in effect.effect_isolation
     assert session.any_effect_left_the_platform() is False
 
 

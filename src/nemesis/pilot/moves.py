@@ -140,6 +140,28 @@ class Ruling(BaseModel):
     and did not say — and a session treats the second case as contact, because a control that
     reads silence as safety is the one that fails quietly."""
 
+    effect_isolation: str | None = None
+    """What confinement the effect actually ran under, rendered — mechanism, whether the
+    network was denied, the writable directory, the deadline.
+
+    ``None`` means no effect ran. It is a *rendered* report rather than the object because the
+    transcript is read by people and replayed by tests, and the failure this records is one a
+    reader has to be able to see without knowing the type: for the whole life of the pilot path
+    the answer was `mechanism=none; network=NOT DENIED` and nothing anywhere said so."""
+
+    effect_egress_denied: bool | None = None
+    """Whether a child process ran it **and** the kernel refused that process a socket.
+
+    Named for what it measures rather than for what a reader would like it to mean, following
+    :attr:`~nemesis.ports.isolation.IsolationReport.egress_denied_from_this_process`: "this
+    process could not open a socket" is what the kernel establishes, and "nothing could have
+    left the system" is a stronger claim no rule here proves.
+
+    Separate from :attr:`effect_isolation` because a session must be able to *count* this, and
+    counting a rendered string is how a control becomes decorative. Read it the way
+    :attr:`external_contact_made` is read — ``None`` means nothing ran, or something ran and
+    did not say, and a session treats silence as unconfined rather than as safe."""
+
     recorded_claim_id: str | None = None
     """Set when a belief was recorded. What the pilot asserts becomes a claim of kind
     HYPOTHESIS derived from MODEL_ASSERTION — never an observation, a fact or an evidence

@@ -17,8 +17,12 @@ Where each containment lives, so a reader can find it rather than take it on fai
   the envelope and reports what the envelope decided.
 - **Acting outside the envelope** — a forbidden operation, an unapproved target, an expired
   grant — is contained by routing every :class:`RequestEffect` through
-  ``registry.execute(request, envelope)``. The refusal is the *capability's*, reached by
-  asking it, never a judgement the mediator substituted for it.
+  ``effects.perform(request, envelope, operation=...)``. The refusal is the *capability's*,
+  reached by asking it, never a judgement the mediator substituted for it. The executor is a
+  port rather than the registry, so *where* the effect runs is the wiring site's decision and
+  is recorded on every ruling: this path called the registry directly until 2026-08-27, which
+  made it the one unconfined path in a plane graded `IMPLEMENTED` on the demonstration's
+  behaviour.
 - **Forging the target's state** to slip past target binding is contained because the mediator
   observes the target's current attributes *from the graph*, never from the pilot. A pilot may
   name a target; it may not tell NEMESIS what that target currently looks like.
@@ -65,7 +69,6 @@ from nemesis.core.temporal import TemporalExtent, utcnow
 from nemesis.effects.registry import (
     STOP_CONDITION_CLEARED,
     STOP_CONDITION_PARAMETER_PREFIX,
-    EffectsRegistry,
 )
 from nemesis.pilot.challenger import (
     ChallengeOutcome,
@@ -105,6 +108,7 @@ from nemesis.pilot.stagnation import (
     SessionStep,
 )
 from nemesis.ports.effects import EffectRequest
+from nemesis.ports.isolation import EffectsExecutor
 from nemesis.ports.storage import AuditEvent, AuditSink, ClaimStore, GraphStore
 from nemesis.pursuit.engine import PursuitEngine
 from nemesis.pursuit.investigation import IncidentSeed, Investigation
@@ -489,7 +493,7 @@ class PilotMediator:
         engine: PursuitEngine,
         graph: GraphStore,
         envelope: AutonomyEnvelope,
-        registry: EffectsRegistry,
+        effects: EffectsExecutor,
         claims: ClaimStore,
         audit: AuditSink,
         clock: Callable[[], datetime] = utcnow,
@@ -503,7 +507,15 @@ class PilotMediator:
         self._engine = engine
         self._graph = graph
         self._envelope = envelope
-        self._registry = registry
+        # An `EffectsExecutor`, never an `EffectsRegistry`. The distinction is the whole point
+        # of this argument: the registry performs the operation in *this* process, and holding
+        # one here is what left the one path an untrusted model drives as the only unconfined
+        # path in the plane — no separate process, no sandbox profile, no deadline, no import
+        # seal — while `PROJECT_STATE.md` graded the plane `IMPLEMENTED` on the strength of the
+        # demonstration, which was the one caller that did confine. There is deliberately no
+        # default: a wiring site that wants to run effects in-process says so by name, with
+        # `InProcessEffectsExecutor`, and the report it gets back says so on every result.
+        self._effects = effects
         self._claims = claims
         self._audit = audit
         self._clock = clock
@@ -1280,7 +1292,9 @@ class PilotMediator:
             requested_by=pilot_actor,
             requested_at=self._clock(),
         )
-        result = await self._registry.execute(request, capability)
+        result, isolation = await self._effects.perform(
+            request, capability, operation=move.operation
+        )
 
         if result.succeeded:
             status = RulingStatus.ACCEPTED
@@ -1294,6 +1308,8 @@ class PilotMediator:
             reason=result.detail,
             effect_outcome=result.outcome.value,
             external_contact_made=result.external_contact_made,
+            effect_isolation=isolation.render(),
+            effect_egress_denied=isolation.egress_denied_from_this_process,
             authorization=result.authorization,
             target_natural_key=target_natural_key,
             target_entity_type=target_entity_type,

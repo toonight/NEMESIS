@@ -62,6 +62,7 @@ from nemesis.core.authorization import (
 from nemesis.core.temporal import utcnow
 from nemesis.effects.registry import (
     REGISTRY_NAME,
+    EffectsRegistry,
     Preflight,
     preflight,
     refusal_record,
@@ -637,3 +638,57 @@ class IsolatedEffectsExecutor:
             detail=detail,
             external_contact_made=False,
         )
+
+
+UNCONFINED_REPORT: Final = IsolationReport(
+    mechanism="none",
+    separate_process=False,
+    network_denied=False,
+    filesystem_confined_to=None,
+    # True for a structural reason rather than a hopeful one: an `EffectsRegistry` is
+    # constructed from a *verifying* key and a revocation oracle, so there is no signing key
+    # in this process for an adapter to reach. The other four fields are the honest `False`.
+    private_key_withheld=True,
+    imports_sealed_by_worker=False,
+)
+"""Every control off, stated once.
+
+``egress_denied_from_this_process`` is False on it, which is what a session counts.
+"""
+
+
+class InProcessEffectsExecutor:
+    """Performs an operation **here**, in the process that asked for it.
+
+    The counterpart to :class:`IsolatedEffectsExecutor`, and it exists so that "unconfined" is
+    something a wiring site has to *choose and name* rather than something it gets by omission.
+    Before this, the mediator held an :class:`~nemesis.effects.registry.EffectsRegistry` and
+    called it directly: every session was unconfined, no line of code said so, and
+    ``PROJECT_STATE.md`` graded process isolation `IMPLEMENTED` because the demonstration path
+    — the one path that did use the isolating executor — was the one anybody read.
+
+    Legitimate uses are the ones where a child process would measure the wrong thing: the
+    offline Breaker arena, the pilot benchmarks that drive deliberately pathological pilots to
+    completion, and the test suite. It is **not** a deployment choice. A deployment that runs a
+    real pilot and reaches for this class has removed the Effects plane's only kernel-enforced
+    boundary, and the report it returns says so on every single result.
+    """
+
+    def __init__(self, registry: EffectsRegistry) -> None:
+        self._registry = registry
+
+    async def perform(
+        self,
+        request: EffectRequest,
+        capability: AuthorizationCapability,
+        *,
+        operation: OperationClass,
+    ) -> tuple[EffectResult, IsolationReport]:
+        """Run it here, and say plainly that nothing confined it.
+
+        ``operation`` is accepted to satisfy the port and is deliberately **not** used to route:
+        the registry keys on ``request.operation``, which is the value the capability was
+        checked against. Routing on a second, separately supplied operation would be a way for
+        the two to disagree.
+        """
+        return await self._registry.execute(request, capability), UNCONFINED_REPORT
