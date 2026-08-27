@@ -52,6 +52,7 @@ from nemesis.core.entities import Entity, EntityType
 from nemesis.core.identity import Role
 from nemesis.core.ids import IdPrefix, new_id
 from nemesis.core.temporal import TemporalExtent
+from nemesis.effects.isolation import InProcessEffectsExecutor
 from nemesis.effects.registry import default_registry
 from nemesis.evidence.vault import FileSystemEvidenceVault
 from nemesis.graph.memory import InMemoryClaimStore, InMemoryGraphStore
@@ -274,8 +275,14 @@ async def arena(*, effect_budget: int = 4, max_moves: int = 12, **mediator: Any)
             engine=engine,
             graph=graph,
             envelope=envelope,
-            registry=default_registry(
-                verifying_key=signer.verifying_key, revocations=RevocationRegistry()
+            # An offline arena, not a deployment. The attacks here are against the envelope,
+            # the audit trail and the mediator's own gates, none of which a child process
+            # changes — and the arena runs every attack, so a spawn per effect would buy
+            # nothing and cost the suite. Unconfined by choice, and the report says so.
+            effects=InProcessEffectsExecutor(
+                default_registry(
+                    verifying_key=signer.verifying_key, revocations=RevocationRegistry()
+                )
             ),
             claims=claims,
             audit=audit,

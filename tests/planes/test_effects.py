@@ -557,6 +557,60 @@ def test_an_adapter_that_raises_is_recorded_as_failed_not_propagated() -> None:
     assert result.external_contact_made is False
 
 
+@pytest.mark.parametrize("failure", [RuntimeError, AttributeError])
+def test_an_adapter_whose_name_raises_is_still_recorded_as_failed(
+    failure: type[Exception],
+) -> None:
+    """The crash handler must not be defeated by the object whose failure it is handling.
+
+    Same defect class as the version that called ``authorizes()`` on the capability that had
+    just crashed, and the fix landed on one of the two sites that read ``name``. The
+    ``getattr`` guarding ``adapter_name`` absorbs ``AttributeError`` alone, so a ``name``
+    raising anything else escaped there; and ``detail`` read ``adapter.name`` bare one line
+    later, so ``AttributeError`` escaped after all. Either way the operation ran and produced
+    no ``EffectResult``, which is the single outcome this handler exists to make impossible.
+    """
+
+    class _NameRaisingAdapter:
+        operation = OperationClass.SIMULATION
+        makes_external_contact = False
+        anchor = ANCHOR
+        crashed = False
+
+        @property
+        def name(self) -> str:
+            # Well-behaved while it is being wired, so the protocol check at registration
+            # passes and the failure lands where it matters. Any `name` derived from a
+            # lazily-loaded resource behaves exactly this way.
+            if type(self).crashed:
+                raise failure("name unavailable")
+            return "adapter-whose-name-breaks"
+
+        async def execute(
+            self, request: EffectRequest, capability: AuthorizationCapability
+        ) -> EffectResult:
+            type(self).crashed = True
+            raise ValueError("adapter bug")
+
+    registry = EffectsRegistry(
+        verifying_key=SIGNING_KEY.verifying_key, revocations=RevocationRegistry()
+    )
+    registry.register(_NameRaisingAdapter())
+    target = _target()
+    result = asyncio.run(
+        registry.execute(
+            _request(OperationClass.SIMULATION, target),
+            _capability(OperationClass.SIMULATION, target),
+        )
+    )
+
+    assert result.outcome is EffectOutcome.FAILED
+    assert "ValueError" in result.detail
+    assert result.external_contact_made is False
+    # The record still names an actor: the registry itself, rather than nothing at all.
+    assert result.adapter_name
+
+
 # --- Statelessness -----------------------------------------------------------
 
 

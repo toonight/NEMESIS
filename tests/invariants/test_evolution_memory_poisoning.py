@@ -49,6 +49,7 @@ from nemesis.core.entities import Entity, EntityType
 from nemesis.core.identity import Role
 from nemesis.core.ids import IdPrefix, new_id
 from nemesis.core.temporal import TemporalExtent
+from nemesis.effects.isolation import InProcessEffectsExecutor
 from nemesis.effects.registry import default_registry
 from nemesis.evidence.vault import FileSystemEvidenceVault
 from nemesis.evolution.controller import EvolutionController
@@ -384,8 +385,8 @@ async def _harness() -> Harness:
         engine=engine,
         graph=graph,
         envelope=envelope,
-        registry=default_registry(
-            verifying_key=signer.verifying_key, revocations=RevocationRegistry()
+        effects=InProcessEffectsExecutor(
+            default_registry(verifying_key=signer.verifying_key, revocations=RevocationRegistry())
         ),
         claims=claims,
         audit=audit,

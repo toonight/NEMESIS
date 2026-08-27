@@ -49,6 +49,7 @@ from nemesis.core.identity import Role
 from nemesis.core.ids import IdPrefix, new_id
 from nemesis.core.provenance import CollectionMethod
 from nemesis.core.temporal import TemporalExtent
+from nemesis.effects.isolation import InProcessEffectsExecutor
 from nemesis.effects.registry import default_registry
 from nemesis.evidence.vault import FileSystemEvidenceVault
 from nemesis.graph.memory import InMemoryClaimStore, InMemoryGraphStore
@@ -306,8 +307,12 @@ async def run_scenario(
         engine=engine,
         graph=graph,
         envelope=envelope,
-        registry=default_registry(
-            verifying_key=signer.verifying_key, revocations=RevocationRegistry()
+        # A measurement harness, not a deployment. Effects run in this process so the
+        # figures describe the limiter rather than process-spawn latency, and the report
+        # on every ruling says `mechanism=none; network=NOT DENIED` rather than letting
+        # the absence of confinement go unrecorded.
+        effects=InProcessEffectsExecutor(
+            default_registry(verifying_key=signer.verifying_key, revocations=RevocationRegistry())
         ),
         claims=claims,
         audit=audit,

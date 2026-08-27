@@ -137,7 +137,17 @@ class SourceDescriptor(BaseModel):
         "Populating this is what makes independence assessment possible at all.",
     )
     handling_restrictions: tuple[str, ...] = ()
-    """e.g. TLP:RED, contractual redistribution limits, law-enforcement caveats."""
+    """e.g. TLP:RED, contractual redistribution limits, law-enforcement caveats.
+
+    **Recorded, not enforced — do not read this as a control.** Two connectors write it and
+    nothing in the tree reads it: no export path, no disclosure path, no test. A field whose
+    documented purpose is redistribution limits, consulted by nobody, reads as a dissemination
+    control in review and is not one, which is the more dangerous of the two states.
+
+    It is also dropped rather than merged when :func:`~nemesis.evidence.lineage.resolve_sources`
+    collapses two artifacts naming one source, because that dedup keys on identity alone. See
+    the threat model; enforcing it is `PROPOSED` and labelling it honestly is the interim.
+    """
 
     @property
     def is_adversary_influenceable(self) -> bool:
