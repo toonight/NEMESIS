@@ -1,6 +1,6 @@
 # Project state
 
-**Last updated: 2026-08-23.** How a future session finds its bearings quickly.
+**Last updated: 2026-08-27.** How a future session finds its bearings quickly.
 
 Everything below carries its epistemic label. These are never silently upgraded, and a
 label change is a documented event.
@@ -89,10 +89,17 @@ can be until a corpus of resolved cases exists.
 | Selectivity | `IMPLEMENTED` | Edge weight derives from how many entities share the pivot attribute. Uncounted populations weigh zero. |
 | Method reliability ceilings | `IMPLEMENTED` | Separate from selectivity. Stylometry capped at 0.30, transaction-graph heuristics at 0.60, cryptographic identity uncapped. |
 | Evidence fusion | `IMPLEMENTED` | Subjective logic. WBF within dependence groups, CBF across independent origins, N-ary only. See ADR-0002. |
-| Plane separation | `IMPLEMENTED` | 13 `import-linter` contracts in CI. Effects cannot reach the intelligence platform; disruption cannot reach persona linkage; a provider adapter cannot reach the mediator or any platform plane; the collaboration plane cannot reach authorization or evidence. **The eleventh contract exists because of what adding the tenth measured:** a new top-level package under `src/nemesis/` is *ungoverned by default*. A probe that imported all nine planes at once from a fresh `nemesis.collaboration` reported `10 kept, 0 broken`, and `nemesis.core` importing it left the contract literally named "Core domain model depends on nothing internal" reporting KEPT — every `forbidden` contract is a deny-list keyed by module name and the `layers` contract ignores modules it does not list. A clean linter run over new top-level code is evidence of absent coverage, not of compliance. Both new contracts were verified to **break** on a deliberate probe before being trusted. |
+| Plane separation | `IMPLEMENTED` | 15 `import-linter` contracts in CI. **Two added 2026-08-27 (ADR-0014):** an `independence` contract so no provider seat can reach another — the Hugging Face incident's invented-channel failure mode, made structural — and a `forbidden` contract so no plane may import the adversarial Breaker. Effects cannot reach the intelligence platform; disruption cannot reach persona linkage; a provider adapter cannot reach the mediator or any platform plane; the collaboration plane cannot reach authorization or evidence. **The eleventh contract exists because of what adding the tenth measured:** a new top-level package under `src/nemesis/` is *ungoverned by default*. A probe that imported all nine planes at once from a fresh `nemesis.collaboration` reported `10 kept, 0 broken`, and `nemesis.core` importing it left the contract literally named "Core domain model depends on nothing internal" reporting KEPT — every `forbidden` contract is a deny-list keyed by module name and the `layers` contract ignores modules it does not list. A clean linter run over new top-level code is evidence of absent coverage, not of compliance. Both new contracts were verified to **break** on a deliberate probe before being trusted. |
 | Graph store | `IMPLEMENTED` | In-memory, temporal traversal, refuses to expand through shared infrastructure and reports where it stopped. |
 | Evidence vault | `IMPLEMENTED` | Hash-chained, append-only, tested by actual tampering. |
-| Audit trail | `IMPLEMENTED` | Hash-chained; insertion, deletion, reordering and modification each tested separately. |
+| Audit trail | `IMPLEMENTED` | Hash-chained; insertion, deletion, reordering and modification each tested separately. **Measured 2026-08-27:** a *fresh reader* cannot see a truncated tail — the demo's trail cut from 72 entries to 60 reported `chain intact: True`, because `verify()` compares the file against counters the writing process held and `nemesis verify` is a different process. |
+| Audit anchoring | `IMPLEMENTED` at `AnchorIndependence.NONE` | `authz/audit_anchor.py` publishes a signed `(epoch, record_count, tip_hash)` after a run and `nemesis verify` checks it — closing the truncation gap above, and finally *calling* a contract that had existed untouched by any production path. The chain and the anchor are **complementary, not overlapping**: the chain catches a careless edit and misses a fully recomputed rewrite; the anchor does the reverse. Both catch interior deletion. At `NONE` it catches an accident and nobody who meant it, and says so in the verdict text. |
+| Authority monotonicity | `IMPLEMENTED` | `authz/monotonicity.py` makes "nothing untrusted widened authority" one comparable value rather than a dozen separate refusals. An observation instrument, never a gate — nothing in the production path consults it. AUTH-01…04. |
+| Transitive egress analysis | `IMPLEMENTED` | `sandbox/reachability.py` + a CI step: no path from a model-controlled context to a module that can reach the network **or start a process**, except through a broker declared with a written justification. Measured today: four egress-capable modules, two process-spawners, and no path at all. NET-02. |
+| Credentials as evidence | `IMPLEMENTED` | `core/credentials.py`: no type has a field material fits in, the fingerprint is HMAC under a deployment key rather than a digest a weak password is recovered from, and a credential cannot be a graph node's natural key. RESTRICTED by category, so the briefing filter, the effects scan, the analyst view and the export redaction all cover it with no credential-specific code. AUTH-04. |
+| Safe investigative failure | `IMPLEMENTED` (thresholds `PROPOSED`) | `ConclusionOutcome` types how a run ended; `pilot/stagnation.py` ends a stalled session with one of them. Every signal maps into the safe-failure set and no branch responds to a stall by widening anything. Detection is not configurable; only stopping is. SAFEFAIL-01/02. |
+| Control-boundary canaries | `IMPLEMENTED` | `core/canaries.py`: ten reserved identifiers nothing legitimate emits, matched on a normalised whole token **in pilot-authored identifier fields only** — never prose, because a control an adversary can fire is a denial of service handed to them. A hit is a typed `security.control_boundary_probe` event; three distinct tokens end the session. Refuses nothing on its own. PROBE-01/02. |
+| NEMESIS Breaker | `IMPLEMENTED` (harness) / `PROPOSED` (model-backed attacker) | An offline adversary: ten deterministic attacks, each bound to a named invariant, each in its own throwaway arena with an ephemeral key. Three verdicts — a run holding any `INCONCLUSIVE` is not clean. `nemesis breaker`. See `docs/security/BREAKER.md`. |
 | Authorization gateway | `IMPLEMENTED` | Ed25519, target fingerprint binding, dual control, offline verification with the public key alone. |
 | Identity and RBAC | `IMPLEMENTED` | Roles and assurance checked, not accepted. Approval needs the role and the floor; refusal deliberately needs less. A legal instrument needs a legal reviewer among the approvers, checked at issuance. |
 | Identity attestation | `IMPLEMENTED` | The gateway takes a signed `IdentityAssertion` and a mandatory `PrincipalVerifier`, never a caller-built `Principal`. Issuer allowlist, audience, expiry, signature, and a per-issuer assurance ceiling. |
@@ -251,6 +258,16 @@ Founder-level questions, with working defaults implemented so nothing is blocked
 ---
 
 ## Known risks, worst first
+
+0. **A fleet, not a person, is now a named adversary — and two of its best moves are open.**
+   Class G was added to the threat model on 2026-08-27 (ADR-0014). Most of what it wants is
+   refused by construction, and two things are not. **Manufactured source independence:**
+   `independence_key()` refuses to count three resold feeds as three and cannot refuse to count
+   three genuinely separate origins a collective paid for, which is the control everything else
+   here rests on. **Cross-session probe correlation:** PROBE-01 halts a session that reaches for
+   three reserved capability names; a fleet reaches for one per session across three hundred
+   sessions and every session ends clean. The events are all in the trail and nothing reads them
+   together. Both `PROPOSED`.
 
 1. **No confidence figure has ever been validated.** Attribution rarely has ground truth,
    so Brier scores and reliability diagrams have nothing to score against. Every number the
