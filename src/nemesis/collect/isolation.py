@@ -27,7 +27,9 @@ contract calls for.
 
 from __future__ import annotations
 
+import base64
 import json
+import shutil
 import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -36,6 +38,11 @@ from typing import Final
 
 from pydantic import ValidationError
 
+from nemesis.collect.quarantine import (
+    AnalysisReport,
+    ArtifactHandle,
+    analysis_payload,
+)
 from nemesis.collect.wire import decode_result
 from nemesis.ports.collection import (
     ConnectorCapabilities,
@@ -290,3 +297,148 @@ async def collect_confined(
     if failure is not None:
         return None, f"confined collection failed: {failure}"
     return result, None
+
+
+ANALYSER_WORKER_MODULE: Final = "nemesis.collect.analyser_worker"
+
+SHIPPED_ANALYSER_FACTORY: Final = "nemesis.collect.quarantine:StructuralAnalyser"
+"""The factory the child imports when no other is named.
+
+A ``module:function`` string rather than an object, for the reason `IsolatedCollector` gives:
+an object cannot cross a process boundary, and pickling one would hand the child a
+deserialization surface — the very class of bug this boundary exists to contain.
+"""
+
+
+class ConfinedAnalyser:
+    """Examines quarantined bytes in a child process that cannot reach this one.
+
+    The gap this closes is the one the quarantine was built for and did not have.
+    `StructuralAnalyser` runs in the calling process — the process holding the graph, the claim
+    store and an open vault — and it says so honestly by reporting ``confined=False``. So the
+    pipeline that exists because collected bytes are hostile was parsing them in the one place
+    a parser exploit pays best.
+
+    One process per artifact. A warm analyser would carry state from the last artifact into the
+    next, and the first thing a compromised parser does with that is wait — the same reasoning
+    that gives the Effects plane one process per operation and the collector one per pivot.
+
+    ``confined`` on the returned report is **overwritten here, from the process this parent
+    observed**, and never taken from the child's own answer. A worker that has been taken over
+    would otherwise attest to its own containment, which is the one claim it must not be able
+    to make. The same lesson is written into `IsolationReport.separate_process`, where a review
+    once reached the report-building line with `create_subprocess_exec` raising and collected
+    four asserted controls for a run in which nothing was ever created.
+    """
+
+    def __init__(
+        self,
+        analyser_factory: str = SHIPPED_ANALYSER_FACTORY,
+        *,
+        deny_reads: tuple[Path, ...] = (),
+        require_kernel_confinement: bool = False,
+        deadline_seconds: float = DEFAULT_DEADLINE_SECONDS,
+    ) -> None:
+        self._factory = analyser_factory
+        self._deny_reads = deny_reads
+        self._require_kernel_confinement = require_kernel_confinement
+        self._deadline = deadline_seconds
+
+    @property
+    def name(self) -> str:
+        return f"confined:{self._factory}"
+
+    async def analyse(self, artifact: bytes, handle: ArtifactHandle) -> AnalysisReport:
+        """Run the examination elsewhere, and report what confinement it actually had.
+
+        Returns a report for every outcome, including a child that crashed, hung or wrote
+        nonsense. Raising instead would be caught by `Quarantine.analyse` and turned into a
+        held artifact anyway — but by a handler that could not say *which* of those happened,
+        and the difference between "the analyser died" and "the analyser said routine" is the
+        whole content of the decision downstream.
+        """
+        import sys
+
+        import nemesis
+
+        workdir = Path(tempfile.mkdtemp(prefix="nemesis-analyse-"))
+        try:
+            policy = SandboxPolicy(
+                workdir=workdir,
+                # The danger runs inward here, as it does for a collector: the artifact is
+                # already in hand, and what must not happen is this process reaching out with
+                # it or reaching further in.
+                allow_network=False,
+                read_denied=self._deny_reads,
+                confine_reads=True,
+                read_allowed=(Path(nemesis.__file__).resolve().parent.parent,),
+                environment={
+                    "PATH": "/usr/bin:/bin",
+                    "PYTHONPATH": str(Path(nemesis.__file__).resolve().parent.parent),
+                },
+            )
+            envelope = json.dumps(
+                {
+                    "factory": self._factory,
+                    "job": json.loads(analysis_payload(handle)),
+                    "artifact": base64.b64encode(artifact).decode(),
+                }
+            ).encode()
+
+            run = await run_confined(
+                [sys.executable, "-s", "-m", ANALYSER_WORKER_MODULE],
+                stdin=envelope,
+                policy=policy,
+                deadline_seconds=self._deadline,
+                allow_unsandboxed=not self._require_kernel_confinement,
+            )
+        finally:
+            shutil.rmtree(workdir, ignore_errors=True)
+
+        # Kernel-enforced, or not. A plain subprocess is a real boundary against an accident
+        # and no boundary at all against code that means it, so it does not earn `confined`.
+        confined = run.started and run.mechanism == "sandbox-exec"
+
+        if not run.ok:
+            return self._failed(handle, confined, run.failure or "the analyser did not run")
+        try:
+            payload = json.loads(run.stdout or b"{}")
+            if "error" in payload:
+                return self._failed(handle, confined, str(payload["error"]))
+            # Re-validated on this side. What crosses that pipe is untrusted data — invariant 5
+            # applied to our own worker, because a worker that has been owned *is* the outside
+            # world, and it is the one that most wants to be believed.
+            report = AnalysisReport.model_validate(payload)
+        except (ValidationError, ValueError, TypeError) as exc:
+            tail = run.stderr.decode(errors="replace").strip().splitlines()[-1:] or ["no stderr"]
+            return self._failed(
+                handle,
+                confined,
+                f"the analyser returned nothing usable ({type(exc).__name__}: {exc}); "
+                f"last stderr line: {tail[0][:200]}",
+            )
+
+        if report.artifact_id != handle.artifact_id:
+            return self._failed(
+                handle,
+                confined,
+                f"the analyser reported on {report.artifact_id!r} and was asked about "
+                f"{handle.artifact_id!r}; a report filed against the wrong artifact is worse "
+                "than none",
+            )
+        return report.model_copy(update={"confined": confined})
+
+    def _failed(self, handle: ArtifactHandle, confined: bool, why: str) -> AnalysisReport:
+        """A failure keeps the declared classification, never `ROUTINE`.
+
+        Anyone who can crash the analyser would otherwise choose the classification, which is
+        the rule `Quarantine.analyse` already applies to an exception and which has to hold
+        here too — this path returns rather than raises, so it does not reach that handler.
+        """
+        return AnalysisReport(
+            artifact_id=handle.artifact_id,
+            classification=handle.declared_safety,
+            analyser=self.name,
+            confined=confined,
+            failure=why,
+        )

@@ -226,14 +226,14 @@ def test_process_spawning_is_detected_at_the_call_and_not_at_the_import() -> Non
 
 
 def test_the_holes_in_this_analysis_are_enumerated_and_justified() -> None:
-    """A dynamic import is an edge the graph does not contain. There are two, and both are named.
+    """A dynamic import is an edge the graph does not contain. There are three, and all are named.
 
     ``import_module`` resolves code at runtime, so a module that calls it can reach whatever its
     argument names and the static analysis above cannot see any of it. That is a genuine blind
     spot and it cannot be closed — what can be done is bound it, so an unbounded caveat becomes a
     list somebody has to justify.
 
-    Both existing sites are benign for a specific reason rather than by luck:
+    Each site is benign for a specific reason rather than by luck:
 
     * ``calibration.freeze`` imports modules to read their constants, and sits above the pilot in
       the layering, so no model-controlled root reaches it at all.
@@ -242,13 +242,25 @@ def test_the_holes_in_this_analysis_are_enumerated_and_justified() -> None:
       pipe would hand the child a deserialization surface. The string comes from a connector's
       registered capabilities, which is deployment configuration; no caller and no pilot
       supplies it.
+    * ``collect.analyser_worker`` resolves an *analyser* factory from a ``module:function``
+      string, for the same reason and with the same shape — added 2026-08-27 when the artifact
+      analyser gained a confined child of its own. The string is `ConfinedAnalyser`'s
+      constructor argument, which defaults to the shipped analyser and is otherwise deployment
+      wiring; nothing that crosses the collection boundary reaches it, and in particular the
+      artifact does not. It is worth noting what this site is *for*: it exists so the module
+      that parses hostile bytes stops doing so in the process holding the vault, which is a
+      larger reduction in reachable surface than the edge it adds.
 
-    A third site is not necessarily wrong. It is a place this analysis stops seeing, and this
+    A fourth site is not necessarily wrong. It is a place this analysis stops seeing, and this
     test makes somebody say which.
     """
     sites = dynamic_import_sites(SRC)
     modules = sorted({site.split(":")[0] for site in sites})
-    assert modules == ["nemesis.calibration.freeze", "nemesis.collect.worker"], (
+    assert modules == [
+        "nemesis.calibration.freeze",
+        "nemesis.collect.analyser_worker",
+        "nemesis.collect.worker",
+    ], (
         f"the set of dynamic-import sites changed: {sites}. Each one is an edge the reachability "
         "analysis cannot contain — say why the new one is safe, or remove it."
     )

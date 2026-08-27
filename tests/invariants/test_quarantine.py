@@ -53,7 +53,7 @@ class _Exploding:
 
     name = "exploding-analyser"
 
-    def analyse(self, artifact: bytes, handle: ArtifactHandle) -> AnalysisReport:
+    async def analyse(self, artifact: bytes, handle: ArtifactHandle) -> AnalysisReport:
         raise MemoryError("the parser died on this input")
 
 
@@ -62,7 +62,7 @@ class _Lying:
 
     name = "lying-analyser"
 
-    def analyse(self, artifact: bytes, handle: ArtifactHandle) -> AnalysisReport:
+    async def analyse(self, artifact: bytes, handle: ArtifactHandle) -> AnalysisReport:
         return AnalysisReport(
             artifact_id=handle.artifact_id,
             classification=ContentSafety.ROUTINE,
@@ -76,7 +76,7 @@ class _Escalating:
 
     name = "escalating-analyser"
 
-    def analyse(self, artifact: bytes, handle: ArtifactHandle) -> AnalysisReport:
+    async def analyse(self, artifact: bytes, handle: ArtifactHandle) -> AnalysisReport:
         return AnalysisReport(
             artifact_id=handle.artifact_id,
             classification=ContentSafety.MANDATORY_REPORT,
@@ -91,7 +91,7 @@ class _Sideways:
 
     name = "sideways-analyser"
 
-    def analyse(self, artifact: bytes, handle: ArtifactHandle) -> AnalysisReport:
+    async def analyse(self, artifact: bytes, handle: ArtifactHandle) -> AnalysisReport:
         return AnalysisReport(
             artifact_id=handle.artifact_id,
             classification=ContentSafety.SENSITIVE_PERSONAL_DATA,
@@ -145,7 +145,7 @@ def test_an_analysis_that_crashes_leaves_the_artifact_quarantined() -> None:
     quarantine = Quarantine()
     handle = quarantine.admit(b"input that kills the parser")
 
-    report = quarantine.analyse(handle, _Exploding())
+    report = asyncio.run(quarantine.analyse(handle, _Exploding()))
 
     assert report.succeeded is False
     assert quarantine.state(handle) is QuarantineState.HELD
@@ -159,15 +159,15 @@ def test_a_failed_analysis_reports_that_it_was_not_confined() -> None:
     quarantine = Quarantine()
     handle = quarantine.admit(b"x")
 
-    assert quarantine.analyse(handle, _Exploding()).confined is False
+    assert asyncio.run(quarantine.analyse(handle, _Exploding())).confined is False
 
 
 def test_held_artifacts_are_listed_so_a_human_can_see_the_backlog() -> None:
     quarantine = Quarantine()
     first = quarantine.admit(b"one")
     second = quarantine.admit(b"two")
-    quarantine.analyse(first, _Exploding())
-    quarantine.analyse(second, StructuralAnalyser())
+    asyncio.run(quarantine.analyse(first, _Exploding()))
+    asyncio.run(quarantine.analyse(second, StructuralAnalyser()))
 
     assert first.artifact_id in quarantine.held()
     assert second.artifact_id not in quarantine.held()
@@ -184,7 +184,7 @@ def test_an_executable_declared_routine_is_raised_not_believed() -> None:
         b"MZ\x90\x00 this is a PE header", declared_safety=ContentSafety.ROUTINE
     )
 
-    report = quarantine.analyse(handle, StructuralAnalyser())
+    report = asyncio.run(quarantine.analyse(handle, StructuralAnalyser()))
 
     assert report.classification is ContentSafety.MALICIOUS_CODE
     assert any("raised to malicious_code" in note for note in report.observations)
@@ -194,7 +194,7 @@ def test_a_declared_classification_is_never_lowered_by_the_shipped_analyser() ->
     quarantine = Quarantine()
     handle = quarantine.admit(b"ordinary text", declared_safety=ContentSafety.MALICIOUS_CODE)
 
-    assert quarantine.analyse(handle, StructuralAnalyser()).classification is (
+    assert asyncio.run(quarantine.analyse(handle, StructuralAnalyser())).classification is (
         ContentSafety.MALICIOUS_CODE
     )
 
@@ -204,7 +204,7 @@ def test_malicious_code_may_still_be_sealed_because_sealing_is_not_running() -> 
     job. *Executing* it is what the classification forbids, and sealing executes nothing."""
     quarantine = Quarantine()
     handle = quarantine.admit(b"MZ malware sample")
-    quarantine.analyse(handle, StructuralAnalyser())
+    asyncio.run(quarantine.analyse(handle, StructuralAnalyser()))
 
     assert quarantine.release(handle) == b"MZ malware sample"
     assert quarantine.state(handle) is QuarantineState.RELEASED
@@ -218,7 +218,7 @@ def test_mandatory_report_material_has_no_automated_exit() -> None:
     decision by omission."""
     quarantine = Quarantine()
     handle = quarantine.admit(b"content", declared_safety=ContentSafety.MANDATORY_REPORT)
-    quarantine.analyse(handle, StructuralAnalyser())
+    asyncio.run(quarantine.analyse(handle, StructuralAnalyser()))
 
     with pytest.raises(QuarantineError, match="no automated exit"):
         quarantine.release(handle)
@@ -246,7 +246,7 @@ def test_a_lying_analyser_cannot_release_mandatory_report_material() -> None:
     """
     quarantine = Quarantine()
     handle = quarantine.admit(b"x", declared_safety=ContentSafety.MANDATORY_REPORT)
-    quarantine.analyse(handle, _Lying())
+    asyncio.run(quarantine.analyse(handle, _Lying()))
 
     with pytest.raises(QuarantineError, match="less restrictive"):
         quarantine.release(handle)
@@ -261,7 +261,7 @@ def test_an_analyser_may_still_raise_a_classification() -> None:
     check that refused every disagreement would be a check somebody turns off."""
     quarantine = Quarantine()
     handle = quarantine.admit(b"x", declared_safety=ContentSafety.ROUTINE)
-    quarantine.analyse(handle, _Escalating())
+    asyncio.run(quarantine.analyse(handle, _Escalating()))
 
     with pytest.raises(QuarantineError, match="no automated exit"):
         quarantine.release(handle)
@@ -279,7 +279,7 @@ def test_a_sideways_reclassification_is_refused_rather_than_guessed() -> None:
     """
     quarantine = Quarantine()
     handle = quarantine.admit(b"x", declared_safety=ContentSafety.MALICIOUS_CODE)
-    quarantine.analyse(handle, _Sideways())
+    asyncio.run(quarantine.analyse(handle, _Sideways()))
 
     with pytest.raises(QuarantineError, match="less restrictive"):
         quarantine.release(handle)
@@ -307,7 +307,7 @@ def test_the_shipped_analyser_does_not_claim_confinement_it_does_not_have() -> N
     """
     quarantine = Quarantine()
     handle = quarantine.admit(b"<html>ordinary</html>")
-    report = StructuralAnalyser().analyse(b"<html>ordinary</html>", handle)
+    report = asyncio.run(StructuralAnalyser().analyse(b"<html>ordinary</html>", handle))
 
     assert report.confined is False, (
         "the shipped analyser attested to kernel-enforced confinement it never had"
@@ -335,7 +335,7 @@ def test_malware_under_a_non_routine_class_is_named_rather_than_lost() -> None:
 
     for declared in ContentSafety:
         handle = quarantine.admit(malware, declared_safety=declared)
-        report = StructuralAnalyser().analyse(malware, handle)
+        report = asyncio.run(StructuralAnalyser().analyse(malware, handle))
 
         # The load-bearing half: never lowered, on any member.
         assert report.classification is declared or declared is ContentSafety.ROUTINE
@@ -404,7 +404,7 @@ def test_material_carrying_a_reporting_obligation_never_reaches_the_vault() -> N
     quarantine = Quarantine()
     artifact = b"declared as carrying a reporting obligation"
     handle = quarantine.admit(artifact, declared_safety=ContentSafety.MANDATORY_REPORT)
-    quarantine.analyse(handle, StructuralAnalyser())
+    asyncio.run(quarantine.analyse(handle, StructuralAnalyser()))
 
     with pytest.raises(QuarantineError):
         quarantine.release(handle)

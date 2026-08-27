@@ -25,7 +25,7 @@ guarantee, and it is the only one that sees a bare literal inside a function bod
 field default, or a two-line logic change that touches no constant at all. `engine_drifted()`
 names the modules that moved.
 
-**Every module-level constant**, by normalised syntax, in `CONSTANT_DIGESTS` — 774 of them,
+**Every module-level constant**, by normalised syntax, in `CONSTANT_DIGESTS` — 776 of them,
 with no classification whatsoever. A dial does not have to hold a digit and does not have to
 look like a table; four rules for deciding what counted were tried and all four excluded
 something load-bearing. `constants_drifted()` names what moved, appeared or vanished.
@@ -135,7 +135,7 @@ CALIBRATION_CONSTANTS: Final[tuple[str, ...]] = (
 """The curated epistemic subset, named as ``module:NAME`` and frozen by **imported value**.
 
 Not "every number": most of what decides a published figure here is not a number at all — of the
-774 dials `discovered_constants()` covers, 543 hold no numeric literal. And not the completeness
+776 dials `discovered_constants()` covers, 545 hold no numeric literal. And not the completeness
 guarantee either, which is the job of the two syntactic digests; this list is deliberately
 curated, so it is allowed to be incomplete in a way they are not.
 
@@ -517,7 +517,9 @@ CONSTANT_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis.collect.fixtures.iron_tide:_REGISTRATION_EXPIRES": "b990aa1fbf63f584",
         "nemesis.collect.fixtures.iron_tide:_SCAN_OBSERVED_FROM": "aa395cfd9ed7ed78",
         "nemesis.collect.fixtures.iron_tide:_SCAN_OBSERVED_UNTIL": "6a8896d5719000f1",
+        "nemesis.collect.isolation:ANALYSER_WORKER_MODULE": "49b109e83398e47f",
         "nemesis.collect.isolation:DEFAULT_DEADLINE_SECONDS": "555016a71b57c351",
+        "nemesis.collect.isolation:SHIPPED_ANALYSER_FACTORY": "c6d8e6b1ef06ba5f",
         "nemesis.collect.isolation:WORKER_MODULE": "501c1273d74f3132",
         "nemesis.collect.quarantine:HELD_CLASSIFICATIONS": "6791ff6dd57cb037",
         "nemesis.collect.quarantine:MAX_ARTIFACT_BYTES": "7979bbf4b77a0d2c",
@@ -1082,7 +1084,7 @@ def discovered_constants(tree: Path | None = None) -> dict[str, str]:
     `EXCLUDED_CONCLUSIONS`, four security tables made of plain strings. The module digest covered
     them, so it was never a bypass; the claim that every dial was *named* was simply false.
 
-    So there is no rule now. Every module-level upper-case assignment is a dial, 774 of them,
+    So there is no rule now. Every module-level upper-case assignment is a dial, 776 of them,
     and the cost of including the genuine prose is nothing: rewording a message already moves
     that module's syntax digest, so no new failure mode is introduced by naming it too.
 
@@ -1261,14 +1263,15 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/collaboration/providers/registry.py": "3f06a0cbfdd90da1",
         "nemesis/collaboration/publisher.py": "2795a37b55ec8a5d",
         "nemesis/collect/__init__.py": "ad2e13b69c4fc1fd",
+        "nemesis/collect/analyser_worker.py": "ce1270f80c81e9f8",
         "nemesis/collect/base.py": "2942f5ba711b0cc7",
         "nemesis/collect/dark_web.py": "2a1fa5c9e03df787",
         "nemesis/collect/deepdarkcti.py": "1464c386e157b4c3",
         "nemesis/collect/fixtures/__init__.py": "697cd02f522bbe51",
         "nemesis/collect/fixtures/glass_anvil.py": "ee6a6c4241054d2a",
         "nemesis/collect/fixtures/iron_tide.py": "1185765cf3c3a1d9",
-        "nemesis/collect/isolation.py": "b8558935d5a0593e",
-        "nemesis/collect/quarantine.py": "d3014265d772c686",
+        "nemesis/collect/isolation.py": "92be3ad0742ea961",
+        "nemesis/collect/quarantine.py": "78352715c1f9c534",
         "nemesis/collect/ransomware_live.py": "e0d4f7137a88c8ae",
         "nemesis/collect/simulated.py": "e96dc57efcf409d7",
         "nemesis/collect/wire.py": "0b2c5b0cf7ea8e40",
