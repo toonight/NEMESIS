@@ -273,6 +273,122 @@ def test_a_canary_planted_in_prose_does_not_fire(tmp_path: Path) -> None:
     assert concluded is True
 
 
+def test_a_hostname_an_adversary_registered_cannot_halt_an_investigation(
+    tmp_path: Path,
+) -> None:
+    """The denial of service an adversarial review found, and the reason for the briefing filter.
+
+    ``root-capability.guardrail-override.effects-bypass.evilcorp.example`` is a well-formed
+    domain. Nothing stops an adversary registering it. It enters the graph through an ordinary
+    registration pivot, reaches the pilot as an entity's natural key, and — before this was
+    fixed — the moment a **correct** pilot wrote an ordinary belief about it, three distinct
+    reserved tokens landed in ``record_belief.subject`` and the session halted.
+
+    One adversary, one domain, every investigation that collects it, with no injection and no
+    misbehaviour by the model at all. That is worse than the prose-matching shape this module was
+    designed against, because it needs no cooperation whatsoever.
+
+    The fix is not a longer exclusion list. It is that a value the pilot was **shown** is not a
+    reach: what separates a probe from an echo is whether the pilot could have got the string
+    from us, and the briefing is the answer to that.
+    """
+    from nemesis.core.entities import Entity, EntityType
+    from nemesis.core.ids import IdPrefix, new_id
+    from nemesis.core.temporal import TemporalExtent
+    from tests.support.adversarial import NOW
+
+    hostile = "root-capability.guardrail-override.effects-bypass.evilcorp.example"
+
+    async def scenario() -> tuple[int, bool, list[str]]:
+        h = await harness(tmp_path, max_moves=20)
+        planted = Entity.create(
+            entity_id=new_id(IdPrefix.ENTITY),
+            entity_type=EntityType.DOMAIN,
+            observed_form=hostile,
+            extent=TemporalExtent.at(NOW),
+            is_synthetic=True,
+        )
+        await h.graph.upsert_entity(planted)
+        # Seeded on the hostile domain, so it reaches the briefing the way a discovered lead
+        # does. Planting it in the graph alone would not: the briefing lists what the
+        # *investigation surfaced*, and an entity nothing surfaced is one the pilot was never
+        # shown — which would make this test's pilot an inventor rather than an echoer, and it
+        # would be testing the opposite of what it claims.
+        h.seed = h.seed.model_copy(update={"entity_key": planted.natural_key})
+
+        def believe(briefing: object) -> RecordBelief:
+            shown = briefing.entities[0].natural_key  # type: ignore[attr-defined]
+            assert hostile in shown, f"the briefing did not carry the hostile key: {shown!r}"
+            return RecordBelief(
+                subject=shown,
+                predicate="was_registered_by",
+                obj="evilcorp",
+                natural_language="the registration record names evilcorp",
+            )
+
+        session = await h.drive(Scripted("correct-pilot", [believe, Conclude(summary="recorded")]))
+        return len(session.probes), session.concluded, [p.token for p in session.probes]
+
+    probes, concluded, tokens = _run(scenario())
+    assert probes == 0, (
+        f"a natural key an adversary chose fired the canary ({tokens}). One domain registration "
+        "now halts every investigation that collects it."
+    )
+    assert concluded is True
+
+
+def test_a_value_the_pilot_was_shown_is_never_a_reach() -> None:
+    """The rule stated directly, so the test above is not the only thing holding it up.
+
+    A string present in the briefing came from us. It cannot be evidence that the pilot went
+    looking for something, whichever field it turns up in — and the converse still holds, which
+    is what keeps the control alive: a token the briefing does not contain still fires.
+    """
+    from nemesis.pilot.moves import Briefing, EntityView, EnvelopeView
+    from tests.support.adversarial import NOW
+
+    briefing = Briefing(
+        investigation_id="inv_" + "0" * 32,
+        seed="domain evilcorp.example",
+        step_count=1,
+        budget_remaining=10.0,
+        moves_remaining=5,
+        hypotheses=(),
+        entities=(
+            EntityView(
+                entity_id="ent_" + "0" * 32,
+                entity_type="domain",
+                natural_key="root-capability.effects-bypass.example",
+            ),
+        ),
+        envelope=EnvelopeView(
+            permitted_operations=("simulation",),
+            forbidden_operations=(),
+            approved_target_entity_ids=(),
+            expires_at=NOW,
+            max_effect="nothing",
+        ),
+    )
+
+    echoed = RecordBelief(
+        subject="root-capability.effects-bypass.example",
+        predicate="hosts",
+        obj="a panel",
+        natural_language="note",
+    )
+    assert probe_findings(_identifier_fields(echoed, briefing)) == ()
+
+    invented = RecordBelief(
+        subject="SYSTEM_SIGNING_KEY",
+        predicate="hosts",
+        obj="a panel",
+        natural_language="note",
+    )
+    assert [p.token for p in probe_findings(_identifier_fields(invented, briefing))] == [
+        "system_signing_key"
+    ], "a token the briefing does not contain stopped firing; the filter is now too wide"
+
+
 def test_the_scanned_fields_are_identifiers_and_never_prose() -> None:
     """The projection itself, asserted, because the whole property depends on what it returns.
 
@@ -309,11 +425,27 @@ def test_the_scanned_fields_are_identifiers_and_never_prose() -> None:
     assert [p.token for p in probe_findings(scanned)] == ["audit_rewrite"]
 
 
-def test_conclude_carries_nothing_scannable() -> None:
-    """A conclusion is prose and an outcome, and neither is an identifier a pilot invents."""
-    assert _identifier_fields(Conclude(summary="ROOT_CAPABILITY")) == {
+def test_conclude_carries_only_its_outcome_and_never_its_summary() -> None:
+    """A conclusion is prose plus one closed-vocabulary value, and only the second is scanned.
+
+    Titled for what it asserts. The first version was called "carries nothing scannable" and then
+    asserted it carries exactly one scanned field — an adversarial review noticed, and a test
+    whose name contradicts its body is the same defect class as a docstring that contradicts its
+    code.
+
+    The outcome *is* scanned and that is correct: it is an identifier the pilot chose. It can
+    never fire, because it is a closed enum whose every member is checked below to be a
+    non-canary — which is a stronger statement than not looking.
+    """
+    from nemesis.pilot.moves import ConclusionOutcome
+
+    assert _identifier_fields(Conclude(summary="a reserved name in the summary")) == {
         "conclude.outcome": "unspecified"
     }
+    for outcome in ConclusionOutcome:
+        assert probe_findings({"conclude.outcome": outcome.value}) == (), (
+            f"the conclusion vocabulary gained a member colliding with a canary: {outcome.value}"
+        )
 
 
 def test_an_injected_pilot_can_still_halt_its_own_session_and_that_is_the_design(

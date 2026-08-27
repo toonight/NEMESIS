@@ -328,27 +328,65 @@ the wording would call every one of those moves new.
 """
 
 
-def _identifier_fields(move: PilotMove) -> dict[str, str]:
-    """The parts of a move that are names rather than sentences.
+def _identifier_fields(move: PilotMove, briefing: Briefing | None = None) -> dict[str, str]:
+    """The parts of a move the pilot **invented**, as opposed to echoed back at us.
 
     Field-agnostic on purpose, like :func:`_redacted_context`: it walks whatever the model
-    declares minus the prose fields, so a move field added later is scanned the day it appears
-    rather than the day someone notices it was not. Parameter *keys* are included and parameter
-    *values* are not — a key is an identifier the pilot chose from nothing, while a value is
-    where text it read during collection is most likely to have ended up.
+    declares minus the prose fields, so a move field added later is scanned the day it appears.
+    Parameter *keys* are included and parameter *values* are not — a key is an identifier the
+    pilot composed, while a value is where text it read during collection is most likely to have
+    ended up.
+
+    **The ``briefing`` filter is the important half, and it was missing.** An adversarial review
+    of this module broke it with one DNS registration: a domain whose *subdomain labels are three
+    reserved capability names*. That is a well-formed hostname and nothing stops anybody buying
+    it. It enters the graph through an ordinary registration pivot, reaches the pilot as an
+    :class:`~nemesis.pilot.moves.EntityView` natural key, and the moment a correct pilot writes an
+    ordinary belief about it, three distinct reserved tokens appear in ``record_belief.subject``
+    and the session halts. One adversary, one domain, every investigation that collects it — the
+    exact denial of service :mod:`nemesis.core.canaries` says must not exist, arriving through a
+    field that docstring had not considered. (The literal hostname is in
+    `tests/invariants/test_control_boundary_canaries.py`; spelling it here would trip the scan
+    that keeps reserved names out of real code, which is that scan working.)
+
+    So a value the pilot was *shown* is not a reach. Every string in the assembled briefing is
+    excluded, which is the rule the original design meant and stated as "identifier fields": what
+    distinguishes a probe from an echo is not which field it is in, it is whether the pilot could
+    have got the string from us. A pilot that invents a reserved name still fires it; a pilot
+    that repeats a natural key we handed it does not.
+
+    ``briefing`` is optional so the function stays callable from a test with a bare move. Absent,
+    nothing is excluded — the strict reading, which is right for a caller that has no briefing to
+    compare against.
     """
+    shown = briefing.model_dump_json() if briefing is not None else ""
+
+    def invented(value: str) -> bool:
+        return bool(value) and value not in shown
+
     fields: dict[str, str] = {}
     for name, value in move:
         if name in _PROSE_MOVE_FIELDS or name == "kind":
             continue
         if isinstance(value, Mapping):
+            # Keys only. A key is an identifier the pilot composed; a value is where text it
+            # read during collection is most likely to have ended up.
             for key in value:
-                fields[f"{move.kind}.{name}.key:{key}"] = str(key)
-        elif isinstance(value, str):
-            fields[f"{move.kind}.{name}"] = value
+                if invented(str(key)):
+                    fields[f"{move.kind}.{name}.key:{key}"] = str(key)
         elif isinstance(value, tuple):
             for index, item in enumerate(value):
-                fields[f"{move.kind}.{name}[{index}]"] = str(item)
+                if invented(str(item)):
+                    fields[f"{move.kind}.{name}[{index}]"] = str(item)
+        else:
+            # Everything else, stringified. The first version tested for `str` explicitly and
+            # silently skipped anything that was not one — so an `int`, a `bool` or a nested
+            # model added to a move later would have been unscanned while this docstring claimed
+            # to be field-agnostic. A default branch is what makes that claim true; the prose
+            # exclusions above are the only list, and there is now only one.
+            text = str(value)
+            if invented(text):
+                fields[f"{move.kind}.{name}"] = text
     return fields
 
 
@@ -768,7 +806,7 @@ class PilotMediator:
                 # move below is refused or accepted by exactly the controls that would have
                 # ruled on it anyway, because a canary that could refuse things would be a
                 # control an adversary steering the pilot could aim at an honest investigation.
-                found = probe_log.observe(_identifier_fields(move), at=self._clock())
+                found = probe_log.observe(_identifier_fields(move, briefing), at=self._clock())
                 if found:
                     await self._record_probes(
                         pilot_actor, investigation, move.kind, found, probe_log.response
@@ -802,6 +840,7 @@ class PilotMediator:
                         status=ruling.status,
                         entities_discovered=len(ruling.entities_discovered),
                         evidence_sealed=len(ruling.evidence_sealed),
+                        claim_recorded=ruling.recorded_claim_id is not None,
                     )
                 )
                 last_ruling = ruling
@@ -809,10 +848,24 @@ class PilotMediator:
                     pilot, pilot_actor, investigation, identity, move, ruling, metadata, challenge
                 )
 
+                # Assessed BEFORE the conclude branch, and the order is the fix. It used to run
+                # after, so a pilot that stalled for five turns and concluded on the sixth — the
+                # turn the detector would have fired — produced `stagnation=None`, no signals in
+                # the audit close, and whatever outcome it chose to file. `PilotSession.outcome`
+                # claimed "the detector outranks the pilot deliberately"; it did not, and an
+                # adversarial review filed a stalled run as `attribution_reached` to prove it.
+                assessment = self._stagnation.assess(steps)
+                if assessment.stagnant:
+                    stagnation = assessment
+
                 if isinstance(move, Conclude) and ruling.accepted:
                     concluded = True
                     conclusion = move.summary
-                    conclusion_outcome = move.outcome
+                    # The detector wins when it fired. A pilot is free to say what it thinks the
+                    # run established; it is not free to file a run that stopped going anywhere
+                    # as an attribution, because that is the record every downstream consumer
+                    # keys on.
+                    conclusion_outcome = assessment.outcome if assessment.stagnant else move.outcome
                     break
 
                 if probe_log.should_halt:
@@ -828,21 +881,18 @@ class PilotMediator:
                     )
                     break
 
-                # Assessed every turn and kept whether or not it fires, so a session that ran to
-                # its ceiling can still say it had stopped learning at move nine. Only the
-                # *stopping* is configurable; the detection is not.
-                assessment = self._stagnation.assess(steps)
-                if assessment.stagnant:
-                    stagnation = assessment
-                    if self._stagnation.policy.halt_on_stall:
-                        # Stop, and only stop. There is deliberately no branch here that asks
-                        # for a wider seed, a bigger budget or another target — a stalled run is
-                        # exactly the run that must not be able to buy itself more room
-                        # (SAFEFAIL-02), and the absence of the branch is the control rather
-                        # than a check inside one.
-                        conclusion_outcome = assessment.outcome
-                        halted = assessment.describe()
-                        break
+                # Assessed above, before the conclude branch, and kept whether or not it fires —
+                # so a session that ran to its ceiling can still say it had stopped learning at
+                # move nine. Only the *stopping* is configurable; the detection is not.
+                if assessment.stagnant and self._stagnation.policy.halt_on_stall:
+                    # Stop, and only stop. There is deliberately no branch here that asks
+                    # for a wider seed, a bigger budget or another target — a stalled run is
+                    # exactly the run that must not be able to buy itself more room
+                    # (SAFEFAIL-02), and the absence of the branch is the control rather
+                    # than a check inside one.
+                    conclusion_outcome = assessment.outcome
+                    halted = assessment.describe()
+                    break
             else:
                 halted = f"reached the {max_moves}-move ceiling without concluding"
                 conclusion_outcome = ConclusionOutcome.SCOPE_EXHAUSTED

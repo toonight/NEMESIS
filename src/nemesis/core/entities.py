@@ -209,6 +209,21 @@ class NormalizationError(ValueError):
     """The observed value cannot be normalized into a natural key."""
 
 
+KEYED_BY_CONSTRUCTION_TYPES: frozenset[EntityType] = frozenset({EntityType.CREDENTIAL_INDICATOR})
+"""Types whose natural key must be *built*, never observed — so the normalizer may only refuse.
+
+Most entity types normalize an observed form into a key, and a form that will not normalize is
+allowed through on a caller-supplied key, because personas and campaigns have no syntax. That
+escape hatch is right for them and wrong here: a credential indicator's normalizer exists solely
+to refuse anything that is not ``kind:credfp-…``, so falling through it accepts the raw
+credential it just rejected.
+
+Membership therefore means: the key is re-validated even when the observed form could not be
+normalized. Add a type here only when its normalizer has no success path from a raw observation —
+otherwise this closes a door that was supposed to be open.
+"""
+
+
 _DOMAIN_RE = re.compile(r"^(?!-)[a-z0-9-]{1,63}(?<!-)(\.(?!-)[a-z0-9-]{1,63}(?<!-))*$")
 _ASN_RE = re.compile(r"^(?:as)?(\d{1,10})$", re.IGNORECASE)
 _HEX_RE = re.compile(r"^[0-9a-f]+$")
@@ -354,6 +369,17 @@ class Entity(BaseModel):
         except NormalizationError:
             # An unnormalizable observed form is allowed only if the caller supplied the
             # key explicitly — some entity types (personas, campaigns) have no syntax.
+            #
+            # **Except where the refusal IS the rule.** For a type in
+            # `KEYED_BY_CONSTRUCTION_TYPES` the normalizer's only job is to raise on anything
+            # that is not the required shape, so falling through here accepts exactly what it
+            # refused. An adversarial review walked straight through it: `Entity.create` refused
+            # a raw credential and `Entity(...)` and `Entity.model_validate(...)` — the
+            # deserialization path every storage adapter uses — both accepted it as a natural
+            # key. The claim "a credential cannot be a graph key" was true of the function and
+            # false of the graph.
+            if self.entity_type in KEYED_BY_CONSTRUCTION_TYPES:
+                normalize_identifier(self.entity_type, self.natural_key)
             return self
         if self.natural_key != expected:
             raise ValueError(

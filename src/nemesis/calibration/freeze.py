@@ -25,7 +25,7 @@ guarantee, and it is the only one that sees a bare literal inside a function bod
 field default, or a two-line logic change that touches no constant at all. `engine_drifted()`
 names the modules that moved.
 
-**Every module-level constant**, by normalised syntax, in `CONSTANT_DIGESTS` — 759 of them,
+**Every module-level constant**, by normalised syntax, in `CONSTANT_DIGESTS` — 763 of them,
 with no classification whatsoever. A dial does not have to hold a digit and does not have to
 look like a table; four rules for deciding what counted were tried and all four excluded
 something load-bearing. `constants_drifted()` names what moved, appeared or vanished.
@@ -135,7 +135,7 @@ CALIBRATION_CONSTANTS: Final[tuple[str, ...]] = (
 """The curated epistemic subset, named as ``module:NAME`` and frozen by **imported value**.
 
 Not "every number": most of what decides a published figure here is not a number at all — of the
-759 dials `discovered_constants()` covers, 528 hold no numeric literal. And not the completeness
+763 dials `discovered_constants()` covers, 532 hold no numeric literal. And not the completeness
 guarantee either, which is the job of the two syntactic digests; this list is deliberately
 curated, so it is allowed to be incomplete in a way they are not.
 
@@ -214,6 +214,7 @@ CONSTANT_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis.authz.audit_anchor:ANCHOR_FILE": "6a2ec0d885ddb7f4",
         "nemesis.authz.audit_anchor:ANCHOR_PUBLIC_KEY_FILE": "5488e2de6f3cb13a",
         "nemesis.authz.audit_anchor:AUDIT_CHAIN": "76a099ab0b63925e",
+        "nemesis.authz.audit_anchor:RETAINED_EPOCH_FILE": "07a5d26cc48aaafa",
         "nemesis.authz.envelope:DEFAULT_AUTONOMOUS_EFFECT_BUDGET": "37d10dc09a311b23",
         "nemesis.authz.gateway:MAX_CAPABILITY_LIFETIME": "3866862a69bfd65d",
         "nemesis.authz.keys:_ED25519_SIGNATURE_BYTES": "196effcb6590f357",
@@ -558,7 +559,7 @@ CONSTANT_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis.core.confidence:UNJUDGEABLE_CREDIBILITY_WEIGHT_CEILING": "61a51fc57c09d078",
         "nemesis.core.confidence:VACUITY_THRESHOLD": "aded317dc89093d4",
         "nemesis.core.confidence:_TOLERANCE": "9ced8479b9d6999f",
-        "nemesis.core.credentials:CREDENTIAL_MATERIAL_PATTERNS": "b31036aad4cbc3dc",
+        "nemesis.core.credentials:CREDENTIAL_MATERIAL_PATTERNS": "7eb7a3ef9627a5df",
         "nemesis.core.credentials:CREDENTIAL_REDACTION": "21ce1722780879b8",
         "nemesis.core.credentials:FINGERPRINT_PREFIX": "036153386db0ac80",
         "nemesis.core.credentials:MAX_PREVIEW_LENGTH": "5a27fc8bb8ef4e33",
@@ -572,6 +573,7 @@ CONSTANT_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis.core.disclosure:PERSONA_ENTITY_TYPES": "303725dbb5ea3026",
         "nemesis.core.disclosure:_ORDER": "ad51cdfd3675c519",
         "nemesis.core.entities:CATEGORY_OF": "319691e22af92b85",
+        "nemesis.core.entities:KEYED_BY_CONSTRUCTION_TYPES": "92566c17112231e2",
         "nemesis.core.entities:SHARED_INFRASTRUCTURE_TYPES": "5ee401e6b14d0ecf",
         "nemesis.core.entities:_ASN_RE": "f9715ffe430e80dc",
         "nemesis.core.entities:_DOMAIN_RE": "37efe747ecd6553b",
@@ -866,10 +868,12 @@ CONSTANT_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis.sandbox.reachability:DECLARED_BROKERS": "13377bce339c2536",
         "nemesis.sandbox.reachability:DYNAMIC_IMPORT_CALLS": "06565b0e487acc5c",
         "nemesis.sandbox.reachability:MODEL_CONTROLLED_ROOTS": "64b1527db2cafdb8",
+        "nemesis.sandbox.reachability:NETWORK_CALLS": "5b2e5774ec03fb1d",
         "nemesis.sandbox.reachability:NETWORK_MODULES": "74c80b2243d0a597",
         "nemesis.sandbox.reachability:PACKAGE_ROOT": "8ef4eca04cee620f",
-        "nemesis.sandbox.reachability:PROCESS_CALLS": "d728eede5a568229",
+        "nemesis.sandbox.reachability:PROCESS_CALLS": "ecd0040e2d1a1b30",
         "nemesis.sandbox.reachability:PROCESS_MODULES": "eb87042f0c13b90c",
+        "nemesis.sandbox.reachability:_BARE": "a3628e204629cdfa",
         "nemesis.slice.evolution_session:APPROVED_DOMAIN": "70f83dd7d092654b",
         "nemesis.slice.evolution_session:APPROVED_STATE": "982d5401dd8f2be0",
         "nemesis.slice.evolution_session:BENIGN_HINT": "bfe0399cec6667dd",
@@ -1067,7 +1071,7 @@ def discovered_constants(tree: Path | None = None) -> dict[str, str]:
     `EXCLUDED_CONCLUSIONS`, four security tables made of plain strings. The module digest covered
     them, so it was never a bypass; the claim that every dial was *named* was simply false.
 
-    So there is no rule now. Every module-level upper-case assignment is a dial, 759 of them,
+    So there is no rule now. Every module-level upper-case assignment is a dial, 763 of them,
     and the cost of including the genuine prose is nothing: rewording a message already moves
     that module's syntax digest, so no new failure mode is introduced by naming it too.
 
@@ -1205,17 +1209,17 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/authz/__init__.py": "ad2e13b69c4fc1fd",
         "nemesis/authz/anchor.py": "67a0fb6b0bd4ace4",
         "nemesis/authz/attestation.py": "de77df2a9c728935",
-        "nemesis/authz/audit_anchor.py": "5773b21e56fd19a8",
+        "nemesis/authz/audit_anchor.py": "d16308e2f11e4666",
         "nemesis/authz/envelope.py": "26331a4b05dc728c",
         "nemesis/authz/gateway.py": "1a541fd083f6358b",
         "nemesis/authz/keys.py": "b1a89e11f42f944a",
-        "nemesis/authz/monotonicity.py": "d642030c68dfa9a5",
+        "nemesis/authz/monotonicity.py": "659f6b727058ae3b",
         "nemesis/authz/providers.py": "a6d145f04bbce983",
         "nemesis/authz/rbac.py": "8638465529fb2575",
         "nemesis/authz/store.py": "9f0e1c3d3ef0b3e7",
         "nemesis/authz/verification.py": "b36a928a39b96e67",
         "nemesis/breaker/__init__.py": "c612da8e624e7b35",
-        "nemesis/breaker/arena.py": "a749e73482277332",
+        "nemesis/breaker/arena.py": "700397886df9d1fa",
         "nemesis/breaker/attack.py": "943ab2a7e07a22ac",
         "nemesis/breaker/attacks.py": "c84d184898e1b298",
         "nemesis/breaker/report.py": "060295fbe07aee74",
@@ -1229,7 +1233,7 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/calibration/scoring.py": "b2e7a193a30d65a1",
         "nemesis/calibration/sizing.py": "340861bb04cab7b6",
         "nemesis/cli/__init__.py": "ad2e13b69c4fc1fd",
-        "nemesis/cli/main.py": "f66a4aae3b16b0b9",
+        "nemesis/cli/main.py": "917a5155ed935189",
         "nemesis/collaboration/__init__.py": "ca1145a798cbf210",
         "nemesis/collaboration/approvals.py": "9e5aef566b46d5d1",
         "nemesis/collaboration/base.py": "0f24972d696c4060",
@@ -1264,9 +1268,9 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/core/canonical.py": "dfda6b475e3b80c8",
         "nemesis/core/claims.py": "c019f8b283a6a405",
         "nemesis/core/confidence.py": "db49d12f752f0a03",
-        "nemesis/core/credentials.py": "ace221205693e6b1",
+        "nemesis/core/credentials.py": "35674cce188eacab",
         "nemesis/core/disclosure.py": "525312b5cdc6d2a9",
-        "nemesis/core/entities.py": "aee0bb29012c25a7",
+        "nemesis/core/entities.py": "eba211df1f8c48b2",
         "nemesis/core/evidence.py": "11f4c3c302e3bbd1",
         "nemesis/core/fusion.py": "b932562ceea3ae2c",
         "nemesis/core/identity.py": "aa1dbd3e0be4e2cb",
@@ -1314,7 +1318,7 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/pilot/anthropic_pilot.py": "653a3edd88f63dd4",
         "nemesis/pilot/challenger.py": "e32378cc74490f41",
         "nemesis/pilot/local_pilot.py": "844b5ec238222866",
-        "nemesis/pilot/mediator.py": "d83b9eabb2132ad1",
+        "nemesis/pilot/mediator.py": "b01815d742b392c2",
         "nemesis/pilot/model_seat.py": "32ced7717960e1e3",
         "nemesis/pilot/moves.py": "bb5981fb9d73aaef",
         "nemesis/pilot/openai_pilot.py": "a0ff06cac4fc63f6",
@@ -1337,7 +1341,7 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/pilot/providers/seat.py": "f9099d2210436e15",
         "nemesis/pilot/providers/transport.py": "2bf0df2a35d0c3ee",
         "nemesis/pilot/providers/xai.py": "b8fda96407e8504e",
-        "nemesis/pilot/stagnation.py": "1371be6f39902ea1",
+        "nemesis/pilot/stagnation.py": "24dca2c6d398317c",
         "nemesis/pilotbench/__init__.py": "b68c078ef2457acf",
         "nemesis/pilotbench/corpus.py": "0cdec71ef36139fc",
         "nemesis/pilotbench/harness.py": "c67f23f03002bc8d",
@@ -1367,14 +1371,14 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/resolve/signals.py": "d061ffc01a1a2ed0",
         "nemesis/sandbox/__init__.py": "ad2e13b69c4fc1fd",
         "nemesis/sandbox/process.py": "70c60d3fcda3d564",
-        "nemesis/sandbox/reachability.py": "61e30a301226190c",
+        "nemesis/sandbox/reachability.py": "1a18de28da3014ef",
         "nemesis/sandbox/seal.py": "e007ab5044298ce4",
         "nemesis/slice/__init__.py": "af4908b211f76e8b",
         "nemesis/slice/evolution_session.py": "b4cad74342cea6a8",
         "nemesis/slice/iron_tide.py": "e5fdb3f51981d6e7",
         "nemesis/slice/loopbench.py": "849d0bd73b430a47",
         "nemesis/slice/pilot_session.py": "b0cd426b7deb91a3",
-        "nemesis/slice/scenario.py": "7337c4c5953c77d3",
+        "nemesis/slice/scenario.py": "26be19c6b0c85b5d",
         "nemesis/slice/standing_session.py": "0d31831a845bb20f",
         "nemesis/ui/__init__.py": "bb9576acc61aeb78",
         "nemesis/ui/investigation.py": "8a672135840ea5c0",

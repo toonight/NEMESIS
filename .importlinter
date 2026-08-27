@@ -315,10 +315,18 @@ modules =
 
 ; --- The Breaker is not on the authority path ------------------------------------------------
 ; `nemesis.breaker` drives NEMESIS adversarially in an isolated test environment. It must be
-; unreachable FROM the platform: nothing that runs in production may import it, so no attack
-; harness, no scripted hostile pilot and no invariant probe can end up on a path that authorizes
-; anything. Stated as `forbidden` from every plane rather than as a layer, because the point is
-; not where it sits -- it is that nobody depends on it.
+; unreachable from every plane that decides anything, so no attack harness, no scripted hostile
+; pilot and no invariant probe can end up on a path that authorizes anything. Stated as
+; `forbidden` from each plane rather than as a layer, because the point is not where it sits --
+; it is that nothing consequential depends on it.
+;
+; `nemesis.cli` is deliberately NOT in the list below, and an adversarial review was right to
+; ask: the prose used to say "nothing that runs in production may import it" while `cli/main.py`
+; imports it at module top level for the `nemesis breaker` command. One of the two was wrong, and
+; it was the prose. A command-line entry point is where a human chooses to run something; it
+; holds no capability, decides no authorization and is above every plane in the layering. The
+; alternative -- a lazy import inside the command body to satisfy a contract -- would be hiding
+; the dependency rather than not having it.
 ;
 ; The other direction is deliberately open. A breaker that could not import the mediator, the
 ; envelope or the effects registry could not attack them, and an adversarial harness that has to

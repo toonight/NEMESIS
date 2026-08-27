@@ -98,6 +98,37 @@ class AuthoritySnapshot(BaseModel):
     authorizes the same operation on strictly less agreement."""
 
     revoked: bool
+    signed: bool
+    """Whether the grant carries a signature at all.
+
+    An unsigned capability is valid only for SIMULATION and is marked as such wherever it
+    appears — so signed-to-unsigned is a narrowing and unsigned-to-signed is somebody having
+    minted authority. Neither should ever be observed across an untrusted input, and without
+    this field neither was."""
+
+    jurisdictions: frozenset[str]
+    """Where the operation is authorized. Named verbatim by CLAUDE.md invariant 9 — "capabilities
+    bind to target fingerprints, operation class, **jurisdiction** and a hard expiry" — and
+    missing from the first version of this snapshot, which an adversarial review found by adding
+    three countries to a grant and watching nothing be reported."""
+
+    blocking_stop_conditions: frozenset[str]
+    """The conditions that abort the operation, by name, and only the *blocking* ones.
+
+    Load-bearing rather than descriptive: :func:`~nemesis.effects.registry.preflight` returns
+    ``REFUSED_STOP_CONDITION`` for each uncleared blocking condition, so deleting one deletes a
+    refusal gate. Flipping ``is_blocking`` to False deletes the same gate while leaving the
+    condition visible, which is why the set holds only blocking ones — both edits show up as the
+    same removal, which is what they are."""
+
+    max_effect_description: str
+    """The worst permitted outcome, in the words a human approved.
+
+    Compared verbatim rather than parsed. It is not machine-enforced anywhere and this snapshot
+    does not pretend otherwise — but it is the sentence a human read before signing, and a grant
+    whose *stated* ceiling changed after approval is one whose approval no longer covers what it
+    says it covers."""
+
     autonomy_budget: int
     autonomy_remaining: int
 
@@ -169,6 +200,34 @@ class AuthoritySnapshot(BaseModel):
         if earlier.revoked and not self.revoked:
             defects.append("a revoked capability came back: a withdrawal was undone")
 
+        if self.signed and not earlier.signed:
+            defects.append(
+                "an unsigned grant acquired a signature. An unsigned capability authorizes only "
+                "SIMULATION; a signed one authorizes what it says"
+            )
+
+        new_jurisdictions = self.jurisdictions - earlier.jurisdictions
+        if new_jurisdictions:
+            defects.append(
+                f"jurisdictions added: {sorted(new_jurisdictions)}. An operation spanning "
+                "jurisdictions needs authority in each"
+            )
+
+        dropped_conditions = earlier.blocking_stop_conditions - self.blocking_stop_conditions
+        if dropped_conditions:
+            defects.append(
+                f"blocking stop condition(s) removed or made non-blocking: "
+                f"{sorted(dropped_conditions)}. Each one is a refusal gate the effects preflight "
+                "would otherwise have closed"
+            )
+
+        if self.max_effect_description != earlier.max_effect_description:
+            defects.append(
+                "the stated worst permitted outcome changed after approval: "
+                f"{earlier.max_effect_description!r} became {self.max_effect_description!r}. "
+                "It is the sentence a human read before signing"
+            )
+
         if self.autonomy_remaining > earlier.autonomy_remaining:
             defects.append(
                 f"autonomous effects remaining rose from {earlier.autonomy_remaining} to "
@@ -208,8 +267,19 @@ def snapshot(
         expires_at=capability.expires_at,
         max_targets=capability.max_targets,
         required_approvals=capability.required_approvals,
-        approver_subjects=frozenset(approval.approver for approval in capability.approvals),
+        # Only approvals that actually approved. Reading `.approver` without `.decision` made an
+        # objector indistinguishable from an approver, so flipping a recorded refusal to an
+        # assent was a widening the first version of this function could not see.
+        approver_subjects=frozenset(
+            approval.approver for approval in capability.approvals if approval.decision
+        ),
         revoked=capability.revoked_at is not None,
+        signed=capability.signature is not None,
+        jurisdictions=frozenset(capability.jurisdictions),
+        blocking_stop_conditions=frozenset(
+            condition.condition for condition in capability.stop_conditions if condition.is_blocking
+        ),
+        max_effect_description=capability.max_effect_description,
         autonomy_budget=-1 if autonomy is None else autonomy.budget,
         autonomy_remaining=-1 if autonomy is None else autonomy.remaining,
     )

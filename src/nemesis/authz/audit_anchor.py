@@ -43,6 +43,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Final, Protocol
 
 from nemesis.authz.anchor import (
@@ -101,14 +102,20 @@ class AuditIntegrityReport:
     """What the trail's own chain says, and what the anchor says about it.
 
     Two verdicts kept apart, deliberately, because they answer different questions and only one
-    of them survives an operator. ``chain_intact`` is the trail checking itself, which an insider
-    who rewrote the file can always make true. ``defects`` is the anchor disagreeing with the
-    file, which they cannot — unless they also hold whatever the anchor sits behind, and
-    ``independence`` says exactly how much that is.
+    of them survives an operator. The **trail's own** ``verify()`` is it checking itself, which
+    an insider who rewrote the file can always make true; :attr:`defects` is the anchor
+    disagreeing with the file, which they cannot — unless they also hold whatever the anchor sits
+    behind, and :attr:`independence` says exactly how much that is.
 
     Collapsing the two into one boolean is the mistake this whole ladder exists to prevent: it
     would let a clean internal chain read as integrity, which is the claim the evidence vault
     already refuses to make about itself.
+
+    **The trail's verdict is deliberately not a field here**, and an earlier version of this
+    docstring said it was. That was documentation contradicting the code, which this repository
+    treats as a defect: this report is what *the anchor* found, and a caller wanting both prints
+    both — which is what `nemesis verify` does, on adjacent lines. Folding the trail's answer in
+    would have made one object able to say "sound" about two different things.
     """
 
     chain_id: str
@@ -208,6 +215,48 @@ async def verify_audit_trail(
     )
 
 
+RETAINED_EPOCH_FILE: Final = "anchor-epoch"
+"""Where a verifier remembers the greatest epoch it has accepted.
+
+**Without it the rollback half of this contract is not wired**, which an adversarial review
+pointed out is the same failure the module was written to fix, one level up: the anchor was being
+called and its replay protection was not. A stale but validly-signed anchor, presented alongside
+a file rolled back to match it, verifies perfectly against a verifier with no memory.
+
+A file beside the anchors, which is worth exactly what its placement is worth — at
+``AnchorIndependence.NONE`` an adversary who can roll back the trail can roll back this too. What
+it buys at that rung is the same as everything else at that rung: an accident, a partial restore
+and a stale backup are caught. What it buys at a higher rung is real, and it is a path argument.
+"""
+
+
+def retained_epoch(workspace: Path) -> int | None:
+    """The greatest anchor epoch this workspace has accepted, or ``None`` if it has none.
+
+    Unreadable or malformed is ``None`` — the same reading as absent. A verifier that raised here
+    would turn a corrupt one-line file into a failed verification rather than a weaker one, and
+    the honest answer to "I cannot read my own memory" is that I have none.
+    """
+    path = workspace / RETAINED_EPOCH_FILE
+    try:
+        return int(path.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return None
+
+
+def retain_epoch(workspace: Path, epoch: int) -> None:
+    """Record an accepted epoch, never moving it backwards.
+
+    Monotonic on write as well as on read: a caller that verified an older anchor must not be
+    able to lower the bar for the next one, which would hand back exactly the replay this file
+    exists to refuse.
+    """
+    current = retained_epoch(workspace)
+    if current is not None and epoch <= current:
+        return
+    (workspace / RETAINED_EPOCH_FILE).write_text(str(epoch), encoding="utf-8")
+
+
 def _next_epoch(store: AnchorStore) -> int:
     current = store.latest(AUDIT_CHAIN)
     return 0 if current is None else current.epoch + 1
@@ -217,9 +266,12 @@ __all__ = [
     "ANCHOR_FILE",
     "ANCHOR_PUBLIC_KEY_FILE",
     "AUDIT_CHAIN",
+    "RETAINED_EPOCH_FILE",
     "AnchorSigner",
     "AnchoredChain",
     "AuditIntegrityReport",
     "anchor_audit_trail",
+    "retain_epoch",
+    "retained_epoch",
     "verify_audit_trail",
 ]

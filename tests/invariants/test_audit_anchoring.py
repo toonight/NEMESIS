@@ -334,6 +334,83 @@ def test_replaying_a_stale_anchor_is_caught_when_the_verifier_retained_an_epoch(
     assert any("older than" in defect for defect in with_memory)
 
 
+def test_the_rollback_protection_is_wired_and_not_merely_available(tmp_path: Path) -> None:
+    """The primitive works. An adversarial review asked whether anything calls it — and nothing did.
+
+    `test_replaying_a_stale_anchor_is_caught_when_the_verifier_retained_an_epoch` proves
+    `verify_against_anchor` refuses a replay **when handed a retained epoch**. It calls the
+    primitive directly. The production verifier — `nemesis verify` — passed no epoch at all, so
+    the whole rollback half of the contract was specified, tested, and unreachable from the
+    running platform. That is precisely the failure `audit_anchor.py` was written to fix
+    ("nothing in the running platform called it"), reproduced one level up.
+
+    This drives the *caller*: two anchors published, the file rolled back to the first, and the
+    stale anchor presented. A verifier that remembers refuses it.
+    """
+    from nemesis.authz.audit_anchor import retain_epoch, retained_epoch
+
+    async def scenario() -> tuple[int | None, tuple[str, ...], tuple[str, ...]]:
+        a = Anchored(tmp_path)
+        await a.fill(4)
+        await a.anchor()
+        first = a.store.latest(AUDIT_CHAIN)
+        assert first is not None
+        retain_epoch(tmp_path, first.epoch)
+
+        links_at_first = await a.trail.links()
+        await a.fill(3)
+        await a.anchor()
+        second = a.store.latest(AUDIT_CHAIN)
+        assert second is not None and second.epoch > first.epoch
+        retain_epoch(tmp_path, second.epoch)
+
+        # Roll the file back to the state the FIRST anchor describes, and present that anchor by
+        # discarding the newer one — the shape an attacker leaves behind.
+        lines = a.path.read_text(encoding="utf-8").splitlines()
+        a.path.write_text("\n".join(lines[: len(links_at_first)]) + "\n", encoding="utf-8")
+        (tmp_path / "anchors.jsonl").write_text(first.model_dump_json() + "\n", encoding="utf-8")
+
+        fresh = AppendOnlyAuditTrail(a.path)
+        forgetful = await verify_audit_trail(fresh, store=a.store, authorities=a.authorities)
+        remembering = await verify_audit_trail(
+            fresh,
+            store=a.store,
+            authorities=a.authorities,
+            retained_epoch=retained_epoch(tmp_path),
+        )
+        return retained_epoch(tmp_path), forgetful.defects, remembering.defects
+
+    remembered, forgetful, remembering = _run(scenario())
+    assert remembered == 1, f"the retained epoch was not persisted: {remembered}"
+    assert forgetful == (), (
+        "the rolled-back state disagreed with the stale anchor even without a retained epoch; "
+        "this test is no longer demonstrating the replay it was written for"
+    )
+    assert any("older than" in defect for defect in remembering), (
+        f"a verifier holding epoch {remembered} accepted an older anchor: {remembering}"
+    )
+
+
+def test_a_retained_epoch_never_moves_backwards(tmp_path: Path) -> None:
+    """Monotonic on write as well as on read.
+
+    A caller that verified an older anchor must not be able to lower the bar for the next one —
+    that would hand back exactly the replay the epoch refuses. Unreadable or absent reads as
+    "no memory", which is the honest answer and not an error.
+    """
+    from nemesis.authz.audit_anchor import RETAINED_EPOCH_FILE, retain_epoch, retained_epoch
+
+    assert retained_epoch(tmp_path) is None
+    retain_epoch(tmp_path, 5)
+    retain_epoch(tmp_path, 2)
+    assert retained_epoch(tmp_path) == 5, "an older epoch lowered the bar"
+    retain_epoch(tmp_path, 9)
+    assert retained_epoch(tmp_path) == 9
+
+    (tmp_path / RETAINED_EPOCH_FILE).write_text("not a number", encoding="utf-8")
+    assert retained_epoch(tmp_path) is None, "a corrupt memory file must read as no memory"
+
+
 # --- the store's own refusals ----------------------------------------------------------
 
 

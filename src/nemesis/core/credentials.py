@@ -180,15 +180,26 @@ class SecretReference(BaseModel):
         return self
 
 
-def _is_masked(preview: str) -> bool:
+def _is_masked(preview: str, *, material_length: int) -> bool:
     """Whether a preview shows a shape rather than a secret.
 
-    Counted rather than pattern-matched: a preview is acceptable when at most
-    :data:`MAX_UNMASKED_PREVIEW_CHARS` of its characters are not mask characters. A regex over
-    known token prefixes would pass ``ghp_`` and fail an unfamiliar vendor's format, which is
-    the wrong direction for a guard whose failure mode is storing a live credential.
+    Counted rather than pattern-matched: a regex over known token prefixes would pass ``ghp_``
+    and fail an unfamiliar vendor's format, which is the wrong direction for a guard whose
+    failure mode is storing a live credential.
+
+    **Two bounds, and the second was missing.** A fixed ceiling of
+    :data:`MAX_UNMASKED_PREVIEW_CHARS` is right for a long token and useless for a short one: an
+    adversarial review pointed out that any credential of six characters or fewer passed
+    *intact*, so ``1234``, ``hunter`` and ``123456`` were accepted whole into a field whose
+    validator says "not so the credential can be reconstructed from the record that was supposed
+    to redact it". PINs, six-digit one-time codes and short reused passwords are precisely
+    :attr:`CredentialKind.LEAKED_PASSWORD`'s domain.
+
+    So a preview must also reveal strictly **less** than the material it previews. A four-byte
+    credential gets at most three unmasked characters; a forty-byte one still gets six.
     """
-    return sum(1 for char in preview if char not in _MASK_CHARS) <= MAX_UNMASKED_PREVIEW_CHARS
+    unmasked = sum(1 for char in preview if char not in _MASK_CHARS)
+    return unmasked <= MAX_UNMASKED_PREVIEW_CHARS and unmasked < material_length
 
 
 class CredentialIndicator(BaseModel):
@@ -222,12 +233,16 @@ class CredentialIndicator(BaseModel):
     @model_validator(mode="after")
     def _require_utc_and_a_masked_preview(self) -> Self:
         require_utc(self.observed_at, "observed_at")
-        if self.masked_preview and not _is_masked(self.masked_preview):
+        if self.masked_preview and not _is_masked(
+            self.masked_preview, material_length=self.reference.byte_length
+        ):
             raise CredentialHandlingError(
-                f"masked_preview {self.masked_preview!r} shows more than "
-                f"{MAX_UNMASKED_PREVIEW_CHARS} unmasked characters. A preview exists so a human "
-                "can recognise a format, not so the credential can be reconstructed from the "
-                "record that was supposed to redact it"
+                f"masked_preview {self.masked_preview!r} reveals too much of a "
+                f"{self.reference.byte_length}-byte credential: a preview may show at most "
+                f"{MAX_UNMASKED_PREVIEW_CHARS} unmasked characters and must always show fewer "
+                "than the material has. A preview exists so a human can recognise a format, not "
+                "so the credential can be reconstructed from the record that was supposed to "
+                "redact it"
             )
         return self
 
@@ -263,8 +278,10 @@ CREDENTIAL_MATERIAL_PATTERNS: Final[tuple[tuple[str, re.Pattern[str]], ...]] = (
     (
         "assigned secret",
         re.compile(
-            r"(?i)\b(?:password|passwd|pwd|secret|api[_-]?key|access[_-]?token|"
-            r"private[_-]?key)\b\s*[:=]\s*\S{8,}"
+            r"(?i)\b(?:password|passwd|pwd|pass|secret|api[_-]?key|access[_-]?token|"
+            r"private[_-]?key|credentials?)\b"
+            r"\s*(?:[:=]|\bis\b|\bare\b)\s*"
+            r"\S{4,}"
         ),
     ),
 )
@@ -281,6 +298,14 @@ Its job is the *accidental* path: a collector, a claim's natural-language text o
 parameter carrying a live token onward into a briefing, a document or a channel. It is not the
 control that keeps credentials out of those places — the RESTRICTED disclosure class is — it is
 the backstop for material that never got typed as a credential in the first place.
+
+**The length bound was wrong and the docstring example proved it.** The ``assigned secret``
+pattern required eight non-space characters, and this module motivated the whole function with
+``password = hunter2`` — which is seven, and did not match. An adversarial review noticed that the
+example did not work. Four is the bound now, with ``pass``, ``credentials`` and the ``is``/``are``
+forms added, because ``the password is hunter2`` and ``pwd=abc123`` are the shapes a forum post
+actually uses. A short assigned value is still a secret; ``password = true`` in a config file
+being redacted is a cost worth paying, and cheaper than the reverse.
 """
 
 CREDENTIAL_REDACTION: Final = "[redacted-credential]"

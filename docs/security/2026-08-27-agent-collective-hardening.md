@@ -114,6 +114,56 @@ over more autonomous agents, and do not add a framework because it exists.
 
 ---
 
+## 4b. What an adversarial review then broke
+
+The controls above were written, tested, and handed to a read-only reviewer with one instruction:
+break them. It broke ten of them, with executed reproductions rather than readings, and every
+finding survived the 120 tests that were passing at the time. That is the third time this
+repository has had a control broken on a green tree, and the pattern is the same one it keeps
+recording.
+
+**Four findings were the exact defect class this pass was written to eliminate**, which is worth
+stating plainly rather than filing quietly:
+
+| Finding | Shape |
+|---|---|
+| `widenings_from` unfalsifiable at every call site | An instrument pointed at an object that cannot move. Six invariants cited it as evidence. |
+| The credential and canary behavioural tests | Passing because of a *different* control than the one named. |
+| `test_a_productive_investigation_is_not_stopped` | Five moves against a window of six — it stopped one step before the code path it names, so the detector was never consulted. |
+| `test_no_model_controlled_root_reaches_a_dynamic_import_site` | Derived reachability from findings paths, so it could not detect the violation it names. |
+
+**The most serious finding was a denial of service I introduced.** The canary scanned every
+non-prose field, including a belief's subject — and a belief's subject is where an entity's
+*natural key* lands. One DNS registration of a hostname whose subdomain labels are three reserved
+capability names would have halted every investigation that collected it, with no injection and no
+misbehaviour by any model. The module's own docstring said that shape must not exist; it had not
+considered the field. Fixed by a rule rather than a longer exclusion list: a value the pilot was
+**shown** is not a reach.
+
+**The second most serious was a control that could not fail.** Within one process holding one
+frozen capability, almost every field of an `AuthoritySnapshot` is physically incapable of
+differing, and the fixtures read their own envelope rather than the mediator's. Fixed by pointing
+the instrument at the enforcing object and by writing the test that swaps an envelope to prove it
+fires — plus six dimensions of authority that were outside the snapshot entirely, including
+blocking stop conditions and jurisdictions.
+
+**The third was adversary-steerable and came from over-firing rather than under-firing.** Three
+refused effects anywhere in a session ended it, however productive the run had become — so content
+inducing three out-of-envelope requests early could terminate a healthy investigation from
+outside. And an analytic write-up phase, six accepted beliefs in a row, read as a stall, because
+only a pivot could ever be "productive".
+
+All ten are fixed, each with a test constructing the original reproduction. The full list, with
+what changed, is in [`INVARIANTS.md`](INVARIANTS.md) under the property each one belongs to.
+
+**What this says about the rest.** The reviewer named what it did *not* reach — the effects
+plane's kernel confinement, the evidence vault, the collaboration plane, the API surface, and 15
+of the Breaker's own attacks. Those are unexamined rather than sound. And a review that found ten
+defects in six new modules is evidence about the density of defects in new code, not evidence that
+the count is now zero.
+
+---
+
 ## 5. Behavioural monitoring, not private reasoning
 
 The observable surface, listed because a control nobody can name is a control nobody maintains.

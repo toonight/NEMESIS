@@ -102,7 +102,20 @@ class Harness:
     signer: CapabilitySigningKey
 
     def authority(self) -> AuthoritySnapshot:
-        return snapshot(self.envelope.capability, self.envelope)
+        """Snapshot the **mediator's** envelope, not our own reference to it.
+
+        These differ, and an adversarial review found that they do. Reading ``self.envelope``
+        measures the object this fixture happens to hold; a mediator that swapped its own
+        envelope for a strictly wider one — the exact event these assertions exist to detect —
+        was invisible, because the fixture kept comparing the old object with itself.
+
+        A private attribute, deliberately and with the reason stated: the mediator does not
+        expose its envelope and should not, since that would be a handle. What a test needs is
+        not a handle but a *measurement*, and taking it from the enforcing object is the whole
+        point of taking it at all.
+        """
+        envelope = self.mediator._envelope
+        return snapshot(envelope.capability, envelope)
 
     async def drive(self, pilot: object, *, total_budget: float = 100.0) -> PilotSession:
         """Run a pilot. The cast is declared here, once, with the reason.

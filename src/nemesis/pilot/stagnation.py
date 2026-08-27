@@ -67,6 +67,15 @@ class SessionStep:
     status: RulingStatus
     entities_discovered: int = 0
     evidence_sealed: int = 0
+    claim_recorded: bool = False
+    """Whether this turn put a claim in the store. Set for an accepted ``record_belief``.
+
+    Missing from the first version, and an adversarial review found what that meant: only
+    ``_apply_pivot`` ever sets the two counters above, so a ``record_belief`` was *structurally
+    incapable* of being productive. Six accepted beliefs in a row — a pilot writing up what it
+    concluded, which is the one phase where a good investigation commits — halted the
+    investigation as a stall. The analytic phase looked exactly like giving up.
+    """
 
     @property
     def was_productive(self) -> bool:
@@ -76,8 +85,15 @@ class SessionStep:
         the world had no answer — and it is not productive. Keeping those two apart is the whole
         point: an accepted-but-barren pivot is the exact shape of a session going nowhere, and a
         detector that counted acceptances would call it healthy.
+
+        A recorded belief **is** productive. It is not evidence and it outranks nothing, but it is
+        a claim that was not in the store before, and a pilot committing its reasoning is doing
+        the opposite of stalling. Counting it is not a weakening: a pilot that emits nothing but
+        beliefs and never pivots is still caught by ``REPEATED_MOVE`` if it repeats itself and by
+        the move ceiling regardless, and a run of *distinct* honest conclusions is a run that
+        should be allowed to finish.
         """
-        return self.entities_discovered > 0 or self.evidence_sealed > 0
+        return self.entities_discovered > 0 or self.evidence_sealed > 0 or self.claim_recorded
 
 
 class SessionStagnationSignal(StrEnum):
@@ -158,9 +174,15 @@ class SessionStagnationPolicy:
     slightly longer than a pilot repeating itself."""
 
     max_refused_effects: int = 3
-    """How many refused effect requests make "this needs a human" the honest ending. Not
-    consecutive: an envelope that has refused three separate requests has said what it is going
-    to say, however the pilot spaced them."""
+    """How many refused effect requests **within the window** make "this needs a human" the
+    honest ending.
+
+    Not consecutive — a pilot interleaving refused effects with pivots is still arguing with the
+    envelope — but bounded by the window, which the first version was not. Counting cumulatively
+    over a whole session meant three refusals anywhere ended it, however productive the last three
+    turns were, and handed an adversary a way to terminate a healthy investigation by inducing
+    three out-of-envelope requests early. A refusal from move four should not still be ending
+    sessions at move forty."""
 
     min_signals: int = 1
     """How many signals make a stall. One, because every signal above is already conservative and
@@ -257,6 +279,8 @@ class SessionStagnationDetector:
         signals: list[SessionStagnationSignal] = []
         reasons: list[str] = []
 
+        productive = any(step.was_productive for step in recent)
+
         barren = _trailing_run(
             recent, lambda step: step.move_kind == "run_pivot" and not step.was_productive
         )
@@ -265,9 +289,23 @@ class SessionStagnationDetector:
             reasons.append(f"{barren} consecutive pivots surfaced no entity and sealed no evidence")
 
         repeated = _trailing_identical(recent)
+        distinct = len({(step.move_kind, step.move_digest) for step in recent})
+        cycle_ceiling = max(1, policy.window // policy.max_repeated_move)
         if repeated >= policy.max_repeated_move:
             signals.append(SessionStagnationSignal.REPEATED_MOVE)
             reasons.append(f"the same move was proposed {repeated} times in a row")
+        elif distinct <= cycle_ceiling:
+            # A *cycle*, not a run. `A,B,A,B,A,B` repeats forever and the trailing-run check
+            # never fires, because no two consecutive moves are identical — an adversarial
+            # review defeated the whole signal with twelve turns of exactly that. Counting
+            # distinct moves in the window catches the cycle without catching an ordinary run
+            # of different questions, and the two checks are kept separate so a failure names
+            # which shape it saw.
+            signals.append(SessionStagnationSignal.REPEATED_MOVE)
+            reasons.append(
+                f"the last {policy.window} moves were only {distinct} distinct request(s); the "
+                "session is cycling rather than progressing"
+            )
 
         refusal_run, refusal_status = _trailing_same_refusal(recent)
         if refusal_run >= policy.max_repeated_refusal and refusal_status is not None:
@@ -276,19 +314,32 @@ class SessionStagnationDetector:
                 f"{refusal_run} consecutive moves were refused as {refusal_status.value}"
             )
 
+        # Counted over the WINDOW, not the whole session. Cumulative counting meant three
+        # refused effects anywhere in a run ended it, however productive the last three turns
+        # had been — and an adversary who could induce three out-of-envelope requests early,
+        # which is exactly what an injected page asks for, could terminate a healthy
+        # investigation from outside. A window is what makes "the envelope has said what it is
+        # going to say" a statement about *now*.
         refused_effects = sum(
             1
-            for step in steps
+            for step in recent
             if step.move_kind == "request_effect" and step.status is not RulingStatus.ACCEPTED
         )
-        if refused_effects >= policy.max_refused_effects:
+        # Gated on the window being unproductive as well, and that gate is the finding rather
+        # than a softening. This signal's honest ending is AUTHORIZATION_REQUIRED — *progress
+        # needs an effect nobody authorized*. If pivots in the same window are surfacing
+        # entities and sealing evidence, progress plainly does not need it, and the refusals are
+        # a side note. Without the gate, three refused effects ended a run whose last three
+        # turns each produced nine entities and nine pieces of evidence.
+        if refused_effects >= policy.max_refused_effects and not productive:
             signals.append(SessionStagnationSignal.EFFECT_REFUSALS_REPEATED)
             reasons.append(
-                f"{refused_effects} effect request(s) were refused; the envelope has said what "
-                "it is going to say and the next step belongs to a human"
+                f"{refused_effects} effect request(s) were refused and nothing else in the "
+                "window moved; the envelope has said what it is going to say and the next step "
+                "belongs to a human"
             )
 
-        if not any(step.was_productive for step in recent):
+        if not productive:
             signals.append(SessionStagnationSignal.NO_PRODUCTIVE_TURN)
             reasons.append(
                 f"nothing was added to the investigation in the last {policy.window} turns"

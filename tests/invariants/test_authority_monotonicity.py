@@ -626,6 +626,71 @@ def test_a_research_context_has_no_field_that_could_hold_authority() -> None:
 # --- the instrument itself ----------------------------------------------------------------
 
 
+def test_the_instrument_fires_when_the_mediator_swaps_its_envelope(tmp_path: Path) -> None:
+    """The assertion every other test in this module makes, proven able to fail.
+
+    An adversarial review made the sharpest point in its report about this file: within one
+    process holding one frozen capability, almost every snapshot field is *physically incapable*
+    of differing, so ``after.widenings_from(before) == ()`` was unfalsifiable at every call site.
+    Six invariants in the register cite this instrument as evidence, and evidence that cannot come
+    out the other way is not evidence.
+
+    Two things were wrong and both are fixed. The fixture read its own envelope reference rather
+    than the mediator's, so a mediator that replaced its envelope was invisible; and this test did
+    not exist, so nobody could tell.
+
+    Here the mediator's envelope really is replaced with a strictly wider one, mid-session, which
+    is the event the whole module exists to detect. It must be reported.
+    """
+    from nemesis.authz.envelope import AutonomyEnvelope
+    from nemesis.core.authorization import LegalBasis
+
+    async def scenario() -> tuple[tuple[str, ...], tuple[str, ...]]:
+        h = await harness(tmp_path)
+        before = h.authority()
+        unchanged = h.authority().widenings_from(before)
+
+        # Signed, not stripped. `AutonomyEnvelope` already refuses an unsigned capability —
+        # "delegating autonomous action under a grant nobody signed is not a narrower authority,
+        # it is none" — which is a real control and one this test should not have to defeat. The
+        # realistic attack is anyway the signed one: somebody who can reach the key mints a wider
+        # grant that verifies perfectly, and the question is whether anything notices.
+        unsigned = h.envelope.capability.model_copy(
+            update={
+                "permitted_operations": frozenset(
+                    {OperationClass.SIMULATION, OperationClass.PROVIDER_NOTIFICATION}
+                ),
+                "forbidden_operations": frozenset(),
+                "jurisdictions": ("FR", "US", "RU"),
+                "stop_conditions": (),
+                "max_effect_description": "Seize the infrastructure.",
+                "legal_basis": LegalBasis.NONE_SIMULATION_ONLY,
+                "signature": None,
+            }
+        )
+        wider = unsigned.model_copy(update={"signature": h.signer.sign(unsigned.signing_payload())})
+        h.mediator._envelope = AutonomyEnvelope(wider, max_autonomous_effects=99)
+        return unchanged, h.authority().widenings_from(before)
+
+    unchanged, widened = _run(scenario())
+    assert unchanged == (), "the instrument reported a widening where nothing changed"
+    assert widened, (
+        "the mediator's envelope was replaced with a strictly wider one and widenings_from "
+        "reported nothing. Every assertion in this module is measuring an object that cannot "
+        "move."
+    )
+    reported = " ".join(widened)
+    for expected in (
+        "operations newly permitted",
+        "denials removed",
+        "jurisdictions added",
+        "blocking stop condition",
+        "worst permitted outcome changed",
+        "autonomy",
+    ):
+        assert expected in reported, f"{expected!r} was not reported: {widened}"
+
+
 def test_the_snapshot_notices_every_widening_it_claims_to(tmp_path: Path) -> None:
     """A control that cannot fail is not evidence, so the instrument is made to fail.
 

@@ -50,6 +50,21 @@ would be a control derived from the controls it is meant to check.
 | ID | Property | Status | Enforced by | Tested by |
 |---|---|---|---|---|
 | **AUTH-01** | Model output cannot directly create authority. | `IMPLEMENTED` | The move vocabulary is a four-member discriminated union with `extra="forbid"`. There is no `mint_capability`, no `widen_envelope`, no `change_scope`. The absence of a verb, not a check on one. | `test_authority_monotonicity.py`, `test_pilot_containment.py`; Breaker `invented-verbs` |
+
+**The instrument these four rest on had to be able to fail, and did not.** An adversarial review
+found that within one process holding one frozen capability, almost every snapshot field is
+*physically incapable* of differing — so `after.widenings_from(before) == ()` was unfalsifiable at
+every call site, and six invariants cited it as evidence. Two things were wrong: the fixtures read
+their own envelope reference rather than the mediator's live one, and no test replaced an envelope
+to see whether anything noticed. Both are fixed, and
+`test_the_instrument_fires_when_the_mediator_swaps_its_envelope` now swaps in a strictly wider
+signed grant mid-session and asserts every dimension is reported.
+
+The same review found **six dimensions of authority outside the snapshot entirely**: blocking stop
+conditions (each one a `REFUSED_STOP_CONDITION` gate in the effects preflight), `jurisdictions`
+(named verbatim by CLAUDE.md invariant 9), `max_effect_description`, whether the grant is signed at
+all, and — because `approver_subjects` read `.approver` without `.decision` — an objector was
+indistinguishable from an approver. All six are now compared.
 | **AUTH-02** | Peer/model communication cannot increase authority. | `IMPLEMENTED` | Nothing reads a string as an authorization. A chat reply is a `DecisionIntent` (a *reading*, with no member naming an outcome); a challenger's verdicts only subtract; a supervisor's directives change one word in a briefing; a research hint is redacted and quarantined. The collaboration plane cannot import `nemesis.authz` at all. | `test_authority_monotonicity.py` (10 phrasings × 2 shapes), `test_collaboration_boundary.py`; Breaker `peer-says-go` |
 | **AUTH-03** | Evidence cannot automatically become capability. | `IMPLEMENTED` | A model assertion is minted as `HYPOTHESIS`/`MODEL_ASSERTION` at construction (invariant 1) and can never be an observation or a fact. Capability comes only from a signed `AuthorizationCapability`. | `test_authority_monotonicity.py`, `test_credential_containment.py`; Breaker `opinion-as-evidence` |
 | **AUTH-04** | Discovered credentials do not imply authorization. | `IMPLEMENTED` | `nemesis.core.credentials`: no type has a field for material; the fingerprint is HMAC under a deployment key; `EntityCategory.CREDENTIAL` maps to `RESTRICTED`; `normalize_identifier` refuses a credential as a natural key. Nothing outside `core` imports the types. | `test_credential_containment.py`; Breaker `credential-laundering` |
@@ -62,6 +77,13 @@ would be a control derived from the controls it is meant to check.
 |---|---|---|---|---|
 | **NET-01** | Model-controlled contexts cannot obtain unauthorized **direct** Internet access. | `IMPLEMENTED` | `scripts/check_prohibited.py` refuses a network import outside the collection plane, and every import inside it needs an adjacent `NEMESIS-EGRESS-ALLOWED` marker. Vendor SDKs are on the list, because a full HTTP stack behind a name that does not look like one is how invariant 15 ends quietly. | `test_transitive_egress.py`, CI step |
 | **NET-02** | Model-controlled contexts cannot obtain unauthorized **transitive** Internet access. | `IMPLEMENTED` | `nemesis.sandbox.reachability` builds the import graph, marks modules that can reach the network **or start a process**, and asserts no path from a model-controlled root to one except through a declared broker. Three brokers, each with a written reason the far side is policy-controlled. | `test_transitive_egress.py`, `scripts/check_egress_reachability.py` in CI |
+
+**Four forms it could not see, found by an adversarial review and now covered:** a relative import
+(`from ..x import y` produced *no edge at all*, so a whole subtree was invisible); an aliased
+`import subprocess as sp`; a bare `from subprocess import run`; and `asyncio.open_connection`,
+which is a full TCP client that neither the module list nor the process-call table classified.
+The false positive the design already avoided — `asyncio.run` is not a capability — is now
+asserted alongside them, so a fix for the four cannot reintroduce it.
 | **NET-03** | Collector network privileges are not inherited by pilots. | `IMPLEMENTED` | A pivot names an **entity id the investigation surfaced**, never a locator; the vocabulary has no field a destination fits in. The Tor connector takes a `services` allowlist and has no `url` parameter anywhere in its call path. | `test_transitive_egress.py` (8 locators), `test_darkweb_hostility.py`; Breaker `collector-as-proxy` |
 
 **Measured 2026-08-27**, by removing each broker in turn — because "no findings" does not by
@@ -128,6 +150,24 @@ ordinary commit widens by accident.
 | **SAFEFAIL-01** | Investigations may terminate safely without attribution. | `IMPLEMENTED` | `ConclusionOutcome`: a closed vocabulary of seven honest endings plus `ATTRIBUTION_REACHED` and `UNSPECIFIED`. Carried on the session and written to the audit close, so no consumer parses prose to learn whether a case concluded or was abandoned. | `test_safe_failure.py` |
 | **SAFEFAIL-02** | Stagnation cannot automatically cause scope expansion. | `IMPLEMENTED` (thresholds `PROPOSED`) | `nemesis.pilot.stagnation` is deterministic and its every signal maps into the safe-failure set. There is no branch in the mediator that responds to a stall by asking for more, and no member of the outcome vocabulary that requests it. Detection is not configurable; only stopping is. | `test_safe_failure.py`; Breaker `persistence-past-usefulness` |
 
+**SAFEFAIL-02 as stated survived an adversarial review; the detector around it did not.** Three
+defects, all of them over-firing rather than under-firing, and one adversary-steerable:
+
+- **An analytic write-up phase read as a stall.** `was_productive` counted only entities and
+  evidence, which only a pivot ever sets — so `record_belief` was *structurally incapable* of being
+  productive and six accepted beliefs halted the investigation. An accepted belief is now
+  productive; repeating the *same* belief is still caught, by repetition.
+- **Three refused effects anywhere killed a productive run.** The count was cumulative over the
+  whole session, so content that induces three out-of-envelope requests early — exactly what an
+  injected page asks for — terminated a healthy investigation from outside. Now counted over the
+  window and gated on the window being unproductive, because the signal's honest ending is
+  *progress needs an effect nobody authorized* and a window surfacing entities is one where it
+  does not.
+- **`conclude` outranked the detector at the one moment it mattered.** The assessment ran after
+  the conclude branch, so a run that stalled for five turns and concluded on the sixth filed
+  itself as `attribution_reached` with no signals recorded. It now runs first, and a stalled run
+  gets the detector's ending.
+
 ---
 
 ## AUDIT — history is not what the current process remembers
@@ -135,7 +175,13 @@ ordinary commit widens by accident.
 | ID | Property | Status | Enforced by | Tested by |
 |---|---|---|---|---|
 | **AUDIT-01** | Historical event modification is detectable. | `IMPLEMENTED` | Each entry hashes its canonical encoding together with its predecessor's hash. A careless edit breaks the entry hash; an interior deletion or reorder breaks the link. | `test_audit_anchoring.py`, `test_audit.py` |
-| **AUDIT-02** | Tail truncation is detectable. | `IMPLEMENTED` at `AnchorIndependence.NONE` | A signed `(epoch, record_count, tip_hash)` anchor, published after a run and checked by `nemesis verify`. The chain alone cannot do this: a truncated chain links perfectly, and a fresh reader's counters are whatever the file says. | `test_audit_anchoring.py`, `test_chain_anchor.py`; Breaker `rewrite-history` |
+| **AUDIT-02** | Tail truncation is detectable, and a stale anchor cannot be replayed. | `IMPLEMENTED` at `AnchorIndependence.NONE` | A signed `(epoch, record_count, tip_hash)` anchor, published after a run and checked by `nemesis verify` **against a retained epoch**. The chain alone cannot do this: a truncated chain links perfectly, and a fresh reader's counters are whatever the file says. | `test_audit_anchoring.py`, `test_chain_anchor.py`; Breaker `rewrite-history` |
+
+**The rollback half was specified, tested and unwired.** An adversarial review pointed out that
+`verify_audit_trail`'s own docstring says "without it a stale but validly-signed anchor replays
+cleanly" — and `nemesis verify` passed no `retained_epoch` at all. The primitive had a test; the
+caller did not, which is the same failure this module was written to fix, one level up. A workspace
+now persists the greatest epoch it has accepted, monotonically, and the verifier consults it.
 
 **The two controls are complementary and neither covers both halves. Measured:**
 
@@ -168,15 +214,26 @@ the verdict so "anchored" cannot be read as the tier above.
 | **PROBE-01** | A reach for a reserved capability identifier is recorded, and sustained probing halts the session. | `IMPLEMENTED` | `nemesis.core.canaries`: ten identifiers nothing legitimate emits, matched on a normalised whole token in pilot-authored identifier fields. A hit writes a `security.control_boundary_probe` audit event; three distinct tokens end the session. | `test_control_boundary_canaries.py`; Breaker `capability-probe` |
 | **PROBE-02** | The canary cannot be fired by what an adversary *writes*. | `IMPLEMENTED` | Identifier fields only — never a rationale, a summary, a belief's natural language, a parameter *value*, or anything else an adversary can write. A control an adversary can trigger is a denial of service handed to them. | `test_control_boundary_canaries.py` |
 
-**PROBE-02 is stated as "what an adversary writes" rather than "by an adversary", and the
-distinction is the control.** An adversary who successfully injects the pilot *can* have it put a
-reserved token into a parameter key, and sustained probing then ends the session. That is a
-different shape from the one refused, and it is arguably the right outcome:
+**PROBE-02 is stated as "what an adversary writes", and the boundary moved once already.**
+
+The first version scanned every non-prose field, and an adversarial review broke it with **one
+DNS registration**: a domain whose subdomain labels are three reserved capability names. It is a
+well-formed hostname, it enters the graph through an ordinary registration pivot, it reaches the
+pilot as an entity's natural key — and the moment a *correct* pilot wrote an ordinary belief
+about it, three tokens landed in `record_belief.subject` and the session halted. No injection, no
+misbehaviour, one adversary, every investigation that collected it.
+
+The fix is not a longer exclusion list. **A value the pilot was *shown* is not a reach**: what
+separates a probe from an echo is whether the pilot could have got the string from us, and the
+briefing is the answer. Every string in the assembled briefing is excluded from the scan.
+
+Three shapes, and only the third remains reachable:
 
 | Shape | Cost to the adversary | Effect | Verdict |
 |---|---|---|---|
-| Token in a collected page, matched in prose | One forum post | Halts **every** session that reads it, no model cooperation needed | Refused by design — a weapon handed to them |
-| Token in a field the *model* chose | Must get the model to obey, three distinct times | Halts one session, and flags it for human review | Accepted — a session where a model acted on instructions from collected content is one somebody should read |
+| Token in a collected page, matched in prose | One forum post | Would halt **every** session that reads it | Refused by design — a weapon handed to them |
+| Token in an entity natural key the pilot echoes | One DNS registration | Would halt every session that collects it, with no model cooperation at all | **Was reachable; now refused** by the briefing filter |
+| Token in a field the *model* invented | Must get the model to obey, three distinct times | Halts one session and flags it for human review | Accepted — a session where a model acted on instructions from collected content is one somebody should read |
 
 **What PROBE-01 does not catch, stated so nobody over-reads it.** A careful adversary will not
 say the words. This finds the copy-pasteable probe, the injected payload that names a control,

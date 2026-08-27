@@ -78,6 +78,8 @@ from nemesis.authz.audit_anchor import (
     ANCHOR_PUBLIC_KEY_FILE,
     AUDIT_CHAIN,
     AuditIntegrityReport,
+    retain_epoch,
+    retained_epoch,
     verify_audit_trail,
 )
 from nemesis.authz.verification import CapabilityVerifyingKey
@@ -1457,13 +1459,24 @@ def _verify_audit_anchor(workspace: Path, audit_path: Path) -> AuditIntegrityRep
             independence=AnchorIndependence.NONE,
         )
     verifier = CapabilityVerifyingKey.load(key_path)
-    return asyncio.run(
+    report = asyncio.run(
         verify_audit_trail(
             AppendOnlyAuditTrail(audit_path),
             store=FileAnchorStore(workspace / ANCHOR_FILE),
             authorities=registered_authorities(local_anchor_authority(verifier)),
+            # The rollback half of the contract, which was specified and not called. Without a
+            # retained epoch, a stale but validly-signed anchor presented beside a file rolled
+            # back to match it verifies perfectly — and an adversarial review pointed out that
+            # this was the same failure the anchor module was written to fix, one level up.
+            retained_epoch=retained_epoch(workspace),
         )
     )
+    if report.sound and report.anchor is not None:
+        # Only advance the memory on a verification that agreed. Recording an epoch from an
+        # anchor that failed would let one bad presentation raise the bar and lock out the real
+        # history behind it.
+        retain_epoch(workspace, report.anchor.epoch)
+    return report
 
 
 @app.command()

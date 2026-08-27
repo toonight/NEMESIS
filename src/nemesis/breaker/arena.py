@@ -96,15 +96,22 @@ class Arena:
     signer: CapabilitySigningKey
 
     def authority(self) -> AuthoritySnapshot:
-        """The current authority state, for a before/after comparison.
+        """The current authority state, read from the **mediator's** envelope.
 
         Every authority attack in the catalogue is written as: snapshot, do the worst thing you
         can think of, snapshot again, assert no widening. The value of running it that way rather
         than asserting a specific refusal is that it does not depend on knowing *which* control
         was supposed to stop the attack — and this repository has already been bitten by a
         refusal produced by a different control than the one under test.
+
+        Taken from ``mediator._envelope`` and not from ``self.envelope``. They are the same object
+        today and an adversarial review showed why that is not good enough: a mediator that
+        replaced its own envelope with a wider one left every attack here reporting no widening,
+        because the arena kept comparing its own unchanged reference with itself. An instrument
+        pointed at an object that cannot move measures nothing.
         """
-        return snapshot(self.envelope.capability, self.envelope)
+        envelope = self.mediator._envelope
+        return snapshot(envelope.capability, envelope)
 
     async def drive(self, pilot: object, *, total_budget: float = 100.0) -> PilotSession:
         """Run a pilot against this arena.

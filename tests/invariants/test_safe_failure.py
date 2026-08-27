@@ -34,6 +34,7 @@ from nemesis.pilot.moves import (
     SAFE_FAILURE_OUTCOMES,
     Conclude,
     ConclusionOutcome,
+    RecordBelief,
     RequestEffect,
     RulingStatus,
     RunPivot,
@@ -61,6 +62,7 @@ def _step(
     status: RulingStatus = RulingStatus.ACCEPTED,
     entities: int = 0,
     evidence: int = 0,
+    claim_recorded: bool = False,
 ) -> SessionStep:
     return SessionStep(
         move_kind=kind,
@@ -68,6 +70,7 @@ def _step(
         status=status,
         entities_discovered=entities,
         evidence_sealed=evidence,
+        claim_recorded=claim_recorded,
     )
 
 
@@ -273,37 +276,204 @@ def test_a_productive_investigation_is_not_stopped(tmp_path: Path) -> None:
 
     async def scenario() -> tuple[bool, ConclusionOutcome, int]:
         h = await harness(tmp_path, max_moves=20)
+        # Eight moves, so `assess` is consulted with a **full window** several times. The first
+        # version ran five against a window of six, so the detector returned early on every call
+        # and the test could not have failed however the detector behaved — the exact shape it
+        # was written to catch, one level up. Beliefs are interleaved because they are the phase
+        # a good investigation ends in and the phase a detector counting only pivots calls a
+        # stall.
+        script: list[object] = []
+        for index, pivot in enumerate(
+            (
+                PivotType.RESOLUTION_HISTORY,
+                PivotType.CERTIFICATE_HISTORY,
+                PivotType.REGISTRATION_RECORD,
+                PivotType.HOSTING_NEIGHBOURS,
+            )
+        ):
+            script.append(
+                RunPivot(
+                    entity_id=h.approved.entity_id,
+                    pivot_type=pivot,
+                    rationale="following the lead",
+                )
+            )
+            script.append(
+                RecordBelief(
+                    subject=h.approved.entity_id,
+                    predicate=f"observation_{index}",
+                    obj=f"finding-{index}",
+                    natural_language=f"what pivot {index} established",
+                )
+            )
+        script.append(
+            Conclude(summary="found a cluster", outcome=ConclusionOutcome.ATTRIBUTION_UNCERTAIN)
+        )
+        session = await h.drive(Scripted("productive", script), total_budget=400.0)
+        return session.concluded, session.outcome, len(session.transcript)
+
+    concluded, outcome, moves = _run(scenario())
+    assert moves == 9, (
+        f"the run produced {moves} moves; it must exceed the detector's window or the detector "
+        "is never consulted and this test asserts nothing"
+    )
+    assert concluded is True, "a productive run was stopped by the stagnation detector"
+    assert outcome is ConclusionOutcome.ATTRIBUTION_UNCERTAIN
+
+
+# --- what an adversarial review broke, and what stops it now -------------------------------
+
+
+def test_an_analytic_write_up_phase_is_not_a_stall(tmp_path: Path) -> None:
+    """A run of accepted beliefs is a pilot committing, not a pilot giving up.
+
+    ``was_productive`` read only ``entities_discovered`` and ``evidence_sealed``, and only
+    ``_apply_pivot`` ever sets those — so ``record_belief`` was **structurally incapable** of
+    being productive. Six accepted, distinct beliefs in a row halted the investigation as a
+    stall, which meant the one phase where a good investigation writes down what it concluded
+    was indistinguishable from failure.
+
+    An accepted belief is now productive: it is not evidence and it outranks nothing, but it is
+    a claim that was not in the store before. A pilot that only ever repeats *the same* belief is
+    still caught, which the next assertion shows.
+    """
+
+    async def scenario() -> tuple[bool, ConclusionOutcome, int]:
+        h = await harness(tmp_path, max_moves=20)
         session = await h.drive(
             Scripted(
-                "productive",
+                "analyst-writing-up",
                 [
-                    RunPivot(
-                        entity_id=h.approved.entity_id,
-                        pivot_type=pivot,
-                        rationale="following the lead",
+                    RecordBelief(
+                        subject=h.approved.entity_id,
+                        predicate=f"finding_{index}",
+                        obj=f"conclusion-{index}",
+                        natural_language=f"the {index}th thing this investigation established",
                     )
-                    for pivot in (
-                        PivotType.RESOLUTION_HISTORY,
-                        PivotType.CERTIFICATE_HISTORY,
-                        PivotType.REGISTRATION_RECORD,
-                        PivotType.HOSTING_NEIGHBOURS,
-                    )
+                    for index in range(6)
                 ]
-                + [
-                    Conclude(
-                        summary="found a cluster",
-                        outcome=ConclusionOutcome.ATTRIBUTION_UNCERTAIN,
-                    )
-                ],
+                + [Conclude(summary="written up", outcome=ConclusionOutcome.ATTRIBUTION_UNCERTAIN)],
             ),
             total_budget=400.0,
         )
         return session.concluded, session.outcome, len(session.transcript)
 
     concluded, outcome, moves = _run(scenario())
-    assert concluded is True, "a productive run was stopped by the stagnation detector"
+    assert moves == 7, "the run must exceed the window or the detector is never consulted"
+    assert concluded is True, "an analytic write-up phase was halted as a stall"
     assert outcome is ConclusionOutcome.ATTRIBUTION_UNCERTAIN
-    assert moves == 5
+
+
+def test_the_same_belief_repeated_is_still_a_stall() -> None:
+    """The other half of the fix, so counting beliefs as productive is not a weakening.
+
+    Distinct beliefs are progress. The *same* belief six times is a loop, and it is caught by
+    repetition rather than by productivity — which is the right control for it.
+    """
+    detector = SessionStagnationDetector()
+    assessment = detector.assess([_step("record_belief", digest="same", claim_recorded=True)] * 6)
+    assert assessment.stagnant is True
+    assert SessionStagnationSignal.REPEATED_MOVE in assessment.signals
+
+
+def test_early_refused_effects_do_not_end_a_productive_run() -> None:
+    """Otherwise an injected page ends a healthy investigation from outside.
+
+    ``EFFECT_REFUSALS_REPEATED`` counted cumulatively over the whole session, so three refusals
+    anywhere ended it — however productive the last three turns had been. Content that induces
+    three out-of-envelope requests early is exactly what an injected page asks for, which made
+    this an adversary-steerable denial of service on a *correct* pilot.
+
+    Two changes: the count is over the window, and the signal is gated on the window being
+    unproductive. The second is the real one, because the signal's honest ending is
+    ``AUTHORIZATION_REQUIRED`` — *progress needs an effect nobody authorized* — and a window
+    surfacing entities is a window where progress plainly does not need it.
+    """
+    detector = SessionStagnationDetector()
+    steered = [
+        _step("request_effect", digest=str(i), status=RulingStatus.REFUSED_OUT_OF_ENVELOPE)
+        for i in range(3)
+    ] + [_step("run_pivot", digest=f"p{i}", entities=9, evidence=9) for i in range(3)]
+    assessment = detector.assess(steered)
+    assert assessment.stagnant is False, (
+        f"three early refusals ended a run whose last three turns each surfaced nine entities: "
+        f"{[s.value for s in assessment.signals]}"
+    )
+
+    # And a genuinely blocked run still ends, asking for the human it needs.
+    blocked = [
+        _step("request_effect", digest=str(i), status=RulingStatus.REFUSED_OUT_OF_ENVELOPE)
+        for i in range(6)
+    ]
+    stuck = detector.assess(blocked)
+    assert SessionStagnationSignal.EFFECT_REFUSALS_REPEATED in stuck.signals
+    assert stuck.outcome is ConclusionOutcome.AUTHORIZATION_REQUIRED
+
+
+def test_a_cycle_is_a_stall_even_though_no_two_moves_are_consecutive() -> None:
+    """``A,B,A,B,A,B`` repeats forever and the trailing-run check never fires.
+
+    An adversarial review defeated ``REPEATED_MOVE`` with twelve turns of exactly that: no two
+    *consecutive* moves are identical, so a check counting a trailing run sees a run of one every
+    time. Counting distinct moves in the window catches the cycle; a run of genuinely different
+    questions is untouched.
+    """
+    detector = SessionStagnationDetector()
+    cycling = [_step("run_pivot", digest="A" if i % 2 == 0 else "B", entities=1) for i in range(12)]
+    assessment = detector.assess(cycling)
+    assert assessment.stagnant is True
+    assert SessionStagnationSignal.REPEATED_MOVE in assessment.signals
+
+    varied = [_step("run_pivot", digest=f"p{i}", entities=1) for i in range(6)]
+    assert detector.assess(varied).stagnant is False, (
+        "six different productive pivots were called a cycle; the ceiling is too tight"
+    )
+
+
+def test_a_stalled_pilot_cannot_file_the_run_as_an_attribution(tmp_path: Path) -> None:
+    """The claim `PilotSession.outcome` made and did not keep.
+
+    The assessment ran *after* the conclude branch, so a pilot that stalled for five turns and
+    concluded on the sixth — the turn the detector would have fired — produced
+    ``stagnation=None``, no signals in the audit close, and whatever outcome it chose to file. An
+    adversarial review filed a stalled run as ``attribution_reached`` to prove it.
+
+    The assessment now runs first, and when it fired the detector's ending is the one recorded.
+    A pilot is free to say what it thinks the run established; it is not free to file a run that
+    stopped going anywhere as an attribution, because that is the record every downstream
+    consumer keys on.
+    """
+
+    async def scenario() -> tuple[ConclusionOutcome, bool, dict[str, str]]:
+        h = await harness(tmp_path, max_moves=20)
+        barren = RunPivot(
+            entity_id=h.unapproved.entity_id,
+            pivot_type=PivotType.RESOLUTION_HISTORY,
+            rationale="nothing here",
+        )
+        session = await h.drive(
+            Scripted(
+                "stalled-then-declares-victory",
+                [
+                    *[barren] * 5,
+                    Conclude(
+                        summary="attributed to RedOctober",
+                        outcome=ConclusionOutcome.ATTRIBUTION_REACHED,
+                    ),
+                ],
+            ),
+            total_budget=400.0,
+        )
+        closes = await h.audit.query(action="pilot.session", limit=10)
+        return session.outcome, session.stagnation is not None, dict(closes[-1].inputs)
+
+    outcome, recorded, close = _run(scenario())
+    assert outcome is not ConclusionOutcome.ATTRIBUTION_REACHED, (
+        "a stalled run filed itself as an attribution"
+    )
+    assert outcome in SAFE_FAILURE_OUTCOMES
+    assert recorded, "the stall was not kept on the session, so nothing downstream can see it"
+    assert close["stagnation_signals"], "the audit close records no signals for a stalled run"
 
 
 # --- the detector itself ---------------------------------------------------------------
@@ -341,14 +511,12 @@ def test_each_signal_fires_on_its_own_shape() -> None:
     )
     assert SessionStagnationSignal.REPEATED_REFUSAL in refusals.signals
 
+    # `entities=0`, because a refused effect discovers nothing. The first version of this
+    # fixture set `entities=1` — a shape that cannot occur — and it mattered once the signal was
+    # gated on the window being unproductive: a contradictory fixture would have masked the gate.
     effects = detector.assess(
         [
-            _step(
-                "request_effect",
-                digest=str(i),
-                status=RulingStatus.REFUSED_OUT_OF_ENVELOPE,
-                entities=1,
-            )
+            _step("request_effect", digest=str(i), status=RulingStatus.REFUSED_OUT_OF_ENVELOPE)
             for i in range(6)
         ]
     )

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+from collections import deque
 from collections.abc import Coroutine
 from pathlib import Path
 from typing import Any
@@ -36,6 +37,7 @@ from nemesis.sandbox.reachability import (
     DECLARED_BROKERS,
     MODEL_CONTROLLED_ROOTS,
     NETWORK_MODULES,
+    ImportGraph,
     build_graph,
     dynamic_import_sites,
     process_spawning_modules,
@@ -47,6 +49,14 @@ from tests.support.adversarial import Scripted, harness
 pytestmark = pytest.mark.invariant
 
 SRC = Path(__file__).resolve().parents[2] / "src"
+
+NEWLINE = chr(10)
+"""A literal newline, named.
+
+The tests below write Python source into temporary trees, so their fixtures contain code.
+Spelling the separator as a name keeps the fixture strings readable and keeps an escaped
+newline out of a string that already has quotes and backslashes in it.
+"""
 
 LOCATORS = (
     "http://169.254.169.254/latest/meta-data/iam/security-credentials/",
@@ -244,6 +254,27 @@ def test_the_holes_in_this_analysis_are_enumerated_and_justified() -> None:
     )
 
 
+def _reachable_from(graph: ImportGraph, roots: tuple[str, ...]) -> set[str]:
+    """Every module reachable from ``roots``, by closure over the import graph.
+
+    Written out rather than derived from ``unbrokered_egress`` findings, and that was the defect:
+    a findings list holds only the *shortest path to each egress target*, which on the real tree
+    is five modules. An adversarial review planted an import from the mediator to
+    ``calibration.freeze`` and the test below still passed, because ``freeze`` is not an egress
+    target and so appeared in no finding's path at all. The test could not detect the violation
+    it names.
+    """
+    seen: set[str] = set()
+    queue: deque[str] = deque(roots)
+    while queue:
+        current = queue.popleft()
+        for nxt in graph.edges.get(current, frozenset()):
+            if nxt not in seen:
+                seen.add(nxt)
+                queue.append(nxt)
+    return seen
+
+
 def test_no_model_controlled_root_reaches_a_dynamic_import_site() -> None:
     """The sharper half: a hole only matters if a model-controlled context can reach it.
 
@@ -254,11 +285,122 @@ def test_no_model_controlled_root_reaches_a_dynamic_import_site() -> None:
     """
     graph = build_graph(SRC)
     sites = {site.split(":")[0] for site in dynamic_import_sites(SRC)}
-    findings = unbrokered_egress(graph, brokers=())
-    reachable = {f.target for f in findings} | {module for f in findings for module in f.path}
+    reachable = _reachable_from(graph, MODEL_CONTROLLED_ROOTS)
+    assert reachable, "the closure is empty; the traversal is not running"
     assert not (sites & reachable), (
         f"a model-controlled context reaches a dynamic-import site: {sorted(sites & reachable)}. "
         "That is an edge this analysis cannot follow, on a path the model can."
+    )
+
+
+def test_the_dynamic_import_check_detects_a_planted_path() -> None:
+    """The check above, proven able to fail — because its first version could not."""
+    import shutil
+    import tempfile
+
+    staging = Path(tempfile.mkdtemp(prefix="nemesis-dynimport-"))
+    shutil.copytree(SRC / "nemesis", staging / "nemesis")
+    mediator = staging / "nemesis" / "pilot" / "mediator.py"
+    planted = (
+        "from nemesis.calibration.freeze import FROZEN_DIGEST"
+        + NEWLINE
+        + "from nemesis.pilot.pilot import AutonomousPilot"
+    )
+    mediator.write_text(
+        mediator.read_text(encoding="utf-8").replace(
+            "from nemesis.pilot.pilot import AutonomousPilot", planted, 1
+        ),
+        encoding="utf-8",
+    )
+    reachable = _reachable_from(build_graph(staging), MODEL_CONTROLLED_ROOTS)
+    assert "nemesis.calibration.freeze" in reachable, (
+        "a planted edge from the mediator to a dynamic-import site was not seen; the closure is "
+        "not computing reachability"
+    )
+
+
+def test_the_analysis_sees_the_import_and_call_forms_it_claims_to() -> None:
+    """Five forms an adversarial review used to walk past the capability classification.
+
+    Checked on a synthetic tree rather than the real one, because the real tree deliberately
+    contains none of them — and a check that only ever runs against code without the shape cannot
+    tell whether it would see it. Four were missed; the fifth is the false positive the design
+    already avoided, asserted here so a fix for the other four cannot reintroduce it.
+    """
+    import tempfile
+
+    root = Path(tempfile.mkdtemp(prefix="nemesis-forms-"))
+    pkg = root / "nemesis"
+    (pkg / "net").mkdir(parents=True)
+    for name in ("__init__.py", "net/__init__.py"):
+        (pkg / name).write_text("", encoding="utf-8")
+
+    sources = {
+        "net/client.py": "import httpx",
+        "rel.py": "from .net import client",
+        "aliased.py": "import subprocess as sp"
+        + NEWLINE
+        + "def f() -> None:"
+        + NEWLINE
+        + "    sp.run(['x'])",
+        "bare.py": "from subprocess import run"
+        + NEWLINE
+        + "def f() -> None:"
+        + NEWLINE
+        + "    run(['x'])",
+        "sock.py": "import asyncio"
+        + NEWLINE
+        + "async def f() -> None:"
+        + NEWLINE
+        + "    await asyncio.open_connection('1.2.3.4', 80)",
+        "loop.py": "import asyncio"
+        + NEWLINE
+        + "def f() -> None:"
+        + NEWLINE
+        + "    asyncio.run(None)",
+    }
+    for name, body in sources.items():
+        (pkg / name).write_text(body + NEWLINE, encoding="utf-8")
+
+    graph = build_graph(root)
+    assert "nemesis.net.client" in graph.edges.get("nemesis.rel", frozenset()), (
+        "a relative import produced no edge; `from .x import y` is invisible to the analysis"
+    )
+    assert graph.capabilities["nemesis.aliased"].process, "`import subprocess as sp` evaded"
+    assert graph.capabilities["nemesis.bare"].process, "`from subprocess import run` evaded"
+    assert graph.capabilities["nemesis.sock"].network, "`asyncio.open_connection` unclassified"
+    assert not graph.capabilities["nemesis.loop"].is_egress_capable, (
+        "`asyncio.run` was classified as a capability; that false positive is the one the "
+        "per-module qualification exists to avoid"
+    )
+
+
+def test_a_relative_import_of_an_egress_module_is_found() -> None:
+    """The same fix end to end on a real copy of the tree.
+
+    `test_the_analysis_finds_a_path_when_one_is_planted` plants an *absolute* import. This plants
+    the relative form, which is the one that produced no edge at all.
+    """
+    import shutil
+    import tempfile
+
+    staging = Path(tempfile.mkdtemp(prefix="nemesis-relegress-"))
+    shutil.copytree(SRC / "nemesis", staging / "nemesis")
+    mediator = staging / "nemesis" / "pilot" / "mediator.py"
+    planted = (
+        "from ..collect.dark_web import TorOnionConnector"
+        + NEWLINE
+        + "from nemesis.pilot.pilot import AutonomousPilot"
+    )
+    mediator.write_text(
+        mediator.read_text(encoding="utf-8").replace(
+            "from nemesis.pilot.pilot import AutonomousPilot", planted, 1
+        ),
+        encoding="utf-8",
+    )
+    findings = unbrokered_egress(build_graph(staging))
+    assert any(f.target == "nemesis.collect.dark_web" for f in findings), (
+        "a relative import of the dark-web connector from the mediator was not found"
     )
 
 

@@ -126,6 +126,7 @@ PROCESS_CALLS: Final[Mapping[str, frozenset[str]]] = {
         {
             "system",
             "popen",
+            "startfile",
             "execv",
             "execve",
             "execvp",
@@ -134,14 +135,44 @@ PROCESS_CALLS: Final[Mapping[str, frozenset[str]]] = {
             "execlp",
             "spawnv",
             "spawnve",
+            "spawnvp",
+            "spawnvpe",
             "spawnl",
+            "spawnlp",
             "posix_spawn",
+            "posix_spawnp",
             "fork",
             "forkpty",
         }
     ),
     "multiprocessing": frozenset({"Process", "Pool", "spawn"}),
+    "ctypes": frozenset({"CDLL", "WinDLL", "PyDLL", "cdll", "windll"}),
 }
+
+NETWORK_CALLS: Final[Mapping[str, frozenset[str]]] = {
+    "asyncio": frozenset(
+        {
+            "open_connection",
+            "start_server",
+            "open_unix_connection",
+            "start_unix_server",
+            "create_connection",
+            "create_server",
+            "create_datagram_endpoint",
+        }
+    ),
+}
+"""Network capability that arrives as a *call* rather than as an import.
+
+``asyncio`` cannot go in :data:`NETWORK_MODULES`: it is imported by half this tree for its event
+loop, and marking every one of those modules egress-capable would make the analysis report
+everything and therefore nothing. But ``asyncio.open_connection`` is a full TCP client, and an
+adversarial review pointed out that neither list saw it — a module opening a socket that way was
+classified ``network=() process=()``.
+
+So the same per-module qualification :data:`PROCESS_CALLS` uses applies here: the module is only
+egress-capable if it calls one of these, not if it merely imports ``asyncio``.
+"""
 """Call names that can put a new process on the machine, qualified by the module they live on.
 
 **A flat name set does not work, and the first version proved it in one run.** ``run`` and
@@ -259,19 +290,61 @@ def _module_name(path: Path, src: Path) -> str:
     return name.removesuffix(".__init__")
 
 
-def _call_base(node: ast.Call) -> tuple[str, str] | None:
-    """``asyncio.create_subprocess_exec(...)`` -> ``("asyncio", "create_subprocess_exec")``.
+def _call_base(node: ast.Call, aliases: Mapping[str, str]) -> tuple[str, str] | None:
+    """Resolve a call to ``(capability module, attribute)``, or ``None``.
 
-    Returns ``None`` for anything that is not a two-part attribute call, which is what keeps a
-    domain object's ``self.run()`` out of the process-capability set.
+    Three forms, and the last two were missing until an adversarial review used them:
+
+    * ``asyncio.create_subprocess_exec(...)`` — a two-part attribute call, resolved directly.
+    * ``sp.run(...)`` after ``import subprocess as sp`` — resolved through ``aliases``, because
+      keying on the *written* name meant any alias evaded the table.
+    * ``run(...)`` after ``from subprocess import run`` — an ``ast.Name`` call with no module
+      prefix at all, resolved through ``aliases`` to the module it was imported from.
+
+    Still ``None`` for a bare call whose name was never imported from a capability module, which
+    is what keeps a domain object's ``self.run()`` and a local ``run()`` out of the set.
     """
     func = node.func
-    if not isinstance(func, ast.Attribute):
-        return None
-    base = func.value
-    if not isinstance(base, ast.Name):
-        return None
-    return base.id, func.attr
+    if isinstance(func, ast.Attribute):
+        base = func.value
+        if not isinstance(base, ast.Name):
+            return None
+        return aliases.get(base.id, base.id), func.attr
+    if isinstance(func, ast.Name):
+        origin = aliases.get(f"{_BARE}{func.id}")
+        return (origin, func.id) if origin else None
+    return None
+
+
+_BARE: Final = "\x00bare:"
+"""Prefix distinguishing ``from x import y`` bindings from ``import x as y`` ones in one map.
+
+A control character so it can never collide with a real identifier. Two lookups sharing one dict
+rather than two dicts threaded through one function — the alternative is a second parameter that
+every caller has to keep in step with the first.
+"""
+
+
+def _import_aliases(tree: ast.AST) -> dict[str, str]:
+    """Map the names a module bound to the capability modules they came from.
+
+    Only capability modules are tracked, so this stays small and cannot shadow an unrelated
+    local name: an ``import json as run`` binds nothing here.
+    """
+    interesting = set(PROCESS_CALLS) | set(NETWORK_CALLS)
+    aliases: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                root = alias.name.split(".")[0]
+                if root in interesting and alias.asname:
+                    aliases[alias.asname] = root
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            root = node.module.split(".")[0]
+            if root in interesting:
+                for alias in node.names:
+                    aliases[f"{_BARE}{alias.asname or alias.name}"] = root
+    return aliases
 
 
 def build_graph(src: Path) -> ImportGraph:
@@ -292,16 +365,34 @@ def build_graph(src: Path) -> ImportGraph:
         network: set[str] = set()
         process: set[str] = set()
 
+        aliases = _import_aliases(tree)
+        package = name.rsplit(".", 1)[0] if "." in name else name
+
         for node in ast.walk(tree):
             imported: list[str] = []
             if isinstance(node, ast.Import):
                 imported = [alias.name for alias in node.names]
-            elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
-                imported = [node.module, *(f"{node.module}.{a.name}" for a in node.names)]
+            elif isinstance(node, ast.ImportFrom):
+                if node.level == 0 and node.module:
+                    imported = [node.module, *(f"{node.module}.{a.name}" for a in node.names)]
+                elif node.level > 0:
+                    # A relative import. The first version required `level == 0` and therefore
+                    # produced **no edge at all** for `from ..net import client` — an adversarial
+                    # review planted one and the graph came back empty. This tree has no relative
+                    # imports today, so it was latent; nothing enforced that, and the planted-path
+                    # test used an absolute import and would not have caught it.
+                    base = package.rsplit(".", node.level - 1)[0] if node.level > 1 else package
+                    prefix = f"{base}.{node.module}" if node.module else base
+                    imported = [prefix, *(f"{prefix}.{a.name}" for a in node.names)]
             elif isinstance(node, ast.Call):
-                base = _call_base(node)
-                if base is not None and base[1] in PROCESS_CALLS.get(base[0], frozenset()):
-                    process.add(f"{base[0]}.{base[1]}")
+                base_call = _call_base(node, aliases)
+                if base_call is None:
+                    continue
+                module_name_, attribute = base_call
+                if attribute in PROCESS_CALLS.get(module_name_, frozenset()):
+                    process.add(f"{module_name_}.{attribute}")
+                if attribute in NETWORK_CALLS.get(module_name_, frozenset()):
+                    network.add(f"{module_name_}.{attribute}")
                 continue
             else:
                 continue
@@ -461,6 +552,7 @@ __all__ = [
     "DECLARED_BROKERS",
     "DYNAMIC_IMPORT_CALLS",
     "MODEL_CONTROLLED_ROOTS",
+    "NETWORK_CALLS",
     "NETWORK_MODULES",
     "PACKAGE_ROOT",
     "PROCESS_CALLS",

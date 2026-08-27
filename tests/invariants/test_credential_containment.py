@@ -276,6 +276,53 @@ def test_a_discovered_credential_offered_as_authentication_does_nothing(tmp_path
     )
 
 
+def test_a_credential_a_pilot_types_into_a_claim_is_held_and_not_exported(
+    tmp_path: Path,
+) -> None:
+    """Where a pilot-supplied credential actually ends up, stated rather than assumed.
+
+    An adversarial review made a fair point about the behavioural test above: it asserts the
+    credential reached no *audit record*, and that holds because `_record_move` writes a fixed key
+    set which never includes `parameters`, `obj` or `natural_language`. It would hold identically
+    for any string with this whole module deleted — a refusal from a different control.
+
+    So this asserts the uncomfortable half directly. The credential **is** in the claim store,
+    verbatim, inside a HYPOTHESIS the pilot typed. What bounds it is not redaction, it is
+    standing and disclosure: a model assertion is not evidence, and the claim is attached to an
+    entity whose class decides what may leave. The honest statement is "held under the disclosure
+    wall", not "scrubbed" — and the register says AUTH-04 is about a credential not becoming a
+    *capability*, which is a different claim from it never being written down.
+    """
+    from nemesis.core.claims import ClaimKind
+
+    async def scenario() -> tuple[bool, list[str]]:
+        h = await harness(tmp_path)
+        await h.drive(
+            Scripted(
+                "types-a-credential",
+                [
+                    RecordBelief(
+                        subject=h.approved.entity_id,
+                        predicate="panel_login",
+                        obj=TOKEN,
+                        natural_language=f"the panel login is admin / {TOKEN}",
+                    )
+                ],
+            )
+        )
+        stored = [c for c in h.claims.claims() if TOKEN in c.statement.obj]
+        return bool(stored), [c.kind.value for c in stored]
+
+    present, kinds = _run(scenario())
+    assert present, (
+        "this test asserts what is TRUE, not what is comfortable. If the credential no longer "
+        "reaches the claim store, something now scrubs it and this test should say so instead."
+    )
+    assert kinds == [ClaimKind.HYPOTHESIS.value], (
+        "a credential a pilot typed was stored at a standing above hypothesis"
+    )
+
+
 def test_a_belief_naming_a_credential_is_still_only_a_hypothesis(tmp_path: Path) -> None:
     """AUTH-03 with a credential in it: evidence does not become capability by being sensitive.
 
@@ -348,4 +395,40 @@ def test_nothing_in_the_platform_consumes_a_credential_indicator() -> None:
     assert importers == ["core/entities.py"], (
         f"a plane now reaches for credential types: {importers}. Discovery and use are "
         "separate concepts; wiring one to the other needs an independent authorization path."
+    )
+
+
+def test_the_redaction_backstop_is_free_to_be_wired_where_the_types_are_not() -> None:
+    """Two different things live in one module, and only one of them is quarantined.
+
+    The test above forbids any plane importing :mod:`nemesis.core.credentials`. An adversarial
+    review pointed out what that costs: :func:`redact_credential_material` exists precisely so a
+    collector or an effect boundary can scrub credential-shaped prose, and the module's own
+    docstring says so — yet wiring it anywhere would fail that test. The module's stated job was
+    forbidden by its own suite, and the function has zero callers today as a result.
+
+    The distinction that resolves it, asserted here so it does not get lost:
+
+    * :class:`CredentialIndicator` and :class:`SecretReference` are the *quarantined* half. They
+      carry provenance about authentication material, and keeping them out of every plane is
+      what AUTH-04's "discovery and use are separate concepts" means.
+    * :func:`redact_credential_material` and :func:`credential_shapes` are a *text utility*. They
+      hold nothing, return nothing sensitive, and refusing to let a plane call them protects
+      nothing at all.
+
+    So the rule is on the types, not on the module. When a plane does wire the backstop, the test
+    above needs its allowance widened to name that importer and this test is the argument for it.
+    """
+    import inspect
+
+    from nemesis.core import credentials
+
+    for name in ("redact_credential_material", "credential_shapes"):
+        signature = inspect.signature(getattr(credentials, name))
+        assert list(signature.parameters) == ["text"], (
+            f"{name} grew a parameter; a text utility that takes anything but text is no longer "
+            "safe to call from a plane that must not hold credential types"
+        )
+    assert "CredentialIndicator" not in inspect.getsource(credentials.redact_credential_material), (
+        "the redactor now references a quarantined type"
     )

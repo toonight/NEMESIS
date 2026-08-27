@@ -68,6 +68,7 @@ from nemesis.authz.audit_anchor import (
     ANCHOR_FILE,
     ANCHOR_PUBLIC_KEY_FILE,
     anchor_audit_trail,
+    retain_epoch,
 )
 from nemesis.authz.gateway import (
     AuthorizationGateway,
@@ -3112,7 +3113,13 @@ async def _anchor_the_trail(root: Path, audit: AppendOnlyAuditTrail) -> None:
     """
     signer = LocalAnchorSigner(CapabilitySigningKey.generate())
     (root / ANCHOR_PUBLIC_KEY_FILE).write_bytes(signer.verifying_key.public_pem())
-    await anchor_audit_trail(audit, store=FileAnchorStore(root / ANCHOR_FILE), signer=signer)
+    published = await anchor_audit_trail(
+        audit, store=FileAnchorStore(root / ANCHOR_FILE), signer=signer
+    )
+    # The epoch this run published, so a later `nemesis verify` has a baseline to refuse a
+    # rollback against. A verifier with no memory accepts a stale anchor beside a rolled-back
+    # file without complaint, which is the replay the epoch exists to order.
+    retain_epoch(root, published.epoch)
 
 
 async def _cluster_claims(
