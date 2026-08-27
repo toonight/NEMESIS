@@ -31,6 +31,7 @@ extra) — tests inject an inert transport and never contact the network.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import re
 from collections.abc import Mapping
@@ -238,23 +239,19 @@ class HttpxRansomwareLiveTransport:
             ) from exc
 
     async def health(self, base_url: str, *, timeout_seconds: float) -> bool:
-        # A health probe is still egress: only report reachability of the pinned host, and
-        # never fetch data here. Absent httpx, the connector is simply unavailable.
+        """Report whether the transport *could* run — availability, not remote reachability.
+
+        Deliberately opens no socket. The connector refuses direct network collection outside
+        ``collect_confined``, so probing the remote host from a health check would be exactly
+        the unconfined egress path that refusal exists to prevent. This validates the pinned
+        base URL and whether the ``httpx`` transport is installed, and touches no network.
+        """
+        del timeout_seconds
         try:
-            import httpx
-        except ModuleNotFoundError:
+            _base_url(base_url)
+        except RansomwareLiveConfigurationError:
             return False
-        parsed = _base_url(base_url)
-        origin = f"{parsed.scheme}://{parsed.hostname}"
-        try:
-            async with httpx.AsyncClient(
-                timeout=timeout_seconds, follow_redirects=False, trust_env=False
-            ) as client:
-                # NEMESIS-EGRESS-ALLOWED: a HEAD to the pinned origin, no path, no data.
-                response = await client.head(origin)
-        except (httpx.HTTPError, OSError, TimeoutError):
-            return False
-        return response.status_code < 500
+        return importlib.util.find_spec("httpx") is not None
 
 
 class RansomwareLiveConnector:
