@@ -649,7 +649,13 @@ class EffectsRegistry:
                 operation=request.operation,
                 outcome=EffectOutcome.FAILED,
                 executed_at=utcnow(),
-                adapter_name=adapter.name,
+                # `getattr`, not `adapter.name`. This handler exists so one uncaught adapter
+                # bug cannot become an effect nobody recorded — and it consulted the object it
+                # was handling the failure of, so an adapter with no `name` made the handler
+                # itself raise. Same defect class as the version that called `authorizes()` on
+                # the capability that had just crashed, reintroduced through a different
+                # attribute.
+                adapter_name=str(getattr(adapter, "name", REGISTRY_NAME))[:120],
                 # Built locally. This handler exists so that one uncaught adapter bug
                 # cannot become an effect whose outcome nobody recorded — and it used to
                 # call `authorizes()` on the same untrusted object that had just caused the

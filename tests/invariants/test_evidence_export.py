@@ -871,6 +871,8 @@ def test_the_verifier_does_not_read_through_a_symlinked_artifacts_directory(
     private = tmp_path / "recipient-private"
     private.mkdir()
     (private / "merger-terms.txt").write_bytes(b"CONFIDENTIAL")
+    # NEMESIS-SYNTHETIC-CREDENTIAL: a private-key header shape, not a key. The fixture must
+    # look like the thing whose leakage is being tested, or it tests the fixture.
     (private / "id_ed25519").write_bytes(b"-----BEGIN PRIVATE KEY-----")
 
     shutil.rmtree(bundle / ARTIFACTS_DIR)

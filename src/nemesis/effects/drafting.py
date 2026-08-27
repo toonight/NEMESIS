@@ -37,6 +37,7 @@ from nemesis.core.authorization import (
     AuthorizationDecision,
     OperationClass,
 )
+from nemesis.core.disclosure import DisclosureViolationError, scan_for_internal_material
 from nemesis.core.temporal import utcnow
 from nemesis.effects.registry import preflight, sanitize
 from nemesis.ports.authorization import TrustAnchor
@@ -201,8 +202,16 @@ class _DraftingAdapter:
             f"Capability: {capability.capability_id}",
             f"Authorization expires: {capability.expires_at.isoformat()}",
             f"Legal basis: {capability.legal_basis.value}",
-            f"Authority reference: {capability.legal_authority_reference or _UNSPECIFIED}",
-            f"Jurisdictions: {', '.join(capability.jurisdictions)}",
+            # Sanitized, like `max_effect_description` on the next line always was. An
+            # adversarial review pointed out the asymmetry: these two were interpolated raw,
+            # which is enough to put a fabricated court order into a document under a *genuine*
+            # signature over genuinely matching bytes. ADR-0006 fixed the value-confusion form
+            # of this attack — composing from the reconstruction — and that addressed the
+            # value's provenance, not its shape. A plain signed string with newlines in it
+            # produces the identical forgery.
+            f"Authority reference: "
+            f"{sanitize(capability.legal_authority_reference or _UNSPECIFIED, limit=200)}",
+            f"Jurisdictions: {sanitize(', '.join(capability.jurisdictions), limit=200)}",
             f"Approved maximum effect: {sanitize(capability.max_effect_description)}",
             f"Target: {sanitize(request.target_natural_key, limit=120)}",
             f"Target fingerprint: {request.target_fingerprint}",
@@ -212,7 +221,27 @@ class _DraftingAdapter:
         ]
         lines.extend(self._body(request, capability))
         lines.extend((SEPARATOR, NOT_SENT_FOOTER))
-        return "\n".join(lines)
+        document = "\n".join(lines)
+
+        # The D1 wall, at the only boundary that is total. `preflight` scans
+        # `request.parameters`, and an adversarial review found that is one of four sources of
+        # text in this document: `max_effect_description`, `legal_authority_reference` and
+        # `target_natural_key` each carried persona linkage into a draft with the parameter scan
+        # passing cleanly, and `requested_by` is a fourth. `core.disclosure` claims "every value
+        # crossing that boundary is scanned"; scanning the *input dict* could never make that
+        # true, because the document is assembled from more than the dict.
+        #
+        # Raised rather than returned as a refusal: `DisclosureViolationError`'s contract is that
+        # nobody catches it to carry on, and a composed document that reached here carrying an
+        # internal marker means a leak path was opened upstream and must be closed there. The
+        # adapter's caller turns it into a recorded refusal.
+        leaked = scan_for_internal_material({"document": document})
+        if leaked:
+            raise DisclosureViolationError(
+                "the composed document would carry internal-classified material out of the "
+                "platform: " + "; ".join(leaked)
+            )
+        return document
 
     def _body(self, request: EffectRequest, capability: AuthorizationCapability) -> tuple[str, ...]:
         raise NotImplementedError
