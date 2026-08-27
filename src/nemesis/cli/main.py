@@ -67,6 +67,20 @@ except ModuleNotFoundError as missing:  # pragma: no cover - exercised by a clea
 
 from nemesis.attribute.dimensions import AttributionDimension, DimensionAssessment
 from nemesis.audit.trail import AppendOnlyAuditTrail, ChainVerification
+from nemesis.authz.anchor import (
+    AnchorIndependence,
+    FileAnchorStore,
+    local_anchor_authority,
+    registered_authorities,
+)
+from nemesis.authz.audit_anchor import (
+    ANCHOR_FILE,
+    ANCHOR_PUBLIC_KEY_FILE,
+    AUDIT_CHAIN,
+    AuditIntegrityReport,
+    verify_audit_trail,
+)
+from nemesis.authz.verification import CapabilityVerifyingKey
 from nemesis.collaboration.demonstration import (
     CollaborationDemonstration,
     run_collaboration_demonstration,
@@ -1368,14 +1382,19 @@ def verify(
     _field(console, "externally held anchors", report.externally_anchored)
     _bullets(console, report.log_defects, marker="!", style="red")
 
+    integrity = _verify_audit_anchor(workspace, audit_path)
+
     _heading(console, "audit trail")
     _field(console, "path", audit_path)
     _field(console, "entries checked", chain.entries_checked)
     _field(console, "chain intact", chain.intact)
     if chain.reason is not None:
         _bullets(console, [f"broken at {chain.broken_at}: {chain.reason}"], marker="!", style="red")
+    _field(console, "anchored at", integrity.independence.value)
+    _field(console, "anchor agrees", integrity.sound)
+    _bullets(console, integrity.defects, marker="!", style="red")
 
-    healthy = report.is_intact and chain.intact
+    healthy = report.is_intact and chain.intact and integrity.sound
     _heading(console, "verdict")
     console.print(
         Text(
@@ -1392,6 +1411,17 @@ def verify(
             style="yellow",
         )
     )
+    console.print(
+        Text(
+            "  The audit anchor above is what catches an end removed from the trail. This "
+            "process did not write those entries, so its own chain check compares the file "
+            "against the file and a truncated trail links perfectly — the anchor is the only "
+            f"memory of how long it used to be. It sits at '{integrity.independence.value}': "
+            "beside the trail, signed by a key beside it, which catches an accident and not "
+            "anybody who meant it.",
+            style="yellow",
+        )
+    )
     if not healthy:
         raise typer.Exit(code=1)
 
@@ -1402,6 +1432,37 @@ def _verify_vault(root: Path) -> FileSystemVaultIntegrityReport:
 
 def _verify_audit(path: Path) -> ChainVerification:
     return asyncio.run(AppendOnlyAuditTrail(path).verify())
+
+
+def _verify_audit_anchor(workspace: Path, audit_path: Path) -> AuditIntegrityReport:
+    """Check the trail against the anchor the run that wrote it published.
+
+    A missing anchor or a missing public key is **not** treated as "nothing to check". It is
+    reported through the same defect list as a mismatch, because ``verify_against_anchor``'s rule
+    is that an absent attestation is a finding: a verifier that read absence as silence would
+    hand an attacker the cheapest attack in the set, which is to delete the anchor rather than
+    forge one.
+    """
+    key_path = workspace / ANCHOR_PUBLIC_KEY_FILE
+    if not key_path.is_file():
+        return AuditIntegrityReport(
+            chain_id=AUDIT_CHAIN,
+            links_examined=0,
+            anchor=None,
+            defects=(
+                f"{key_path.name} is missing, so no anchor in this workspace can be checked at "
+                "all. The trail's length is attested by nothing.",
+            ),
+            independence=AnchorIndependence.NONE,
+        )
+    verifier = CapabilityVerifyingKey.load(key_path)
+    return asyncio.run(
+        verify_audit_trail(
+            AppendOnlyAuditTrail(audit_path),
+            store=FileAnchorStore(workspace / ANCHOR_FILE),
+            authorities=registered_authorities(local_anchor_authority(verifier)),
+        )
+    )
 
 
 __all__ = ["app", "render"]

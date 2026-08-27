@@ -69,6 +69,12 @@ jobs:
       - name: Secret and prohibited-content scan
         run: uv run python scripts/check_prohibited.py
 
+      # The scan above checks one hop: does this module import a network client. This checks
+      # the composition — whether a model-controlled context can reach one by going through
+      # something else. The August 2026 Hugging Face incident was entirely made of second hops.
+      - name: Transitive egress reachability (NET-02)
+        run: uv run python scripts/check_egress_reachability.py
+
       # A number a document states about itself is a claim, and a claim that contradicts the
       # code is a defect here — including when it is only a badge. The badge read 845 within
       # an hour of being written, by the author who then added eleven tests.

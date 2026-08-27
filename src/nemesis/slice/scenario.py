@@ -62,7 +62,13 @@ from nemesis.attribute.engine import (
     EvidenceDirection,
 )
 from nemesis.audit.trail import ActorKind, AppendOnlyAuditTrail, make_event
+from nemesis.authz.anchor import FileAnchorStore, LocalAnchorSigner
 from nemesis.authz.attestation import PrincipalVerifier
+from nemesis.authz.audit_anchor import (
+    ANCHOR_FILE,
+    ANCHOR_PUBLIC_KEY_FILE,
+    anchor_audit_trail,
+)
 from nemesis.authz.gateway import (
     AuthorizationGateway,
     RequestState,
@@ -3056,6 +3062,8 @@ async def run_glass_anvil_scenario_async(
     await _record_watch(context, watch=watch, resumed=resumed is not None)
     resurgence = resurgence.model_copy(update={"watch": watch, "resumed": resumed})
 
+    await _anchor_the_trail(root, context.audit)
+
     return ScenarioResult(
         detect=detect,
         pursue=pursue.model_copy(update={"investigation": watching}),
@@ -3080,6 +3088,31 @@ async def run_glass_anvil_scenario_async(
             effects=registry,
         ),
     )
+
+
+async def _anchor_the_trail(root: Path, audit: AppendOnlyAuditTrail) -> None:
+    """Attest the trail's length and tip at the end of the run, so `nemesis verify` can check it.
+
+    **What this closes, measured rather than argued.** `AppendOnlyAuditTrail.verify` catches tail
+    truncation by comparing the file against counters *this process* holds. `nemesis verify` runs
+    in a different process and constructs a fresh trail from the path, so its counters are
+    whatever the file says: truncate the demo's audit log, run `nemesis verify`, and it reported
+    `chain intact` on a trail missing its end. Measured on this branch before the anchor existed.
+
+    **What it does not close.** The anchor sits in the same directory, signed by a key written
+    beside it. Against an accident, a partial restore or a chain rebuilt by a repair script, that
+    is real. Against anyone who can edit the audit log it is nothing, because they can regenerate
+    both — `AnchorIndependence.NONE` is the honest label and the one it is published under. The
+    ladder above it (`SEPARATE_ACCOUNT`, `SEPARATE_HOST`, `THIRD_PARTY`) is a deployment decision
+    and a constructor argument, which is the whole reason the contract was built first.
+
+    The public half of the key is written so a verifier in another process can check the
+    signature. The private half is ephemeral and never leaves memory: this run signs once and the
+    key is gone, which means the demo cannot re-anchor a trail somebody edited afterwards.
+    """
+    signer = LocalAnchorSigner(CapabilitySigningKey.generate())
+    (root / ANCHOR_PUBLIC_KEY_FILE).write_bytes(signer.verifying_key.public_pem())
+    await anchor_audit_trail(audit, store=FileAnchorStore(root / ANCHOR_FILE), signer=signer)
 
 
 async def _cluster_claims(
