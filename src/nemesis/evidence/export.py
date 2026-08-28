@@ -300,9 +300,11 @@ async def write_sealed_export(
             "already hold a hash of"
         )
 
-    bundle = await vault.export_bundle(requested_by=requested_by, reason=reason)
-    entries = await vault.log_entries()
-    anchors = await vault.anchors()
+    # One acquisition, not three. Read separately, an honest concurrent writer lands between
+    # the manifest's head and the log that ships beside it, and the package's own verifier then
+    # tells its recipient that "the bundle and its log describe different vaults" — the
+    # strongest thing it can say short of naming a forgery, produced by two honest writers.
+    bundle, entries, anchors = await vault.export_snapshot(requested_by=requested_by, reason=reason)
 
     # Assembled beside the destination and moved into place at the end, so a failure
     # anywhere below leaves nothing that looks like a package.
