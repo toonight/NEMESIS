@@ -23,6 +23,8 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import shutil
+import threading
 from collections import Counter
 from collections.abc import Coroutine
 from concurrent.futures import ThreadPoolExecutor
@@ -694,3 +696,112 @@ def test_a_forked_chain_is_named_as_concurrency_rather_than_as_an_edit(tmp_path:
     assert any("forgeable" in d for d in report.log_defects), (
         "a shape anyone who can write the log can write must not read as exculpatory"
     )
+
+
+def test_a_package_is_read_from_one_snapshot_not_from_two_reads(tmp_path: Path) -> None:
+    """The fork argument, one level up, where an adversarial pass found it still standing.
+
+    A package used to be assembled from `export_bundle()` and then `log_entries()` — two
+    acquisitions, so an honest concurrent writer landed in the gap and the manifest named a
+    head the shipped log no longer ended at. That pair is exactly what the package's own
+    `verify.py` checks, and its answer is not "stale": it is `the bundle and its log describe
+    different vaults`, which tells a recipient the evidence was doctored. Measured on the
+    two-call form, 120 exports against one concurrent sealer: 10 disagreed with themselves.
+
+    The writer is real and the assertion that it ran is part of the test — a quiet writer
+    would make this pass while proving nothing.
+    """
+    root = tmp_path / "vault"
+    seed = FileSystemEvidenceVault(root)
+    for index in range(3):
+        artifact = f"seed-{index}".encode()
+        run(seed.seal(_evidence(artifact), artifact))
+
+    stop = threading.Event()
+
+    def keep_sealing() -> None:
+        vault = FileSystemEvidenceVault(root)
+        index = 0
+        while not stop.is_set():
+            artifact = f"concurrent-{index}".encode()
+            index += 1
+            run(vault.seal(_evidence(artifact), artifact))
+
+    log = root / "log.jsonl"
+    before = len(log.read_text().splitlines())
+    writer = threading.Thread(target=keep_sealing, daemon=True)
+    writer.start()
+    try:
+        reader = FileSystemEvidenceVault(root)
+        for _ in range(40):
+            bundle, entries, _anchors = run(
+                reader.export_snapshot(requested_by="analyst-1", reason="disclosure")
+            )
+            assert entries, "the snapshot came back with no chain at all"
+            assert bundle.vault_head == entries[-1].entry_hash, (
+                "the manifest names a head the log it ships beside does not end at; the "
+                "recipient's own verifier reads that as two different vaults"
+            )
+    finally:
+        stop.set()
+        writer.join(timeout=10)
+
+    after = len(log.read_text().splitlines())
+    assert after > before + 5, (
+        f"the concurrent writer only added {after - before} entries, so the window this test "
+        "exists to close was never actually open"
+    )
+
+
+def test_a_vault_on_read_only_media_can_still_be_verified(tmp_path: Path) -> None:
+    """Verifying a store you were handed must not require write access to it.
+
+    The first version of the inter-process lock took `LOCK_EX` in every critical section,
+    including the read-only ones, and `LOCK_EX` needs the lock file opened for append. So
+    `verify_integrity` — whose own docstring says it never raises — raised `PermissionError`
+    on a vault copied to read-only media, which is precisely the forensic workflow the vault
+    exists to support: somebody hands you a package and you check it without touching it.
+
+    Readers hold `LOCK_SH` instead. It still excludes writers, which is all a consistent read
+    needs, and it does not require the store to be writable.
+    """
+    source = tmp_path / "vault"
+    vault = FileSystemEvidenceVault(source)
+    for index in range(3):
+        artifact = f"handed-over-{index}".encode()
+        run(vault.seal(_evidence(artifact), artifact))
+
+    handed_over = tmp_path / "read-only" / "vault"
+    shutil.copytree(source, handed_over)
+    for path in sorted(handed_over.rglob("*"), reverse=True):
+        path.chmod(0o400 if path.is_file() else 0o500)
+    handed_over.chmod(0o500)
+
+    try:
+        report = run(FileSystemEvidenceVault(handed_over).verify_integrity())
+        assert report.is_intact, report.log_defects
+        assert report.artifacts_verified == 3
+    finally:
+        # Restored so pytest's tmp_path cleanup can remove it.
+        handed_over.chmod(0o700)
+        for path in sorted(handed_over.rglob("*"), reverse=True):
+            path.chmod(0o700)
+
+
+def test_a_reader_does_not_need_the_lock_file_to_exist(tmp_path: Path) -> None:
+    """A store with no usable lock file is read without one, deliberately.
+
+    The lock exists to exclude a concurrent writer. A root that cannot supply one is a root
+    nothing is writing to either, and refusing to verify would mean an operator can be handed
+    a vault they cannot check — the failure this module exists to prevent, arrived at by way
+    of the control meant to help.
+    """
+    root = tmp_path / "vault"
+    vault = FileSystemEvidenceVault(root)
+    artifact = b"sealed before the lock file went missing"
+    run(vault.seal(_evidence(artifact), artifact))
+
+    (root / ".lock").unlink()
+
+    report = run(FileSystemEvidenceVault(root).verify_integrity())
+    assert report.is_intact, report.log_defects

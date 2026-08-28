@@ -72,6 +72,24 @@ Evidence sealed before the damage is not retroactively worthless. It is evidence
 stops being self-verifying at a named point, and the honest description of that is the sentence
 to put in front of anyone who relies on it.
 
+## The lock file, and how a deployment loses it
+
+`<root>/.lock` is what makes the inter-process guarantee real. It carries no data — it is a
+zero-byte file whose only job is to be the thing `flock` is taken on — and losing it is silent:
+`_exclusive()` recreates it, so two processes that ended up on *different* inodes each take a
+lock nobody else can see, and the fork this procedure exists for becomes reachable again.
+
+Three ways a deployment loses it, none of them exotic:
+
+- `rsync --delete` or a backup restore that omits dotfiles.
+- A post-crash cleanup script that removes "stray" files from the vault root.
+- A container or host that mounts the root without sharing it — two mounts of the same data are
+  two lock files, and `flock` scopes its guarantee to **one kernel**. A vault root on NFS or SMB
+  is outside what was tested and should be treated as unlocked.
+
+If you cannot establish that every writer shared one lock file, treat the store as one that had
+no lock, and read the shapes in step 2 accordingly.
+
 ## What is deliberately not here
 
 **No repair tool.** Rewriting sequences and relinking hashes would produce a chain that
