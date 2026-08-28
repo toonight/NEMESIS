@@ -304,6 +304,16 @@ class FileSystemVaultIntegrityReport(VaultIntegrityReport):
     """Files in the store that no entry accounts for. Every link may verify and the store
     still hold material that entered it without extending the chain."""
 
+    interrupted_seals: tuple[EvidenceId, ...] = ()
+    """Evidence whose artifact and metadata are present, agree with each other, and have no
+    seal entry — a seal that died between its writes.
+
+    Reported apart from :attr:`unlogged_artifacts` because the two call for opposite reactions
+    and used to read identically. An unaccounted file is the signature of slipping material
+    into the store without logging it; this is a power cut, and it is **recoverable** — sealing
+    the same bytes again completes the entry. Both still stop an export, because an artifact
+    the chain does not account for must not leave the platform either way."""
+
     anchors_verified: int = 0
     """Anchors whose covered head still matches the chain at that sequence."""
 
@@ -315,7 +325,12 @@ class FileSystemVaultIntegrityReport(VaultIntegrityReport):
         and unaccounted-for files are defects it has no field for, and reporting a vault
         as intact while either is true would be the report lying by omission.
         """
-        return super().is_intact and not self.metadata_corrupted and not self.unlogged_artifacts
+        return (
+            super().is_intact
+            and not self.metadata_corrupted
+            and not self.unlogged_artifacts
+            and not self.interrupted_seals
+        )
 
 
 class EvidenceExportEntry(BaseModel):
@@ -502,7 +517,15 @@ class FileSystemEvidenceVault:
             existing = self._read_metadata(evidence.evidence_id)
             if existing is not None:
                 self._reject_conflicting_reseal(existing, evidence, artifact)
-                return existing
+                # Ask the **chain**, not the metadata. `seal` is three writes and the files
+                # land first, so metadata is exactly the half that survives a crash at
+                # `_append` — keying the idempotent path on it meant a retry after a power cut
+                # returned success for evidence that had no chain entry and would never get
+                # one. `get()` then refused it and `write_sealed_export` refused the whole
+                # vault, while the caller had been told it was sealed.
+                if self._is_sealed_in_chain(existing.evidence_id):
+                    return existing
+                return self._finish_interrupted_seal(existing)
 
             locator = f"objects/{evidence.evidence_id}"
             sealed = evidence.model_copy(update={"vault_locator": locator})
@@ -592,6 +615,7 @@ class FileSystemEvidenceVault:
                 ):
                     metadata_corrupted.append(evidence_id)
 
+            unlogged, interrupted = self._unlogged_files(set(sealed))
             return FileSystemVaultIntegrityReport(
                 checked_at=utcnow(),
                 objects_checked=len(sealed),
@@ -602,7 +626,8 @@ class FileSystemEvidenceVault:
                 externally_anchored=external_anchors,
                 log_defects=tuple(defects),
                 metadata_corrupted=tuple(metadata_corrupted),
-                unlogged_artifacts=tuple(self._unlogged_files(set(sealed))),
+                unlogged_artifacts=tuple(unlogged),
+                interrupted_seals=interrupted,
                 anchors_verified=anchors_verified,
             )
 
@@ -856,6 +881,38 @@ class FileSystemEvidenceVault:
             )
             return artifact
 
+    def _is_sealed_in_chain(self, evidence_id: str) -> bool:
+        """Whether the chain holds a seal entry for this id. Caller holds the lock."""
+        entries, defects = _parse_chain(self._read_log_lines())
+        if defects:
+            # A chain that does not verify cannot answer this, and `_append` would refuse
+            # anyway. Say the seal is present so the caller gets the refusal from the chain
+            # check rather than a second, misleading write attempt.
+            return True
+        return evidence_id in _sealed_in_order(entries)
+
+    def _finish_interrupted_seal(self, stored: EvidenceObject) -> EvidenceObject:
+        """Append the entry a crash prevented, for material already on disk.
+
+        The stored metadata wins, as it does for every re-seal: the bytes and the record are
+        the ones the interrupted attempt committed to, and `_reject_conflicting_reseal` has
+        already refused anything that disagrees with them. So this completes a write rather
+        than performing a new one, and the hash committed is the hash of what is on disk —
+        reading the file rather than re-serialising the object, because the file is what the
+        chain will be asked about later.
+        """
+        payload = self._metadata_path(stored.evidence_id).read_bytes()
+        actor, reason = _sealer_of(stored)
+        self._append(
+            kind=VaultEntryKind.SEAL,
+            evidence_id=stored.evidence_id,
+            content_hash=stored.content_hash,
+            metadata_hash=hashlib.sha256(payload).hexdigest(),
+            actor=actor,
+            reason=f"{reason} (completing a seal interrupted before its chain entry)",
+        )
+        return stored
+
     def _reject_conflicting_reseal(
         self, stored: EvidenceObject, incoming: EvidenceObject, artifact: bytes
     ) -> None:
@@ -952,7 +1009,7 @@ class FileSystemEvidenceVault:
             and stored.must_not_be_indexed
         )
 
-    def _unlogged_files(self, sealed: set[str]) -> list[str]:
+    def _unlogged_files(self, sealed: set[str]) -> tuple[list[str], tuple[EvidenceId, ...]]:
         """Files in the store that no seal entry accounts for.
 
         The suffix is stripped **only in the metadata directory**, which is the only one that
@@ -964,6 +1021,7 @@ class FileSystemEvidenceVault:
         An object's name must therefore *be* a sealed id exactly, not merely reduce to one.
         """
         found: list[str] = []
+        candidates: set[str] = set()
         for directory in (self._objects, self._metadata):
             strip_suffix = directory is self._metadata
             for path in sorted(directory.iterdir()):
@@ -972,7 +1030,36 @@ class FileSystemEvidenceVault:
                 name = path.name.removesuffix(".json") if strip_suffix else path.name
                 if name not in sealed:
                     found.append(f"{directory.name}/{path.name}")
-        return found
+                    candidates.add(name)
+
+        interrupted = sorted(name for name in candidates if self._looks_interrupted(name))
+        remaining = [
+            entry
+            for entry in found
+            if entry.split("/", 1)[1].removesuffix(".json") not in set(interrupted)
+        ]
+        return remaining, tuple(EvidenceId(name) for name in interrupted)
+
+    def _looks_interrupted(self, evidence_id: str) -> bool:
+        """Whether these two unaccounted files are a seal that died between its writes.
+
+        Both halves present, the metadata readable, and the bytes hashing to what the metadata
+        commits to. That is what `seal` leaves when it is killed at `_append`; it is not what
+        somebody dropping a file into the store leaves, because they would have to write a
+        matching metadata record too — and if they did, the chain still does not account for it
+        and the export still refuses. Naming it costs nothing and stops a power cut reading as
+        an intrusion.
+        """
+        artifact_path = self._objects / evidence_id
+        metadata_path = self._metadata / f"{evidence_id}.json"
+        if not (artifact_path.is_file() and metadata_path.is_file()):
+            return False
+        try:
+            stored = EvidenceObject.model_validate_json(metadata_path.read_bytes())
+        except ValidationError:
+            return False
+        digest = hashlib.sha256(artifact_path.read_bytes()).hexdigest()
+        return stored.evidence_id == evidence_id and stored.content_hash == digest
 
     def _check_recorded_head(self, entries: list[VaultLogEntry]) -> list[str]:
         """Compare the chain's tip with the head written beside it.
