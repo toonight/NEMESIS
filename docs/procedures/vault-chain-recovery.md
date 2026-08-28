@@ -43,6 +43,13 @@ longer hash to the hash it carries. Nothing accidental produces this.
 **A gap.** Entries reordered, inserted or removed, with no matching-tip pair. A truncated write
 from a crash looks like this, and so does a deletion.
 
+**An interrupted seal.** `interrupted_seals` names evidence whose artifact and metadata are both
+present and agree with each other, with no seal entry accounting for them — a seal killed between
+its writes. This is the one shape on the page that repairs itself: seal the same bytes again and
+the chain entry is completed. It is reported apart from `unlogged_artifacts` for that reason, and
+it still blocks an export until it is completed, because an artifact the chain does not account
+for must not leave the platform.
+
 > **The concurrency signature lowers suspicion; it does not clear it.** Anyone who can write
 > the log can write that shape on purpose. Treat it as a hypothesis to confirm against the
 > deployment's own record of what was running at those timestamps — process supervisors, the

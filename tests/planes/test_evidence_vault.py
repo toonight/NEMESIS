@@ -805,3 +805,85 @@ def test_a_reader_does_not_need_the_lock_file_to_exist(tmp_path: Path) -> None:
 
     report = run(FileSystemEvidenceVault(root).verify_integrity())
     assert report.is_intact, report.log_defects
+
+
+# --- a seal interrupted between its writes -------------------------------------
+
+
+def _interrupted_seal(
+    root: Path, artifact: bytes, monkeypatch: pytest.MonkeyPatch
+) -> EvidenceObject:
+    """Seal until the files are down and the chain entry is not, as a crash would leave it."""
+    vault = FileSystemEvidenceVault(root)
+    evidence = _evidence(artifact)
+
+    def die(_self: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("the process died before the chain entry was written")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(FileSystemEvidenceVault, "_append", die)
+        with pytest.raises(RuntimeError):
+            run(vault.seal(evidence, artifact))
+    return evidence
+
+
+def test_a_retry_after_an_interrupted_seal_finishes_it_instead_of_reporting_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """THE HALF THAT LIED.
+
+    `seal` is three writes — artifact, metadata, chain entry — and the files land first. Its
+    idempotent-retry path then keyed on the *metadata*, which is precisely the half that
+    survives a crash at `_append`. So a retry saw metadata, returned the stored object, and
+    told the caller the evidence was sealed while it had no chain entry and never would get
+    one: `get()` refused it, and `write_sealed_export` refused the whole vault from then on.
+
+    The retry now asks the chain, which is the half that decides, and completes the seal.
+    """
+    root = tmp_path / "vault"
+    seed = b"already sealed"
+    run(FileSystemEvidenceVault(root).seal(_evidence(seed), seed))
+
+    artifact = b"interrupted between the metadata and the chain"
+    evidence = _interrupted_seal(root, artifact, monkeypatch)
+
+    entries = run(FileSystemEvidenceVault(root).log_entries())
+    assert not any(e.evidence_id == evidence.evidence_id for e in entries), (
+        "the fixture did not actually interrupt anything"
+    )
+
+    run(FileSystemEvidenceVault(root).seal(evidence, artifact))
+
+    entries = run(FileSystemEvidenceVault(root).log_entries())
+    assert any(
+        e.evidence_id == evidence.evidence_id and e.kind is VaultEntryKind.SEAL for e in entries
+    ), "the retry returned success and the evidence is still unchained"
+    assert run(FileSystemEvidenceVault(root).get(evidence.evidence_id)) is not None
+    report = run(FileSystemEvidenceVault(root).verify_integrity())
+    assert report.is_intact, report.log_defects
+
+
+def test_an_interrupted_seal_is_named_as_one_rather_than_as_an_unlogged_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A power cut must not produce the report an intruder would.
+
+    `unlogged_artifacts` is documented as the signature of slipping a file into the store
+    without logging it. A crash mid-seal put its two files there, so the store accused itself
+    of tampering over an interruption — the same defect as a fork reading as an edit, in the
+    other direction. The files are still a defect and still block an export; they are simply
+    the *recoverable* one, and the report says which.
+    """
+    root = tmp_path / "vault"
+    seed = b"already sealed"
+    run(FileSystemEvidenceVault(root).seal(_evidence(seed), seed))
+    evidence = _interrupted_seal(root, b"interrupted", monkeypatch)
+
+    report = run(FileSystemEvidenceVault(root).verify_integrity())
+
+    assert not report.is_intact, "an unchained artifact must still stop an export"
+    assert evidence.evidence_id in report.interrupted_seals
+    assert not report.unlogged_artifacts, (
+        f"a recoverable interruption was reported as an unaccounted file: "
+        f"{report.unlogged_artifacts}"
+    )
