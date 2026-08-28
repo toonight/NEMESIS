@@ -23,7 +23,9 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+from collections import Counter
 from collections.abc import Coroutine
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -576,3 +578,119 @@ def test_an_anchor_catches_a_rewrite_the_chain_alone_cannot(tmp_path: Path) -> N
     assert evidence.evidence_id == entry["evidence_id"]
     assert not report.hash_chain_intact
     assert any("the chain was rewritten" in defect for defect in report.log_defects)
+
+
+# --- two writers on one root ---------------------------------------------------
+
+
+def _seal_batch(root: Path, tag: str, count: int) -> Counter[str]:
+    """Seal `count` artifacts through a vault instance of this thread's own.
+
+    A separate instance is the point: the vault's mutex is per-instance, so two of them on
+    one root are exactly as unsynchronised as two processes are, and cost a thread instead
+    of a fork to demonstrate.
+    """
+    vault = FileSystemEvidenceVault(root)
+    outcomes: Counter[str] = Counter()
+    for index in range(count):
+        artifact = f"{tag}-{index}".encode()
+        try:
+            run(vault.seal(_evidence(artifact), artifact))
+            outcomes["sealed"] += 1
+        except Exception as exc:  # recorded rather than raised: the shape matters
+            outcomes[type(exc).__name__] += 1
+    return outcomes
+
+
+def test_two_vaults_on_one_root_do_not_fork_the_chain(tmp_path: Path) -> None:
+    """THE FAILURE THAT LOOKS LIKE AN ATTACK AND IS AN ACCIDENT.
+
+    The mutex was a `threading.Lock` on the instance, `_append` read the tip and wrote with
+    nothing held across the two, and `_write_atomic` used one fixed `.partial` name per
+    target. Measured before the fix, 3 runs out of 3: two entries claim sequence 0, and from
+    the second write onward **every** seal fails for the life of the store — `_chain_tip()`
+    raises, so no seal, no recorded read and no anchor can ever be appended again.
+
+    The report it produced was the worst part. `entries were reordered, inserted or removed`
+    is the sentence a tamper-evident store exists to be able to say, and here it was
+    describing two honest writers and a missing lock.
+    """
+    root = tmp_path / "vault"
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(_seal_batch, root, tag, 20) for tag in ("A", "B")]
+        outcomes = [future.result() for future in futures]
+
+    failures = {kind: n for outcome in outcomes for kind, n in outcome.items() if kind != "sealed"}
+    assert not failures, f"concurrent seals failed: {failures}"
+    assert sum(outcome["sealed"] for outcome in outcomes) == 40
+
+    sequences = [
+        json.loads(line)["sequence"]
+        for line in (root / "log.jsonl").read_text().splitlines()
+        if line.strip()
+    ]
+    assert sorted(sequences) == list(range(40)), (
+        f"the chain forked: duplicate sequences "
+        f"{sorted(s for s, n in Counter(sequences).items() if n > 1)}"
+    )
+
+    report = run(_vault(tmp_path).verify_integrity())
+    assert report.is_intact, report.log_defects
+
+
+def test_a_later_writer_still_works_after_concurrent_ones(tmp_path: Path) -> None:
+    """The store must remain writable, which is the property the fork destroyed.
+
+    Distinct from the assertion above on purpose: a chain can verify and still be one whose
+    tip nothing can build on, and it is the second that ends an investigation.
+    """
+    root = tmp_path / "vault"
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        [future.result() for future in [pool.submit(_seal_batch, root, tag, 10) for tag in "AB"]]
+
+    artifact = b"written after the concurrent ones"
+    run(FileSystemEvidenceVault(root).seal(_evidence(artifact), artifact))
+
+
+def test_a_forked_chain_is_named_as_concurrency_rather_than_as_an_edit(tmp_path: Path) -> None:
+    """The harm the lock does not undo: a store already forked, and the sentence about it.
+
+    `entries were reordered, inserted or removed` is what a tamper-evident store exists to be
+    able to say, and for as long as two writers could race it was routinely saying it about an
+    accident. An operator who reads that about a missing lock either hunts an intruder who was
+    never there, or learns to discount the message — and the second is worse.
+
+    The signature is exact: two entries at the same sequence, built on the same predecessor.
+    The report says so *and* says it is forgeable, because a shape anyone who can write the log
+    can write on purpose lowers suspicion and does not clear it.
+    """
+    vault, _ = _sealed(tmp_path)
+    log = vault.root / "log.jsonl"
+    first = json.loads(log.read_text(encoding="utf-8").splitlines()[0])
+
+    # A sibling of entry 0: same sequence, same predecessor, its own honest hash — exactly
+    # what a second writer that had read the same tip would have appended.
+    sibling = dict(first)
+    sibling["reason"] = "sealed by the other writer"
+    sibling["entry_hash"] = compute_entry_hash(
+        sequence=sibling["sequence"],
+        kind=VaultEntryKind(sibling["kind"]),
+        previous_entry_hash=sibling["previous_entry_hash"],
+        evidence_id=sibling["evidence_id"],
+        content_hash=sibling["content_hash"],
+        metadata_hash=sibling["metadata_hash"],
+        recorded_at=datetime.fromisoformat(sibling["recorded_at"]),
+        actor=sibling["actor"],
+        reason=sibling["reason"],
+    )
+    log.write_text(json.dumps(first) + "\n" + json.dumps(sibling) + "\n", encoding="utf-8")
+
+    report = run(vault.verify_integrity())
+
+    assert not report.hash_chain_intact
+    assert any("signature two concurrent writers leave" in d for d in report.log_defects), (
+        f"the fork was reported only as an edit: {report.log_defects}"
+    )
+    assert any("forgeable" in d for d in report.log_defects), (
+        "a shape anyone who can write the log can write must not read as exculpatory"
+    )

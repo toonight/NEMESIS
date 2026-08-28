@@ -44,12 +44,16 @@ Status: `IMPLEMENTED`.
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import hashlib
 import hmac
 import json
 import os
 import re
+import secrets
 import threading
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
@@ -367,6 +371,17 @@ class FileSystemEvidenceVault:
     whichever event loop touched it first — a needless failure mode for an object built at
     composition time and used by whatever runs next.
 
+    **That mutex alone was not enough, and the gap was measured rather than argued.** It is
+    per *instance*, so two vaults on one root — two processes, or two objects in one process —
+    were entirely unsynchronised, while ``_append`` reads the chain tip and then writes with
+    nothing held across the two. Two writers both build on sequence *n*, both write *n+1*, and
+    ``_chain_tip`` refuses the log from then on: no seal, no recorded read and no anchor can
+    ever be appended again. Measured 3 runs of 3 before the fix, 78 of 80 seals lost, and the
+    sentence it produced was ``entries were reordered, inserted or removed`` — the sentence a
+    tamper-evident store exists to be able to say, describing two honest writers and a missing
+    lock. Every critical section now takes :meth:`_exclusive`, which holds the mutex *and* an
+    ``flock`` on a file beside the log.
+
     No state is cached in memory. The chain tip is re-derived from the log on every
     operation that needs it, which costs a full read per append and is the right trade at
     the scale this adapter targets: a cached tip that disagrees with the file is precisely
@@ -381,10 +396,41 @@ class FileSystemEvidenceVault:
         self._log_path = self._root / "log.jsonl"
         self._head_path = self._root / "head.json"
         self._anchors_path = self._root / "anchors.jsonl"
+        self._lock_path = self._root / ".lock"
         self._lock = threading.Lock()
 
         self._objects.mkdir(parents=True, exist_ok=True)
         self._metadata.mkdir(parents=True, exist_ok=True)
+
+    @contextlib.contextmanager
+    def _exclusive(self) -> Iterator[None]:
+        """Hold the store against every other writer, in this process and outside it.
+
+        Two locks because there are two races and one primitive answers each. The mutex
+        serialises threads sharing *this* object; the ``flock`` serialises everything else,
+        which is what the mutex could never see — a second instance in this process is as
+        unsynchronised as a second process, and both were.
+
+        Taken around the whole critical section rather than around the write, because the race
+        is a read-modify-write: the tip is read, an entry is built on it, and the entry is
+        appended. A lock held only across the append serialises the writes and lets both of
+        them build on the same tip, which is the same fork arriving more tidily.
+
+        ``fcntl`` rather than a lock directory or an atomic create: the kernel releases it when
+        the holder dies, so a crash mid-append leaves a log to repair rather than a store
+        nobody can open. POSIX-only, and imported at module scope on purpose — this package is
+        macOS and Linux, and a platform that silently ran without the second lock would keep
+        exactly the defect this method exists to close.
+        """
+        # Opened per section rather than held for the object's life: an `flock` belongs to an
+        # open file description, so a fresh descriptor each time keeps the lock's scope
+        # identical to the block it guards.
+        with self._lock, self._lock_path.open("a+b") as handle:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
     @property
     def root(self) -> Path:
@@ -406,7 +452,7 @@ class FileSystemEvidenceVault:
                 f"the bytes offered hash to {hashlib.sha256(artifact).hexdigest()}"
             )
 
-        with self._lock:
+        with self._exclusive():
             existing = self._read_metadata(evidence.evidence_id)
             if existing is not None:
                 self._reject_conflicting_reseal(existing, evidence, artifact)
@@ -439,7 +485,7 @@ class FileSystemEvidenceVault:
         than returning a doctored record. A store that quietly serves rewritten metadata
         is worse than one that refuses: the caller has no way to know.
         """
-        with self._lock:
+        with self._exclusive():
             stored = self._read_metadata(evidence_id)
             if stored is None:
                 return None
@@ -468,7 +514,7 @@ class FileSystemEvidenceVault:
         Never raises. A store too damaged to read is a finding to report, not an error to
         propagate — the caller asked what is wrong with it.
         """
-        with self._lock:
+        with self._exclusive():
             lines = self._read_log_lines()
             entries, defects = _parse_chain(lines)
             defects.extend(self._check_recorded_head(entries))
@@ -521,7 +567,7 @@ class FileSystemEvidenceVault:
         that is already inconsistent would attach an outside party's credibility to
         whatever the inconsistency was.
         """
-        with self._lock:
+        with self._exclusive():
             _, tip = self._chain_tip()
             return tip
 
@@ -565,7 +611,7 @@ class FileSystemEvidenceVault:
         remember, because the caller who forgets is the one assembling a package for
         someone outside the organization.
         """
-        with self._lock:
+        with self._exclusive():
             objects = self._enumerable_objects()
         if artifact_kind is None:
             return objects
@@ -578,7 +624,7 @@ class FileSystemEvidenceVault:
         knows the package is partial; the identifiers are not, because naming what was
         withheld defeats withholding it.
         """
-        with self._lock:
+        with self._exclusive():
             _, tip = self._chain_tip()
             releasable = self._enumerable_objects()
             withheld = self._quarantined_count()
@@ -610,7 +656,7 @@ class FileSystemEvidenceVault:
         to another vault or is proof that the chain has already been rewritten, and
         storing it would let a later verification "confirm" a head that no longer exists.
         """
-        with self._lock:
+        with self._exclusive():
             entries, defects = _parse_chain(self._read_log_lines())
             if defects:
                 raise VaultChainError(
@@ -630,7 +676,7 @@ class FileSystemEvidenceVault:
             return record
 
     async def anchors(self) -> tuple[AnchorRecord, ...]:
-        with self._lock:
+        with self._exclusive():
             return self._read_anchors()
 
     async def log_entries(self) -> tuple[VaultLogEntry, ...]:
@@ -640,7 +686,7 @@ class FileSystemEvidenceVault:
         should say: entries whose hash does not recompute come back unchanged, so a caller
         can see the doctored line rather than a sanitized version of it.
         """
-        with self._lock:
+        with self._exclusive():
             entries, _ = _parse_chain(self._read_log_lines())
             return tuple(entries)
 
@@ -654,7 +700,7 @@ class FileSystemEvidenceVault:
         reason: str,
         escalation_reference: str | None,
     ) -> bytes:
-        with self._lock:
+        with self._exclusive():
             stored = self._read_metadata(evidence_id)
             if stored is None:
                 raise EvidenceNotFoundError(f"{evidence_id} is not held by this vault")
@@ -1008,7 +1054,11 @@ class FileSystemEvidenceVault:
         A partially written artifact is indistinguishable from a corrupted one, and would
         put the vault into a state that reports tampering where there was only a power cut.
         """
-        temporary = path.with_name(path.name + ".partial")
+        # Unique per writer. One fixed `.partial` name per target meant two writers shared a
+        # scratch file: measured, one `replace()`d it out from under the other, which then
+        # failed with `FileNotFoundError` on a path it had itself just written. The suffix
+        # stays in the same directory, because `replace()` is only atomic within one.
+        temporary = path.with_name(f"{path.name}.{os.getpid()}.{secrets.token_hex(8)}.partial")
         with temporary.open("wb") as handle:
             handle.write(payload)
             handle.flush()
@@ -1073,6 +1123,27 @@ def _parse_chain(lines: list[str]) -> tuple[list[VaultLogEntry], list[str]]:
                 f"log line {index} claims sequence {entry.sequence}: entries were "
                 "reordered, inserted or removed"
             )
+            if entries and (
+                entry.sequence == entries[-1].sequence
+                and entry.previous_entry_hash == entries[-1].previous_entry_hash
+            ):
+                # Two entries at the same sequence, built on the same tip. That is what two
+                # unsynchronised writers leave behind, and saying so matters: the sentence
+                # above is the one a tamper-evident store exists to be able to say, and before
+                # `_exclusive` existed it was routinely describing an accident. An operator who
+                # reads "reordered, inserted or removed" about a missing lock either hunts an
+                # intruder who was never there or, worse, learns to discount the message.
+                #
+                # It **lowers** suspicion; it does not clear it. Anyone who can write the log
+                # can write this shape deliberately, so it is a hypothesis to check against the
+                # deployment's own record of what was running, never a verdict.
+                defects.append(
+                    f"log entries {index - 1} and {index} both claim sequence "
+                    f"{entry.sequence} and both build on {entry.previous_entry_hash}: this is "
+                    "the signature two concurrent writers leave, not evidence of an edit. "
+                    "Confirm against what was running before treating it as tampering — the "
+                    "shape is forgeable. See docs/procedures/vault-chain-recovery.md"
+                )
         if entry.previous_entry_hash != previous:
             defects.append(
                 f"log entry {entry.sequence} links to {entry.previous_entry_hash} but its "

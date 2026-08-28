@@ -251,8 +251,12 @@ claim id and any `rule_name`, still inherits that premise's origin, which costs 
 gets through, so they measure cost rather than laundering.
 
 **What EVID does not promise, restated because the temptation is to read a green table as more.**
-Two vault instances on one root fork the chain irrecoverably, and the shipped verifier's size
-ceiling covers artifacts but not the log. Both are reproduced and open. The third item here — the
+The shipped verifier's size ceiling covers artifacts but not the log; that one is reproduced and
+open. The other item here — two vault instances on one root forking the chain irrecoverably — is
+**closed as of 2026-08-27**: every critical section holds an `flock` across read-tip-and-append,
+scratch files are named per writer, and a fork that already exists is now reported as the
+signature of concurrent writers rather than only as an edit. Recovery is documented and stays
+human, in `docs/procedures/vault-chain-recovery.md`. The third item here — the
 reporting-obligation register having no callers, so that EVID-04's `REFUSED_ACCESS` entry was the
 *only* trace a statutory obligation was ever incurred — is **closed as of 2026-08-27**:
 `seal_when_released` opens an obligation whenever it holds material that either the collector or
