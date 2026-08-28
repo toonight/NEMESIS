@@ -28,13 +28,16 @@ import pytest
 
 from nemesis.core.claims import Claim, ClaimKind, DerivationKind, Statement
 from nemesis.core.evidence import ArtifactKind, EvidenceObject
+from nemesis.core.fusion import trust_of_source
 from nemesis.core.ids import IdPrefix, content_id, new_id
 from nemesis.core.provenance import (
+    RELIABILITY_CONSERVATISM,
     CollectionMethod,
     ProvenanceChain,
     SourceClass,
     SourceDescriptor,
     SourceReliability,
+    merge_source_records,
 )
 from nemesis.core.temporal import TemporalExtent
 from nemesis.evidence.lineage import (
@@ -808,4 +811,110 @@ async def test_a_demoted_origin_still_names_the_artifact_it_pointed_at() -> None
     assert demoted.is_adversary_influenceable
     assert UNRESOLVED_SOURCE not in lineage.sources, (
         "a demoted origin is not the same state as an unresolved one"
+    )
+
+
+# --- two records of one source -------------------------------------------------
+
+
+def _source(
+    *,
+    reliability: SourceReliability = SourceReliability.USUALLY_RELIABLE,
+    upstream: str | None = None,
+    restrictions: tuple[str, ...] = (),
+) -> SourceDescriptor:
+    """One identity — same class, identifier and operator — recorded differently."""
+    return SourceDescriptor(
+        source_class=SourceClass.OPEN_SOURCE,
+        identifier="feed-alpha",
+        operator="AlphaCorp",
+        reliability=reliability,
+        upstream_of_record=upstream,
+        handling_restrictions=restrictions,
+    )
+
+
+def test_merging_two_records_of_one_source_does_not_depend_on_which_came_first() -> None:
+    """THE ORDER DEPENDENCE THE WALK ABOVE HAD ALREADY REMOVED FROM ITSELF.
+
+    `resolve_sources` deduplicated on `(source_class, identifier, operator)` with
+    `setdefault`, so the first record encountered won and the other's `reliability`,
+    `upstream_of_record` and `handling_restrictions` were discarded — inside the function
+    whose walk was made breadth-first *precisely* so its result would not depend on the order
+    the store happened to yield. `reliability` is not inert on that path: it reaches
+    `fusion.trust_of_source`, so which record arrived first could move a fused number.
+    """
+    graded = _source(reliability=SourceReliability.USUALLY_RELIABLE, upstream="osint:alpha")
+    ungraded = _source(
+        reliability=SourceReliability.CANNOT_BE_JUDGED, restrictions=("no redistribution",)
+    )
+
+    assert merge_source_records(graded, ungraded) == merge_source_records(ungraded, graded)
+
+
+def test_a_merged_source_never_claims_more_than_either_record_did() -> None:
+    """Conservative on the axis that decides, and `CANNOT_BE_JUDGED` is not a middling grade.
+
+    Admiralty `F` maps to a **vacuous** opinion in `trust_of_source` — 0.00/0.00, which
+    nullifies whatever the source claims — so it is the *least* believing value, not the worst
+    one after `E`. Merging by the letter would have read `F` as "worse than E" and, on the
+    other side, let `A` win over `F`; both are wrong. The order is written out by belief.
+    """
+    graded = _source(reliability=SourceReliability.COMPLETELY_RELIABLE)
+    ungraded = _source(reliability=SourceReliability.CANNOT_BE_JUDGED)
+
+    merged = merge_source_records(graded, ungraded)
+
+    assert merged.reliability is SourceReliability.CANNOT_BE_JUDGED, (
+        "one record says nobody judged this source and the merge asserted a grade anyway"
+    )
+    assert trust_of_source(merged).belief <= trust_of_source(graded).belief
+    assert trust_of_source(merged).belief <= trust_of_source(ungraded).belief
+
+
+def test_a_merged_source_keeps_every_handling_restriction() -> None:
+    """Restrictions are unioned rather than picked between. Nothing reads them today, which
+    is a separate finding — but a field that looks like a dissemination limit must not lose
+    entries to a dictionary insertion order while it waits for a reader."""
+    restricted = _source(restrictions=("no redistribution",))
+    tlp = _source(restrictions=("TLP:RED",))
+
+    merged = merge_source_records(restricted, tlp)
+
+    assert merged.handling_restrictions == ("TLP:RED", "no redistribution")
+
+
+def test_two_records_naming_different_origins_assert_neither() -> None:
+    """A single-valued field cannot hold a disagreement, so it holds nothing.
+
+    Asserting one of two contradictory origins is the worse error: `upstream_of_record` is
+    what collapses two feeds into one independent origin, and a *wrong* one silently destroys
+    corroboration that was real. `None` records that none was established, which is what
+    happened.
+    """
+    alpha = _source(upstream="osint:alpha")
+    beta = _source(upstream="osint:beta-reseller")
+
+    assert merge_source_records(alpha, beta).upstream_of_record is None
+    assert merge_source_records(alpha, _source()).upstream_of_record == "osint:alpha"
+
+
+def test_the_conservatism_order_agrees_with_the_beliefs_fusion_actually_uses() -> None:
+    """The anti-drift pin, and the reason the table is written out at all.
+
+    `core.fusion` imports `core.provenance`, so the ordering cannot be derived from
+    `trust_of_source` without a cycle. Written out, it can disagree — and the disagreement
+    would be silent and in the worst direction: a merge that kept the *more* believing of two
+    records while the table said otherwise. So the two are asserted against each other here,
+    and re-grading a letter in one has to move the other or the build says so.
+    """
+    by_belief = sorted(
+        SourceReliability,
+        key=lambda grade: trust_of_source(_source(reliability=grade)).belief,
+    )
+    by_table = sorted(SourceReliability, key=lambda grade: RELIABILITY_CONSERVATISM[grade])
+
+    assert by_table == by_belief, (
+        f"the conservatism order says {[g.value for g in by_table]} and fusion believes "
+        f"{[g.value for g in by_belief]}"
     )
