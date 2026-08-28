@@ -20,9 +20,11 @@ input and output hash of every step makes that answerable.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime
 from enum import StrEnum
-from typing import Annotated, ClassVar, Self
+from types import MappingProxyType
+from typing import Annotated, ClassVar, Final, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -116,6 +118,85 @@ that depends on plantability, so an addition should be a documented decision.
 """
 
 
+RELIABILITY_CONSERVATISM: Final[Mapping[SourceReliability, int]] = MappingProxyType(
+    {
+        SourceReliability.CANNOT_BE_JUDGED: 0,
+        SourceReliability.UNRELIABLE: 1,
+        SourceReliability.NOT_USUALLY_RELIABLE: 2,
+        SourceReliability.FAIRLY_RELIABLE: 3,
+        SourceReliability.USUALLY_RELIABLE: 4,
+        SourceReliability.COMPLETELY_RELIABLE: 5,
+    }
+)
+"""How much each grade lets a claim through, lowest first. **Not the alphabet.**
+
+Admiralty runs A to F, and reading that as a scale is the trap this table exists to remove:
+``F`` is *unjudged*, not "worse than E". `nemesis.core.fusion.trust_of_source` maps it to a
+**vacuous** opinion — 0.00/0.00 — which nullifies whatever the source claims, so it is the
+least-believing value of the six and sits at the bottom here, below ``E``.
+
+Written out rather than derived from the fusion table, because ``core.fusion`` imports this
+module and the reverse would be a cycle. A test pins the two against each other, so they
+cannot drift: the day somebody re-grades a letter in `trust_of_source`, this ordering has to
+move with it or the build says so.
+"""
+
+
+def merge_source_records(first: SourceDescriptor, second: SourceDescriptor) -> SourceDescriptor:
+    """One source, recorded twice, folded into a record that claims no more than either did.
+
+    Two artifacts can name the same source — same class, identifier and operator — and
+    disagree about everything else, and something has to decide. Taking whichever arrived
+    first is what `evidence.lineage` used to do, and it made the result depend on the order a
+    store yielded rows, inside the one function whose walk was made breadth-first precisely so
+    that it would not.
+
+    Each field folds in the direction that asserts least:
+
+    - ``reliability`` to the least-believing of the two, by
+      :data:`RELIABILITY_CONSERVATISM`. We do not get to keep the flattering record.
+    - ``handling_restrictions`` to the union, sorted so the result is a value and not an
+      insertion order. A caveat one collector recorded is not cancelled by another who did not.
+    - ``upstream_of_record`` when they agree, or when only one names an origin. When they name
+      **different** origins the merged record names none: this field is what collapses two
+      feeds into a single independent origin, so a wrong one silently destroys corroboration
+      that was real, which is the worse of the two errors available here. ``None`` then means
+      "two records disagreed", which is a different state from "never populated" and is worth
+      knowing when reading one.
+    """
+    if (first.source_class, first.identifier, first.operator) != (
+        second.source_class,
+        second.identifier,
+        second.operator,
+    ):
+        raise ValueError(
+            "merge_source_records folds two records of ONE source; these name different "
+            f"identities ({first.identifier!r} and {second.identifier!r}). Merging them would "
+            "invent a source that nobody collected from"
+        )
+
+    upstream = first.upstream_of_record or second.upstream_of_record
+    if (
+        first.upstream_of_record
+        and second.upstream_of_record
+        and first.upstream_of_record != second.upstream_of_record
+    ):
+        upstream = None
+
+    return first.model_copy(
+        update={
+            "reliability": min(
+                (first.reliability, second.reliability),
+                key=lambda grade: RELIABILITY_CONSERVATISM[grade],
+            ),
+            "handling_restrictions": tuple(
+                sorted(set(first.handling_restrictions) | set(second.handling_restrictions))
+            ),
+            "upstream_of_record": upstream,
+        }
+    )
+
+
 class SourceDescriptor(BaseModel):
     """Who or what originated a piece of information."""
 
@@ -144,9 +225,11 @@ class SourceDescriptor(BaseModel):
     documented purpose is redistribution limits, consulted by nobody, reads as a dissemination
     control in review and is not one, which is the more dangerous of the two states.
 
-    It is also dropped rather than merged when :func:`~nemesis.evidence.lineage.resolve_sources`
-    collapses two artifacts naming one source, because that dedup keys on identity alone. See
-    the threat model; enforcing it is `PROPOSED` and labelling it honestly is the interim.
+    It is at least no longer *lost*: :func:`merge_source_records` unions it when
+    :func:`~nemesis.evidence.lineage.resolve_sources` folds two records of one source, where the
+    dedup used to keep whichever arrived first. That stops the field losing entries to a
+    dictionary insertion order while it waits for a reader; it does not give it one. Enforcing
+    it at export and disclosure is `PROPOSED`, and saying so here is the interim.
     """
 
     @property

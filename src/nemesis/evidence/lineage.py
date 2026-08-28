@@ -59,7 +59,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from nemesis.core.claims import Claim, DerivationKind
 from nemesis.core.evidence import EvidenceObject
 from nemesis.core.ids import ClaimId
-from nemesis.core.provenance import SourceClass, SourceDescriptor, SourceReliability
+from nemesis.core.provenance import (
+    SourceClass,
+    SourceDescriptor,
+    SourceReliability,
+    merge_source_records,
+)
 from nemesis.core.relationships import PivotSelectivity
 from nemesis.ports.storage import ClaimStore
 
@@ -419,7 +424,17 @@ async def resolve_lineage(
                 if not collected:
                     source = asserted_backing(source)
                 key = (source.source_class.value, source.identifier, source.operator)
-                ordered.setdefault(key, source)
+                # Folded, not first-wins. `setdefault` discarded the other record's
+                # `reliability`, `upstream_of_record` and `handling_restrictions`, so which
+                # artifact the store yielded first decided them — order dependence, one screen
+                # below a walk that was made breadth-first precisely to remove it, and
+                # `reliability` reaches `fusion.trust_of_source`, so the order could move a
+                # fused number. `merge_source_records` folds each field toward the value that
+                # asserts least.
+                previous = ordered.get(key)
+                ordered[key] = (
+                    source if previous is None else merge_source_records(previous, source)
+                )
                 if collected:
                     found_collected = True
                 else:
