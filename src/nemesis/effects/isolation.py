@@ -481,7 +481,16 @@ class IsolatedEffectsExecutor:
                 report,
             )
 
-        contact_claimed = bool(result.external_contact_made)
+        # **Not `bool()`.** `external_contact_made` is three-valued precisely so that a run
+        # which cannot say does not assert safety, and `bool(None)` is `False` — so the parent
+        # was turning a child's honest "I cannot say" into "nothing left the system", in the
+        # one process whose whole job is to not believe the child. A truthiness test is the
+        # one place a widened field silently narrows again.
+        contact = result.external_contact_made
+        # The report's field is a plain bool and stays one, so it folds the way every reader in
+        # this repository does: `is not False`. A run nobody can vouch for is flagged like one
+        # that vouched for itself, because under-reporting contact is the error that matters.
+        contact_claimed = contact is not False
         authored = result.model_copy(
             update={
                 # Identity of the operation: this process's, always. A worker that renamed
@@ -508,7 +517,7 @@ class IsolatedEffectsExecutor:
                 )[:MAX_ARTIFACTS],
                 # Never rewritten to False. The worker's confession is the one thing it says
                 # that is worth keeping, and the kernel's denial is recorded separately.
-                "external_contact_made": contact_claimed,
+                "external_contact_made": contact,
             }
         )
 

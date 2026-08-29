@@ -120,6 +120,14 @@ class ArtifactHandle:
     byte_length: int
     admitted_at: datetime
     declared_safety: ContentSafety
+    simulated: bool = False
+    """Whether these bytes came from a fixture rather than from the world.
+
+    Carried on the handle because it decides *where* the examination runs, and the analyser
+    is handed the handle and not the evidence. It is set by the collection path from
+    `provenance.is_simulated`, which no external content can influence: a connector declares
+    it, and connectors are in-tree.
+    """
 
     def __repr__(self) -> str:  # pragma: no cover - trivial
         return f"ArtifactHandle({self.artifact_id}, {self.byte_length}B, no path)"
@@ -245,6 +253,21 @@ class StructuralAnalyser:
         )
 
 
+def _analyser_name(analyser: ArtifactAnalyser) -> str:
+    """The analyser's name, or a placeholder, without letting the question fail the handler.
+
+    `getattr(..., default)` is not enough and the reason is worth keeping: the default arm
+    answers `AttributeError` alone, so a `name` **property** that raises anything else — very
+    often the same failure that just took the analysis down — escapes. This is read while a
+    failure is already being converted into a report, so there is nowhere left to raise to.
+    """
+    try:
+        return str(analyser.name)[:120]
+    # Deliberately unnarrowed: the point is to survive any answer, including none.
+    except Exception:
+        return "unknown"
+
+
 class Quarantine:
     """A holding area for unexamined bytes, with analysis as the only exit.
 
@@ -267,7 +290,11 @@ class Quarantine:
         self._reports: dict[str, AnalysisReport] = {}
 
     def admit(
-        self, artifact: bytes, *, declared_safety: ContentSafety = ContentSafety.ROUTINE
+        self,
+        artifact: bytes,
+        *,
+        declared_safety: ContentSafety = ContentSafety.ROUTINE,
+        simulated: bool = False,
     ) -> ArtifactHandle:
         """Take custody of bytes. They go here, never to the vault.
 
@@ -287,6 +314,7 @@ class Quarantine:
             byte_length=len(artifact),
             admitted_at=self._clock(),
             declared_safety=declared_safety,
+            simulated=simulated,
         )
         (self._root / handle.artifact_id).write_bytes(artifact)
         self._state[handle.artifact_id] = QuarantineState.ADMITTED
@@ -310,10 +338,19 @@ class Quarantine:
             artifact = path.read_bytes()
             report = await analyser.analyse(artifact, handle)
         except Exception as exc:
+            # **Held first.** The state assignment used to sit below this block, and the block
+            # read `getattr(analyser, "name", "unknown")` — which answers `AttributeError`
+            # alone, so a `name` property raising anything else propagated out of the handler
+            # and the artifact stayed `ADMITTED`: not held, not in `held()`, and no obligation
+            # opened for it. Holding the material is the part that must not depend on a second
+            # answer from the component that just failed to give a first one. Same shape as the
+            # effects registry's crash handler, which consulted the object whose failure it was
+            # handling.
+            self._state[handle.artifact_id] = QuarantineState.HELD
             report = AnalysisReport(
                 artifact_id=handle.artifact_id,
                 classification=handle.declared_safety,
-                analyser=getattr(analyser, "name", "unknown"),
+                analyser=_analyser_name(analyser),
                 confined=False,
                 failure=(
                     f"analysis failed ({type(exc).__name__}); the artifact stays quarantined, "
@@ -388,6 +425,7 @@ def analysis_payload(handle: ArtifactHandle) -> bytes:
             "content_hash": handle.content_hash,
             "byte_length": handle.byte_length,
             "declared_safety": handle.declared_safety.value,
+            "simulated": handle.simulated,
             # The handle's remaining field. Included because the child reconstructs the whole
             # handle and an analyser is entitled to know how long the material has been held —
             # and because inventing a value on the far side would put a fabricated timestamp
@@ -451,7 +489,11 @@ async def seal_when_released(
     what the append-only store recorded, and material carrying a legal clock could be sealed
     as routine and then not be removable.
     """
-    handle = quarantine.admit(artifact, declared_safety=evidence.content_safety)
+    handle = quarantine.admit(
+        artifact,
+        declared_safety=evidence.content_safety,
+        simulated=evidence.provenance.is_simulated,
+    )
     report = await quarantine.analyse(handle, analyser)
     try:
         released = quarantine.release(handle)

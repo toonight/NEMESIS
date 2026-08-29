@@ -130,6 +130,12 @@ def test_a_handle_does_not_let_its_holder_read_the_artifact() -> None:
         "byte_length",
         "admitted_at",
         "declared_safety",
+        # Added 2026-08-29 with `ConfinedWhenReal`, and pinned here on purpose: this set is
+        # exhaustive so that widening the handle is a deliberate, visible event rather than a
+        # convenience somebody adds. `simulated` is a bool the collection path sets from
+        # `provenance.is_simulated`; it names *where the bytes came from*, never where they
+        # are, which is the property this test is actually about.
+        "simulated",
     }
     # And no filesystem path leaks through the repr — checked as a path rather than as the
     # word, since the repr deliberately says "no path".
@@ -553,3 +559,37 @@ def test_a_lying_analyser_cannot_suppress_the_obligation_either(tmp_path: Path) 
     assert len(register.open_obligations()) == 1, (
         "the obligation was keyed on the analyser's answer, so lying suppressed it"
     )
+
+
+class _ExplodingTwice:
+    """Fails the analysis, and then fails to say who it is."""
+
+    @property
+    def name(self) -> str:
+        raise RuntimeError("name unavailable")
+
+    async def analyse(self, artifact: bytes, handle: ArtifactHandle) -> AnalysisReport:
+        raise RuntimeError("analysis blew up")
+
+
+def test_an_analyser_that_fails_twice_still_leaves_the_artifact_held() -> None:
+    """The handler that holds the artifact must not need the analyser's cooperation.
+
+    `getattr(analyser, "name", "unknown")` was read *inside* the except block, and `getattr`
+    answers `AttributeError` alone — so a `name` property raising anything else propagated out
+    of the handler, and the state assignment below it never ran. The artifact stayed
+    `ADMITTED`: not held, not in `held()`, and no obligation opened for it.
+
+    Same shape as the effects registry two days earlier, where the crash handler consulted the
+    object whose failure it was handling. The state is now set before anything optional is
+    built, because holding the material is the part that must not depend on a second answer.
+    """
+    quarantine = Quarantine()
+    handle = quarantine.admit(b"x", declared_safety=ContentSafety.MANDATORY_REPORT)
+
+    report = asyncio.run(quarantine.analyse(handle, _ExplodingTwice()))
+
+    assert quarantine.state(handle) is QuarantineState.HELD
+    assert quarantine.held() == (handle.artifact_id,)
+    assert report.failure is not None
+    assert report.classification is ContentSafety.MANDATORY_REPORT
