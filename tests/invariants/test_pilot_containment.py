@@ -1551,3 +1551,35 @@ def test_the_effect_verb_refuses_an_internal_entity_as_the_pivot_verb_does() -> 
     assert effect.status is RulingStatus.REFUSED_DISCLOSURE
     assert "internal" in effect.reason
     assert session.any_effect_left_the_platform() is False
+
+
+def test_the_confinement_reaches_the_audit_trail_and_not_only_the_transcript() -> None:
+    """`IsolationReport`'s docstring has always said it is written into the audit trail.
+
+    On the pilot path it was not. The report reached the ruling, so a session transcript could
+    show it — and an operator reading the *trail* six months later saw that nothing left the
+    system, with nothing saying what had enforced that. A kernel's refusal and the report of
+    the code that would have made the contact look identical from there, which is the exact
+    distinction the type exists for.
+    """
+
+    async def scenario() -> tuple[PilotSession, RecordingAudit]:
+        h = await _build()
+        session = await h.mediator.drive(_hostile(_rehearsal(h.approved.entity_id)), h.seed)
+        return session, h.audit
+
+    session, audit = _run_pair(scenario())
+
+    effect = next(r for r in session.rulings if r.move_kind == "request_effect")
+    assert effect.accepted, effect.reason
+
+    moves = [e for e in audit.events if e.action == "pilot.move" and "confinement" in e.inputs]
+    assert moves, "no audit event carried the confinement the effect ran under"
+    assert moves[0].inputs["confinement"] == effect.effect_isolation
+    assert moves[0].inputs["confinement.egress_denied"] == str(effect.effect_egress_denied).lower()
+
+
+def _run_pair(
+    coro: Awaitable[tuple[PilotSession, RecordingAudit]],
+) -> tuple[PilotSession, RecordingAudit]:
+    return asyncio.run(coro)  # type: ignore[arg-type]

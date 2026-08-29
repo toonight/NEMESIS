@@ -1512,6 +1512,14 @@ class PilotMediator:
             inputs |= {key: str(value)[:400] for key, value in error.audit().items()}
         elif error is not None:
             inputs["error_kind"] = type(error).__name__[:64]
+        if ruling.effect_isolation is not None:
+            # Onto the trail, not only into the session transcript. `IsolationReport`'s own
+            # docstring says it is written into the audit trail, and on this path it was not:
+            # an operator reading the trail six months later could see that nothing left the
+            # system and not what had enforced it — a kernel's refusal and the report of the
+            # code that would have made the contact look identical from there.
+            inputs["confinement"] = ruling.effect_isolation[:400]
+            inputs["confinement.egress_denied"] = str(ruling.effect_egress_denied).lower()
         if challenge is not None:
             inputs["challenger"] = self._challenger.name[:128] if self._challenger else ""
             inputs["challenger_verdict"] = challenge.verdict.value

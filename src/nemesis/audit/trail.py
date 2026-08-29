@@ -54,6 +54,7 @@ from nemesis.core.ids import IdPrefix, new_id
 from nemesis.core.relationships import PivotMethod, RelationType
 from nemesis.core.temporal import utcnow
 from nemesis.ports.effects import EffectRequest, EffectResult
+from nemesis.ports.isolation import IsolationReport
 from nemesis.ports.storage import AuditEvent
 
 HASH_PREFIX: Final = "sha256:"
@@ -513,6 +514,7 @@ class AppendOnlyAuditTrail:
         actor_kind: ActorKind,
         request: EffectRequest,
         result: EffectResult,
+        isolation: IsolationReport | None = None,
         occurred_at: datetime | None = None,
     ) -> AuditEvent:
         """Record an executed or refused effect, with the request that produced it.
@@ -541,10 +543,28 @@ class AppendOnlyAuditTrail:
             {f"target.{key}": value for key, value in request.current_target_attributes.items()}
         )
 
+        if isolation is not None:
+            # `IsolationReport`'s own docstring has always said it is "written into the audit
+            # trail". It was not: it reached the caller and stopped there, so the trail
+            # recorded *that* nothing left the system and never what had enforced it. An
+            # operator six months later cannot tell a kernel's refusal from the report of the
+            # code that would have made the contact — which is the whole distinction the type
+            # exists for.
+            inputs["confinement"] = isolation.render()
+            inputs["confinement.separate_process"] = str(isolation.separate_process).lower()
+            inputs["confinement.egress_denied"] = str(
+                isolation.egress_denied_from_this_process
+            ).lower()
+
         artifacts = ",".join(result.produced_artifacts) or "none"
+        contact = (
+            "unknown"
+            if result.external_contact_made is None
+            else str(result.external_contact_made).lower()
+        )
         outcome = (
             f"{result.outcome.value} adapter={result.adapter_name} "
-            f"external_contact={str(result.external_contact_made).lower()} "
+            f"external_contact={contact} "
             f"artifacts={artifacts} detail={result.detail}"
         )
 

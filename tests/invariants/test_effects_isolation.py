@@ -52,6 +52,23 @@ pytestmark = pytest.mark.invariant
 DEV = LocalDevelopmentIdentityProvider()
 ACTORS = PrincipalVerifier(DEV.registered_issuer())
 
+
+def _executor(anchor: TrustAnchor, **kwargs: Any) -> IsolatedEffectsExecutor:
+    """An executor for this suite, which has to run on Linux too.
+
+    ``allow_unsandboxed=True`` **by name**, because the default is now the deployment-safe
+    refusal — and that is the whole point of the default: a test default and a deployment
+    default must not be the same value, and this suite is the test default. Eight tests here
+    were silently relying on the old permissive one, which CI on Ubuntu found and a macOS run
+    could not.
+
+    The two tests about the refusal itself construct the executor directly, since the argument
+    is what they are about.
+    """
+    kwargs.setdefault("allow_unsandboxed", True)
+    return IsolatedEffectsExecutor(anchor, **kwargs)
+
+
 needs_sandbox = pytest.mark.skipif(
     not sandbox_available(),
     reason="kernel-enforced confinement needs macOS sandbox-exec; the executor reports its "
@@ -133,7 +150,7 @@ def _probe(script: str, *, sandboxed: bool) -> subprocess.CompletedProcess[str]:
         # Built by the executor itself, so a probe cannot pass under a profile the real
         # thing does not use. Hand-rolling the profile here is how the `/var` vs
         # `/private/var` bug survived: the test and the product disagreed about the rules.
-        profile = IsolatedEffectsExecutor(
+        profile = _executor(
             TrustAnchor(
                 verifying_key=CapabilitySigningKey.generate().verifying_key,
                 revocations=_NoRevocations(),
@@ -159,7 +176,7 @@ def _probe(script: str, *, sandboxed: bool) -> subprocess.CompletedProcess[str]:
 def test_an_authorized_effect_runs_in_the_child_and_comes_back() -> None:
     """A boundary that refuses everything is not a boundary, it is an outage."""
     gateway, capability, target = _grant()
-    executor = IsolatedEffectsExecutor(_anchor(gateway))
+    executor = _executor(_anchor(gateway))
 
     result, report = asyncio.run(
         executor.perform(
@@ -186,7 +203,7 @@ def test_an_unauthorized_operation_never_reaches_a_child() -> None:
     """
     gateway, capability, target = _grant()
     forged = capability.model_copy(update={"signature": None})
-    executor = IsolatedEffectsExecutor(_anchor(gateway))
+    executor = _executor(_anchor(gateway))
 
     result, report = asyncio.run(
         executor.perform(
@@ -321,7 +338,7 @@ def test_no_private_key_crosses_the_boundary() -> None:
     signer = CapabilitySigningKey.generate()
     sent: list[bytes] = []
 
-    executor = IsolatedEffectsExecutor(
+    executor = _executor(
         TrustAnchor(verifying_key=gateway.verifying_key, revocations=gateway.revocations)
     )
 
@@ -382,7 +399,7 @@ def test_no_private_key_crosses_the_boundary() -> None:
 def test_a_worker_that_hangs_is_killed_and_recorded() -> None:
     """An operation whose outcome nobody recorded is the failure the trail exists to stop."""
     gateway, capability, target = _grant()
-    executor = IsolatedEffectsExecutor(_anchor(gateway), deadline_seconds=0.25)
+    executor = _executor(_anchor(gateway), deadline_seconds=0.25)
 
     async def stall() -> None:
         """Substitute a child that never finishes, so the deadline is what is under test."""
@@ -409,8 +426,16 @@ def test_a_worker_that_hangs_is_killed_and_recorded() -> None:
 
         assert result.outcome is EffectOutcome.FAILED
         assert "deadline" in result.detail
-        assert not result.external_contact_made
         assert not result.authorization.permitted
+        # `is None`, not falsy. This assertion used to read `not result.external_contact_made`,
+        # which accepts the lie: the record said `False` — *nothing left the system* — in the
+        # same breath as a detail saying nothing can say how far the worker got. A field that
+        # cannot express "unknown" reads as a positive finding, and a test that accepts either
+        # value cannot tell the two apart.
+        assert result.external_contact_made is None, (
+            "a killed worker cannot report that nothing left the system; nobody knows"
+        )
+        assert "nothing can say how far it got" in result.detail
 
     asyncio.run(stall())
 
@@ -418,7 +443,7 @@ def test_a_worker_that_hangs_is_killed_and_recorded() -> None:
 def test_a_worker_that_returns_nonsense_is_recorded_as_failed() -> None:
     """The parent re-validates. A worker is untrusted in both directions."""
     gateway, _, target = _grant()
-    executor = IsolatedEffectsExecutor(_anchor(gateway))
+    executor = _executor(_anchor(gateway))
 
     report = executor._report(sandboxed=False, workdir=None, started=False)
     result, _ = executor._interpret(
@@ -444,7 +469,7 @@ def test_the_report_never_claims_more_than_the_platform_gave() -> None:
     invited to treat the adapter's own declaration as proof.
     """
     gateway, capability, target = _grant()
-    executor = IsolatedEffectsExecutor(_anchor(gateway))
+    executor = _executor(_anchor(gateway))
     _, report = asyncio.run(
         executor.perform(
             _request(target, OperationClass.SIMULATION),
@@ -463,6 +488,67 @@ def test_the_report_never_claims_more_than_the_platform_gave() -> None:
         assert report.address_space_bytes is None, "macOS cannot set RLIMIT_AS"
     assert report.cpu_seconds is not None
     assert report.file_size_bytes is not None
+
+
+def test_an_executor_built_with_no_argument_refuses_to_run_unconfined(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The default is the deployment-safe value, and it was the other one.
+
+    `allow_unsandboxed` defaulted to `True`, so on Linux an `IsolatedEffectsExecutor()` built
+    with no argument ran the operation in a plain subprocess with full network and filesystem
+    reach — recorded honestly as `network=NOT DENIED`, and overlookably. A deployment default
+    and a test default must not be the same value: the caller who most needs the refusal is the
+    one who never heard of the flag.
+
+    This mattered more from the moment the pilot was routed through the executor, because until
+    then the only caller was a demonstration that knew what it was doing.
+
+    The demonstrations and benchmarks now pass `allow_unsandboxed=True` by name, which is what
+    keeps this suite and CI running on Linux — and what makes the choice visible at the four
+    places that make it.
+    """
+    gateway, capability, target = _grant()
+    monkeypatch.setattr("nemesis.effects.isolation.sandbox_available", lambda: False)
+
+    result, report = asyncio.run(
+        IsolatedEffectsExecutor(_anchor(gateway)).perform(
+            _request(target, OperationClass.SIMULATION),
+            capability,
+            operation=OperationClass.SIMULATION,
+        )
+    )
+
+    assert result.outcome is EffectOutcome.REFUSED_UNAUTHORIZED
+    assert "kernel-enforced confinement" in result.detail
+    assert not report.separate_process, "nothing may have run"
+
+
+def test_a_deployment_can_choose_to_run_unconfined_by_saying_so(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other half: the flag still exists, and naming it still works.
+
+    A default that could not be overridden would be a default nobody could run the suite
+    under, and this repository's own history says what happens to a control that stops the
+    work — it gets removed rather than argued with.
+    """
+    gateway, capability, target = _grant()
+    monkeypatch.setattr("nemesis.effects.isolation.sandbox_available", lambda: False)
+
+    result, report = asyncio.run(
+        IsolatedEffectsExecutor(_anchor(gateway), allow_unsandboxed=True).perform(
+            _request(target, OperationClass.SIMULATION),
+            capability,
+            operation=OperationClass.SIMULATION,
+        )
+    )
+
+    assert result.outcome is not EffectOutcome.REFUSED_UNAUTHORIZED, result.detail
+    assert report.separate_process
+    assert not report.egress_denied_from_this_process, (
+        "a plain subprocess is not kernel confinement and the report must not say it is"
+    )
 
 
 def test_a_deployment_can_refuse_to_run_unconfined() -> None:
@@ -507,7 +593,7 @@ def test_the_parent_authors_the_audit_record_not_the_child() -> None:
     authorization verdict, which is the field the whole boundary exists to protect.
     """
     gateway, capability, target = _grant()
-    executor = IsolatedEffectsExecutor(_anchor(gateway))
+    executor = _executor(_anchor(gateway))
     request = _request(target, OperationClass.SIMULATION)
     check = preflight(
         request, capability, operation=OperationClass.SIMULATION, anchor=_anchor(gateway)
@@ -571,7 +657,7 @@ def test_the_parent_authors_the_audit_record_not_the_child() -> None:
 def test_a_report_claims_nothing_when_no_child_was_started() -> None:
     """Four asserted controls for a run in which nothing was ever created."""
     gateway, capability, target = _grant()
-    executor = IsolatedEffectsExecutor(_anchor(gateway))
+    executor = _executor(_anchor(gateway))
 
     async def fail_to_spawn() -> None:
         original = asyncio.create_subprocess_exec
@@ -611,7 +697,7 @@ def test_the_deadline_kills_descendants_and_returns_promptly() -> None:
     import time
 
     gateway, capability, target = _grant()
-    executor = IsolatedEffectsExecutor(_anchor(gateway), deadline_seconds=0.5)
+    executor = _executor(_anchor(gateway), deadline_seconds=0.5)
 
     async def spawn_a_survivor() -> None:
         original = asyncio.create_subprocess_exec
@@ -665,7 +751,7 @@ def test_the_kill_switch_never_fires_at_this_process() -> None:
 def test_the_output_ceiling_is_enforced_while_reading_not_afterwards() -> None:
     """600 MiB reached the parent in 0.3s, and then it printed "discarded unread"."""
     gateway, capability, target = _grant()
-    executor = IsolatedEffectsExecutor(_anchor(gateway), deadline_seconds=30)
+    executor = _executor(_anchor(gateway), deadline_seconds=30)
 
     async def flood() -> None:
         original = asyncio.create_subprocess_exec
@@ -752,7 +838,7 @@ def test_the_child_cannot_read_the_evidence_vault_or_the_audit_trail() -> None:
     (workspace / "vault.jsonl").write_text("sealed evidence")
 
     gateway = AuthorizationGateway(CapabilitySigningKey.generate(), identity=ACTORS)
-    executor = IsolatedEffectsExecutor(_anchor(gateway), read_denied=(workspace,))
+    executor = _executor(_anchor(gateway), read_denied=(workspace,))
     # The probe runs from the job directory, as `run_confined` runs the real worker. Under read
     # confinement the interpreter scans its cwd for imports, so a probe launched from the repo
     # root — which the allowlist does not include — dies before it can test anything.

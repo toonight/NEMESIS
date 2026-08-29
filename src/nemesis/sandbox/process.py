@@ -214,7 +214,7 @@ async def run_confined(
     stdin: bytes,
     policy: SandboxPolicy,
     deadline_seconds: float,
-    allow_unsandboxed: bool = True,
+    allow_unsandboxed: bool = False,
 ) -> SandboxRun:
     """Run one command, confined as far as this platform allows, and never longer than the
     deadline.

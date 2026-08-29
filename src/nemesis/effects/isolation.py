@@ -180,15 +180,25 @@ class IsolatedEffectsExecutor:
         address_space_bytes: int = DEFAULT_ADDRESS_SPACE_BYTES,
         cpu_seconds: int = DEFAULT_CPU_SECONDS,
         output_bytes: int = DEFAULT_OUTPUT_BYTES,
-        allow_unsandboxed: bool = True,
+        allow_unsandboxed: bool = False,
         read_denied: Sequence[str | Path] = (),
     ) -> None:
-        """``allow_unsandboxed`` is the deployment's call, and it is a real one.
+        """``allow_unsandboxed`` is the deployment's call, and it defaults to refusing.
 
-        Left True so the demonstration and the test suite run on any platform. A deployment
-        that means it sets it False, and then this executor refuses to run at all where the
-        kernel cannot deny the child a socket — which is the honest behaviour for a plane
-        whose whole claim is that nothing leaves the system.
+        It defaulted to ``True`` — so an executor built with no argument ran the operation in a
+        plain subprocess wherever the kernel could not confine it, with full network and
+        filesystem reach, recorded honestly as ``network=NOT DENIED`` and overlookably. A
+        deployment default and a test default must not be the same value: the caller who most
+        needs the refusal is the one who never heard of the flag.
+
+        It mattered more from the moment the pilot was routed through this executor. Until
+        then the only caller was a demonstration that knew what it was doing; afterwards it was
+        the path an untrusted model drives.
+
+        So the demonstrations and the benchmarks say ``allow_unsandboxed=True`` by name, which
+        is what keeps them running on Linux and what puts the choice in front of whoever reads
+        those four wiring sites. A deployment that says nothing gets the refusal, which is the
+        honest behaviour for a plane whose whole claim is that nothing leaves the system.
         """
         self._anchor = anchor
         self._deadline = deadline_seconds
@@ -332,6 +342,9 @@ class IsolatedEffectsExecutor:
                     f"the effects worker {reason} and its process group was killed; the "
                     "operation is recorded as failed because nothing can say how far it got",
                     outcome=EffectOutcome.FAILED,
+                    # And the field says so too. It said `False` here — *nothing left the
+                    # system* — in the same record as that sentence.
+                    external_contact_made=None,
                 ),
                 report,
             )
@@ -621,7 +634,11 @@ class IsolatedEffectsExecutor:
         *,
         outcome: EffectOutcome = EffectOutcome.REFUSED_UNAUTHORIZED,
         refusal: EffectOutcome | None = None,
+        external_contact_made: bool | None = False,
     ) -> EffectResult:
+        """``external_contact_made`` defaults to False because that is *true* of a refusal:
+        nothing ran, so nothing reached anything. It is a parameter because one caller cannot
+        say that — a worker killed mid-flight — and it used to be given this literal anyway."""
         return EffectResult(
             operation_id=request.operation_id,
             operation=request.operation,
@@ -636,7 +653,7 @@ class IsolatedEffectsExecutor:
                 reasons=(detail,),
             ),
             detail=detail,
-            external_contact_made=False,
+            external_contact_made=external_contact_made,
         )
 
 

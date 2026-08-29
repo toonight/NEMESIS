@@ -2514,6 +2514,11 @@ async def _effects(
         # permits reading anything, and reading the vault off disk needs no import — which
         # is how a review turned a confined worker into a reader of the investigation the
         # import contracts exist to keep it away from.
+        # Named, because the default now refuses. This is a demonstration that runs on
+        # whatever platform the reader has, including the Linux CI where `sandbox-exec`
+        # does not exist — a refusal there would hide the thing being demonstrated. A
+        # deployment says nothing here and gets the refusal.
+        allow_unsandboxed=True,
         read_denied=(
             context.vault.root.parent,
             context.audit.path.parent,
@@ -2545,7 +2550,11 @@ async def _effects(
         isolation = report if report.separate_process else isolation
         results.append(result)
         await context.audit.record_effect(
-            actor=context.actor, actor_kind=ActorKind.AGENT, request=request, result=result
+            actor=context.actor,
+            actor_kind=ActorKind.AGENT,
+            request=request,
+            result=result,
+            isolation=report,
         )
 
     notification = EffectRequest(
@@ -2572,7 +2581,11 @@ async def _effects(
     isolation = report if report.separate_process else isolation
     results.append(drafted)
     await context.audit.record_effect(
-        actor=context.actor, actor_kind=ActorKind.AGENT, request=notification, result=drafted
+        actor=context.actor,
+        actor_kind=ActorKind.AGENT,
+        request=notification,
+        result=drafted,
+        isolation=report,
     )
 
     # The rejected option, attempted anyway. Recorded, because a pattern of denied attempts is
@@ -2597,12 +2610,19 @@ async def _effects(
         requested_by=context.actor,
         requested_at=now,
     )
-    refused, _ = await executor.perform(
+    refused, refusal_report = await executor.perform(
         forbidden, capability, operation=OperationClass.REGISTRAR_SUSPENSION
     )
     results.append(refused)
     await context.audit.record_effect(
-        actor=context.actor, actor_kind=ActorKind.AGENT, request=forbidden, result=refused
+        actor=context.actor,
+        actor_kind=ActorKind.AGENT,
+        request=forbidden,
+        result=refused,
+        # Recorded for a refusal too, and it says something a refusal alone does not: no child
+        # was started. "Refused before anything ran" and "ran confined and then refused" are
+        # different events, and the trail could not tell them apart while this was a `_`.
+        isolation=refusal_report,
     )
 
     stage = EffectsStage(
@@ -2615,7 +2635,8 @@ async def _effects(
             )
             for adapter in registry.adapters
         ),
-        external_contact_made=any(result.external_contact_made for result in results),
+        # `is not False`, because `None` means nobody could say and `any()` reads it as no.
+        external_contact_made=any(result.external_contact_made is not False for result in results),
         isolation=isolation
         or IsolationReport(mechanism="in-process", separate_process=False, network_denied=False),
     )
