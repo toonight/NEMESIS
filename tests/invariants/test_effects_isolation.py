@@ -53,7 +53,7 @@ DEV = LocalDevelopmentIdentityProvider()
 ACTORS = PrincipalVerifier(DEV.registered_issuer())
 
 
-def _executor(gateway: AuthorizationGateway, **kwargs: Any) -> IsolatedEffectsExecutor:
+def _executor(anchor: TrustAnchor, **kwargs: Any) -> IsolatedEffectsExecutor:
     """An executor for this suite, which has to run on Linux too.
 
     ``allow_unsandboxed=True`` **by name**, because the default is now the deployment-safe
@@ -66,7 +66,7 @@ def _executor(gateway: AuthorizationGateway, **kwargs: Any) -> IsolatedEffectsEx
     is what they are about.
     """
     kwargs.setdefault("allow_unsandboxed", True)
-    return IsolatedEffectsExecutor(_anchor(gateway), **kwargs)
+    return IsolatedEffectsExecutor(anchor, **kwargs)
 
 
 needs_sandbox = pytest.mark.skipif(
@@ -176,7 +176,7 @@ def _probe(script: str, *, sandboxed: bool) -> subprocess.CompletedProcess[str]:
 def test_an_authorized_effect_runs_in_the_child_and_comes_back() -> None:
     """A boundary that refuses everything is not a boundary, it is an outage."""
     gateway, capability, target = _grant()
-    executor = _executor(gateway)
+    executor = _executor(_anchor(gateway))
 
     result, report = asyncio.run(
         executor.perform(
@@ -203,7 +203,7 @@ def test_an_unauthorized_operation_never_reaches_a_child() -> None:
     """
     gateway, capability, target = _grant()
     forged = capability.model_copy(update={"signature": None})
-    executor = _executor(gateway)
+    executor = _executor(_anchor(gateway))
 
     result, report = asyncio.run(
         executor.perform(
@@ -399,7 +399,7 @@ def test_no_private_key_crosses_the_boundary() -> None:
 def test_a_worker_that_hangs_is_killed_and_recorded() -> None:
     """An operation whose outcome nobody recorded is the failure the trail exists to stop."""
     gateway, capability, target = _grant()
-    executor = _executor(gateway, deadline_seconds=0.25)
+    executor = _executor(_anchor(gateway), deadline_seconds=0.25)
 
     async def stall() -> None:
         """Substitute a child that never finishes, so the deadline is what is under test."""
@@ -443,7 +443,7 @@ def test_a_worker_that_hangs_is_killed_and_recorded() -> None:
 def test_a_worker_that_returns_nonsense_is_recorded_as_failed() -> None:
     """The parent re-validates. A worker is untrusted in both directions."""
     gateway, _, target = _grant()
-    executor = _executor(gateway)
+    executor = _executor(_anchor(gateway))
 
     report = executor._report(sandboxed=False, workdir=None, started=False)
     result, _ = executor._interpret(
@@ -469,7 +469,7 @@ def test_the_report_never_claims_more_than_the_platform_gave() -> None:
     invited to treat the adapter's own declaration as proof.
     """
     gateway, capability, target = _grant()
-    executor = _executor(gateway)
+    executor = _executor(_anchor(gateway))
     _, report = asyncio.run(
         executor.perform(
             _request(target, OperationClass.SIMULATION),
@@ -593,7 +593,7 @@ def test_the_parent_authors_the_audit_record_not_the_child() -> None:
     authorization verdict, which is the field the whole boundary exists to protect.
     """
     gateway, capability, target = _grant()
-    executor = _executor(gateway)
+    executor = _executor(_anchor(gateway))
     request = _request(target, OperationClass.SIMULATION)
     check = preflight(
         request, capability, operation=OperationClass.SIMULATION, anchor=_anchor(gateway)
@@ -657,7 +657,7 @@ def test_the_parent_authors_the_audit_record_not_the_child() -> None:
 def test_a_report_claims_nothing_when_no_child_was_started() -> None:
     """Four asserted controls for a run in which nothing was ever created."""
     gateway, capability, target = _grant()
-    executor = _executor(gateway)
+    executor = _executor(_anchor(gateway))
 
     async def fail_to_spawn() -> None:
         original = asyncio.create_subprocess_exec
@@ -697,7 +697,7 @@ def test_the_deadline_kills_descendants_and_returns_promptly() -> None:
     import time
 
     gateway, capability, target = _grant()
-    executor = _executor(gateway, deadline_seconds=0.5)
+    executor = _executor(_anchor(gateway), deadline_seconds=0.5)
 
     async def spawn_a_survivor() -> None:
         original = asyncio.create_subprocess_exec
@@ -751,7 +751,7 @@ def test_the_kill_switch_never_fires_at_this_process() -> None:
 def test_the_output_ceiling_is_enforced_while_reading_not_afterwards() -> None:
     """600 MiB reached the parent in 0.3s, and then it printed "discarded unread"."""
     gateway, capability, target = _grant()
-    executor = _executor(gateway, deadline_seconds=30)
+    executor = _executor(_anchor(gateway), deadline_seconds=30)
 
     async def flood() -> None:
         original = asyncio.create_subprocess_exec
@@ -838,7 +838,7 @@ def test_the_child_cannot_read_the_evidence_vault_or_the_audit_trail() -> None:
     (workspace / "vault.jsonl").write_text("sealed evidence")
 
     gateway = AuthorizationGateway(CapabilitySigningKey.generate(), identity=ACTORS)
-    executor = _executor(gateway, read_denied=(workspace,))
+    executor = _executor(_anchor(gateway), read_denied=(workspace,))
     # The probe runs from the job directory, as `run_confined` runs the real worker. Under read
     # confinement the interpreter scans its cwd for imports, so a probe launched from the repo
     # root — which the allowlist does not include — dies before it can test anything.
