@@ -344,6 +344,11 @@ async def run_pilot_demonstration(
             # authorization ledger. Reading any of them off disk needs no import, so the
             # import contracts alone would not keep a worker out of the investigation it
             # is acting for.
+            # Named, because the default now refuses. This is a demonstration that runs on
+            # whatever platform the reader has, including the Linux CI where `sandbox-exec`
+            # does not exist — a refusal there would hide the thing being demonstrated. A
+            # deployment says nothing here and gets the refusal.
+            allow_unsandboxed=True,
             read_denied=(root,),
         ),
         claims=claims,

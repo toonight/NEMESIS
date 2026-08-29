@@ -409,8 +409,16 @@ def test_a_worker_that_hangs_is_killed_and_recorded() -> None:
 
         assert result.outcome is EffectOutcome.FAILED
         assert "deadline" in result.detail
-        assert not result.external_contact_made
         assert not result.authorization.permitted
+        # `is None`, not falsy. This assertion used to read `not result.external_contact_made`,
+        # which accepts the lie: the record said `False` — *nothing left the system* — in the
+        # same breath as a detail saying nothing can say how far the worker got. A field that
+        # cannot express "unknown" reads as a positive finding, and a test that accepts either
+        # value cannot tell the two apart.
+        assert result.external_contact_made is None, (
+            "a killed worker cannot report that nothing left the system; nobody knows"
+        )
+        assert "nothing can say how far it got" in result.detail
 
     asyncio.run(stall())
 
@@ -463,6 +471,67 @@ def test_the_report_never_claims_more_than_the_platform_gave() -> None:
         assert report.address_space_bytes is None, "macOS cannot set RLIMIT_AS"
     assert report.cpu_seconds is not None
     assert report.file_size_bytes is not None
+
+
+def test_an_executor_built_with_no_argument_refuses_to_run_unconfined(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The default is the deployment-safe value, and it was the other one.
+
+    `allow_unsandboxed` defaulted to `True`, so on Linux an `IsolatedEffectsExecutor()` built
+    with no argument ran the operation in a plain subprocess with full network and filesystem
+    reach — recorded honestly as `network=NOT DENIED`, and overlookably. A deployment default
+    and a test default must not be the same value: the caller who most needs the refusal is the
+    one who never heard of the flag.
+
+    This mattered more from the moment the pilot was routed through the executor, because until
+    then the only caller was a demonstration that knew what it was doing.
+
+    The demonstrations and benchmarks now pass `allow_unsandboxed=True` by name, which is what
+    keeps this suite and CI running on Linux — and what makes the choice visible at the four
+    places that make it.
+    """
+    gateway, capability, target = _grant()
+    monkeypatch.setattr("nemesis.effects.isolation.sandbox_available", lambda: False)
+
+    result, report = asyncio.run(
+        IsolatedEffectsExecutor(_anchor(gateway)).perform(
+            _request(target, OperationClass.SIMULATION),
+            capability,
+            operation=OperationClass.SIMULATION,
+        )
+    )
+
+    assert result.outcome is EffectOutcome.REFUSED_UNAUTHORIZED
+    assert "kernel-enforced confinement" in result.detail
+    assert not report.separate_process, "nothing may have run"
+
+
+def test_a_deployment_can_choose_to_run_unconfined_by_saying_so(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other half: the flag still exists, and naming it still works.
+
+    A default that could not be overridden would be a default nobody could run the suite
+    under, and this repository's own history says what happens to a control that stops the
+    work — it gets removed rather than argued with.
+    """
+    gateway, capability, target = _grant()
+    monkeypatch.setattr("nemesis.effects.isolation.sandbox_available", lambda: False)
+
+    result, report = asyncio.run(
+        IsolatedEffectsExecutor(_anchor(gateway), allow_unsandboxed=True).perform(
+            _request(target, OperationClass.SIMULATION),
+            capability,
+            operation=OperationClass.SIMULATION,
+        )
+    )
+
+    assert result.outcome is not EffectOutcome.REFUSED_UNAUTHORIZED, result.detail
+    assert report.separate_process
+    assert not report.egress_denied_from_this_process, (
+        "a plain subprocess is not kernel confinement and the report must not say it is"
+    )
 
 
 def test_a_deployment_can_refuse_to_run_unconfined() -> None:

@@ -109,11 +109,17 @@ class EffectResult(BaseModel):
     content itself: artifacts go to the vault, not into an audit record."""
 
     reversible: bool = True
-    external_contact_made: bool = Field(
+    external_contact_made: bool | None = Field(
         default=False,
-        description="Whether anything actually left the system. False for every MVP "
-        "adapter. A test asserts this across the whole adapter registry, so the day it "
-        "becomes true is a deliberate, visible event.",
+        description="Whether anything actually left the system, or None when nobody can say. "
+        "False for every MVP adapter, and a test asserts that across the whole adapter "
+        "registry, so the day it becomes true is a deliberate and visible event. "
+        "**None is not a third kind of safe.** It is what a killed worker leaves: the record "
+        "used to say False — nothing left the system — in the same breath as a detail saying "
+        "nothing can say how far the child got, because the field could not express the one "
+        "thing that was true. Every reader treats None the way it treats True: "
+        "`is not False`, never a truthiness test, because a field that cannot say 'unknown' "
+        "reads as a positive finding and one that says it falsily is worse.",
     )
 
     @property

@@ -662,7 +662,13 @@ def _render_effect(console: Console, stage: EffectsStage) -> None:
             Text(result.operation.value),
             Text(result.outcome.value),
             Text(result.adapter_name),
-            Text(str(result.external_contact_made)),
+            # `None` prints as what it means rather than as a Python literal: nobody could
+            # say, which a reader must not skim as a quiet "False".
+            Text(
+                "unknown"
+                if result.external_contact_made is None
+                else str(result.external_contact_made)
+            ),
         )
     console.print(table)
     _field(
