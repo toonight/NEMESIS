@@ -40,7 +40,9 @@ from pydantic import ValidationError
 
 from nemesis.collect.quarantine import (
     AnalysisReport,
+    ArtifactAnalyser,
     ArtifactHandle,
+    StructuralAnalyser,
     analysis_payload,
 )
 from nemesis.collect.wire import decode_result
@@ -442,3 +444,43 @@ class ConfinedAnalyser:
             confined=confined,
             failure=why,
         )
+
+
+class ConfinedWhenReal:
+    """Examines real collected bytes in a child process, and fixtures in this one.
+
+    `ConfinedAnalyser` shipped with **no caller**, which is the defect this closes: the
+    pipeline that exists because collected bytes are hostile went on parsing them in the
+    process holding the graph, the claim store and an open vault, while `PROJECT_STATE.md`
+    said the analyser was confined. Building the control and not wiring it is the same failure
+    as not building it, with a worse label attached.
+
+    Wiring it unconditionally was measured first and rejected on the numbers: one child per
+    artifact took `nemesis demo` from 1.6s to 10.1s and the test suite from 54s to 207s, to
+    confine 74 artifacts of which **74 were fixtures**. Paying four times the suite to protect
+    synthetic bytes from themselves is how a control becomes the thing somebody removes.
+
+    So the rule is the one `collect_confined` already applies one step earlier: confinement
+    follows the *material*, not the caller. `handle.simulated` comes from
+    `provenance.is_simulated`, which a connector declares and no external content can reach.
+    Real bytes get a child and **require the kernel** — a plain subprocess is a boundary
+    against an accident and none against a parser exploit that means it, and refusing is
+    fail-closed here because a refused analysis leaves the artifact HELD.
+    """
+
+    def __init__(
+        self,
+        *,
+        confined: ArtifactAnalyser | None = None,
+        in_process: ArtifactAnalyser | None = None,
+    ) -> None:
+        self._confined = confined or ConfinedAnalyser(require_kernel_confinement=True)
+        self._in_process = in_process or StructuralAnalyser()
+
+    @property
+    def name(self) -> str:
+        return f"confined-when-real({self._confined.name}|{self._in_process.name})"
+
+    async def analyse(self, artifact: bytes, handle: ArtifactHandle) -> AnalysisReport:
+        chosen = self._in_process if handle.simulated else self._confined
+        return await chosen.analyse(artifact, handle)

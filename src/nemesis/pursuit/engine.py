@@ -29,11 +29,10 @@ import json
 from collections.abc import Callable, Sequence
 from datetime import datetime
 
-from nemesis.collect.isolation import collect_confined
+from nemesis.collect.isolation import ConfinedWhenReal, collect_confined
 from nemesis.collect.quarantine import (
     ArtifactAnalyser,
     Quarantine,
-    StructuralAnalyser,
     seal_when_released,
 )
 from nemesis.core.claims import Claim
@@ -136,7 +135,12 @@ class PursuitEngine:
         # it. `StructuralAnalyser` opens nothing and reports `confined=False`; a deployment
         # taking up the extension point supplies one that runs under a real sandbox.
         self._quarantine = quarantine if quarantine is not None else Quarantine()
-        self._analyser = analyser if analyser is not None else StructuralAnalyser()
+        # `ConfinedWhenReal`, not `StructuralAnalyser`. The confined analyser had no caller at
+        # all, so hostile bytes were still parsed beside the vault while the label said
+        # otherwise. Confinement follows the material: fixtures stay here, real bytes get a
+        # child that requires the kernel. Measured to cost this run nothing, because
+        # everything it seals is simulated.
+        self._analyser = analyser if analyser is not None else ConfinedWhenReal()
         # On by default, and on the same argument. `Register.incur` had no caller in `src/` at
         # all, so material carrying a legal clock was held and nothing opened — an engine that
         # opened obligations only when asked would keep that state for every caller who never

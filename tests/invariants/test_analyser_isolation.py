@@ -19,7 +19,7 @@ from typing import Any
 import pytest
 
 from nemesis.collect import isolation as isolation_module
-from nemesis.collect.isolation import ConfinedAnalyser
+from nemesis.collect.isolation import ConfinedAnalyser, ConfinedWhenReal
 from nemesis.collect.quarantine import (
     AnalysisReport,
     ArtifactAnalyser,
@@ -155,5 +155,68 @@ def test_an_analyser_that_cannot_be_built_keeps_the_declared_classification() ->
 
     assert report.failure is not None
     assert report.classification is ContentSafety.SENSITIVE_PERSONAL_DATA
+    with pytest.raises(QuarantineError, match="could not be analysed"):
+        quarantine.release(handle)
+
+
+# --- confinement follows the material -----------------------------------------
+
+
+@needs_sandbox
+def test_real_bytes_are_examined_in_a_child_and_fixtures_are_not() -> None:
+    """THE WIRING `ConfinedAnalyser` SHIPPED WITHOUT.
+
+    It had no caller at all: the pipeline that exists because collected bytes are hostile went
+    on parsing them in the process holding the graph, the claim store and an open vault, while
+    `PROJECT_STATE.md` said the analyser was confined. Building a control and not wiring it is
+    the same failure as not building it, with a worse label attached.
+
+    Wiring it unconditionally was measured and rejected: one child per artifact took the
+    reference run from 1.6s to 10.1s and the suite from 54s to 207s, to confine 74 artifacts of
+    which 74 were fixtures. So confinement follows the **material**, the way `collect_confined`
+    already decides one step earlier — and this test is the pair that says so, because either
+    half alone is a claim rather than a control.
+    """
+    quarantine = Quarantine()
+    analyser = ConfinedWhenReal()
+
+    fixture = quarantine.admit(b"<html>fixture</html>", simulated=True)
+    real = quarantine.admit(b"<html>collected from the world</html>", simulated=False)
+
+    fixture_report = asyncio.run(quarantine.analyse(fixture, analyser))
+    real_report = asyncio.run(quarantine.analyse(real, analyser))
+
+    assert real_report.confined is True, (
+        "material that came from the world was parsed in this process; that is the defect"
+    )
+    assert fixture_report.confined is False, (
+        "a fixture was confined, which costs the suite four times over for synthetic bytes"
+    )
+    assert real_report.failure is None, real_report.failure
+    assert fixture_report.failure is None, fixture_report.failure
+
+
+def test_real_bytes_are_held_rather_than_examined_unconfined() -> None:
+    """Fail-closed where the kernel cannot confine.
+
+    `ConfinedWhenReal` requires kernel confinement for real material, so on a platform that
+    cannot provide it the analysis *fails* — and a failed analysis leaves the artifact HELD,
+    which is the honest outcome. A plain subprocess is a boundary against an accident and none
+    against a parser exploit that means it.
+    """
+    quarantine = Quarantine()
+    analyser = ConfinedWhenReal(
+        confined=ConfinedAnalyser(require_kernel_confinement=True),
+    )
+    handle = quarantine.admit(b"collected", simulated=False)
+
+    if sandbox_available():
+        report = asyncio.run(quarantine.analyse(handle, analyser))
+        assert report.confined is True
+        return
+
+    report = asyncio.run(quarantine.analyse(handle, analyser))
+    assert report.failure is not None
+    assert quarantine.held() == (handle.artifact_id,)
     with pytest.raises(QuarantineError, match="could not be analysed"):
         quarantine.release(handle)

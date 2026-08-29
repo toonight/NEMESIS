@@ -19,7 +19,7 @@ import json
 import subprocess
 import sys
 import tempfile
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +30,7 @@ from nemesis.authz.gateway import AuthorizationGateway
 from nemesis.authz.keys import CapabilitySigningKey
 from nemesis.authz.providers import LocalDevelopmentIdentityProvider
 from nemesis.core.authorization import (
+    NO_CAPABILITY,
     AuthorizationCapability,
     LegalBasis,
     OperationClass,
@@ -42,10 +43,11 @@ from nemesis.effects.isolation import (
     IsolatedEffectsExecutor,
     sandbox_available,
 )
-from nemesis.effects.registry import preflight
+from nemesis.effects.registry import preflight, refusal_record
 from nemesis.effects.worker import FORBIDDEN_PREFIXES
 from nemesis.ports.authorization import TrustAnchor
-from nemesis.ports.effects import EffectOutcome, EffectRequest
+from nemesis.ports.effects import EffectOutcome, EffectRequest, EffectResult
+from nemesis.ports.isolation import IsolationReport
 
 pytestmark = pytest.mark.invariant
 
@@ -867,3 +869,58 @@ def test_the_child_cannot_read_the_evidence_vault_or_the_audit_trail() -> None:
     )
     assert "DENIED" in done.stdout, done.stdout + done.stderr
     assert "sealed evidence" not in done.stdout
+
+
+def test_a_child_that_cannot_say_is_not_recorded_as_having_made_no_contact() -> None:
+    """THE FIX OF #20, UNDONE ONE LEVEL DOWN AND PUT BACK.
+
+    `external_contact_made` was widened to `bool | None` so that a run which cannot say does
+    not assert safety. The parent then authored the record with
+    `contact_claimed = bool(result.external_contact_made)`, and `bool(None)` is `False` — so a
+    child that honestly reported "I cannot say" had that turned into "nothing left the system"
+    by the very process that exists to not believe the child.
+
+    It is the same mistake the widening was for, in the one place a widening does not reach: a
+    truthiness test. Every reader in this repository asks `is not False` for exactly this
+    reason.
+    """
+    gateway, capability, target = _grant()
+    executor = _executor(_anchor(gateway))
+    request = _request(target, OperationClass.SIMULATION)
+    check = preflight(
+        request, capability, operation=OperationClass.SIMULATION, anchor=_anchor(gateway)
+    )
+
+    undetermined = EffectResult(
+        operation_id=request.operation_id,
+        operation=OperationClass.SIMULATION,
+        outcome=EffectOutcome.SIMULATED,
+        executed_at=datetime.now(UTC),
+        adapter_name="worker-that-cannot-say",
+        authorization=refusal_record(
+            request,
+            operation=OperationClass.SIMULATION,
+            capability_id=NO_CAPABILITY,
+            now=datetime.now(UTC),
+            reasons=("authored by the parent below",),
+        ),
+        detail="the worker finished but cannot say whether anything left",
+        external_contact_made=None,
+    )
+    stdout = json.dumps({"result": json.loads(undetermined.model_dump_json())}).encode()
+
+    authored, report = executor._interpret(
+        request,
+        OperationClass.SIMULATION,
+        stdout,
+        b"",
+        IsolationReport(mechanism="sandbox-exec", separate_process=True, network_denied=True),
+        check=check,
+    )
+
+    assert authored.external_contact_made is None, (
+        "the parent flattened the child's 'I cannot say' into 'nothing left the system'"
+    )
+    assert report.contact_claimed_by_worker is True, (
+        "a run nobody can vouch for must not read as one that vouched for itself"
+    )

@@ -28,6 +28,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from pydantic import ValidationError
 
+from nemesis.collect.quarantine import StructuralAnalyser
 from nemesis.core.claims import Claim, ClaimKind, DerivationKind, Statement
 from nemesis.core.confidence import ConfidenceBand, band_of
 from nemesis.core.entities import Entity, EntityType
@@ -417,6 +418,12 @@ def _engine(
         vault=vault or FakeVault(),
         audit=audit or FakeAudit(),
         connectors=ConnectorRegistry(connectors),
+        # Named, because the engine's default confines by material and these fixtures declare
+        # themselves real. `ConfinedWhenReal` would then require the kernel — correctly, and
+        # fail-closed where it is absent, which on the Linux CI would hold every artifact and
+        # make these tests assert the confinement rather than the pursuit logic they are about.
+        # A deployment gets the default; this suite says what it wants.
+        analyser=StructuralAnalyser(),
         actor=ANALYST,
         clock=lambda: NOW,
     )

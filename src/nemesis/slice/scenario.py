@@ -131,11 +131,10 @@ from nemesis.collect.fixtures.glass_anvil import (
     WALLET_SECOND,
     phase_one_detection,
 )
-from nemesis.collect.isolation import collect_confined
+from nemesis.collect.isolation import ConfinedWhenReal, collect_confined
 from nemesis.collect.quarantine import (
     ArtifactAnalyser,
     Quarantine,
-    StructuralAnalyser,
     seal_when_released,
 )
 from nemesis.collect.simulated import simulated_connectors
@@ -816,7 +815,12 @@ class _Context:
     wrong."""
 
     quarantine: Quarantine = field(default_factory=Quarantine)
-    analyser: ArtifactAnalyser = field(default_factory=StructuralAnalyser)
+    # `ConfinedWhenReal`, not `StructuralAnalyser`. The confined analyser had no caller at
+    # all, so hostile bytes were still parsed beside the vault while the label said
+    # otherwise. Confinement follows the material: fixtures stay here, real bytes get a
+    # child that requires the kernel. Measured to cost this run nothing, because
+    # everything it seals is simulated.
+    analyser: ArtifactAnalyser = field(default_factory=ConfinedWhenReal)
     # Defaulted for the same reason the quarantine beside it is: a demonstration that opened
     # an obligation only when asked would be one that does not, and the reader who most needs
     # to see the backlog is the one who never heard of the register.
