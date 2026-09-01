@@ -7,11 +7,11 @@ requires-python = ">=3.13"
 license = "LicenseRef-Nemesis-Source-Available"
 license-files = ["LICENSE"]
 dependencies = [
-    "pydantic>=2.11",
+    "pydantic>=2.13.5",
     "annotated-types>=0.7",
     # Ed25519 signing for authorization capabilities and evidence-vault log heads.
     # Used only in nemesis.authz and nemesis.evidence; core stays dependency-light.
-    "cryptography>=44.0",
+    "cryptography>=50.0.1",
 ]
 
 [project.optional-dependencies]
@@ -20,7 +20,7 @@ api = [
     "uvicorn[standard]>=0.52.4",
 ]
 cli = [
-    "typer>=0.15",
+    "typer>=0.27.2",
     "rich>=13.9",
 ]
 darkweb = [
@@ -34,8 +34,8 @@ dev = [
     "pytest-cov>=6.0",
     "hypothesis>=6.165.10",
     "mypy>=1.14",
-    "ruff>=0.9",
-    "import-linter>=2.1",
+    "ruff>=0.16.5",
+    "import-linter>=2.14",
     "httpx>=0.28",
     # Required, despite never appearing in an `import` here. Starlette's TestClient
     # deprecates httpx in favour of httpx2, and this project turns warnings into errors,
