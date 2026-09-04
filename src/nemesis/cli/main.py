@@ -1913,20 +1913,26 @@ def view(
     file, and production value reads as confidence.
     """
     from nemesis.ui import render_investigation
+    from nemesis.ui.ledger import stage_ledger
 
     console = Console()
     result = run_glass_anvil_scenario(workspace=workspace)
     destination = output or Path("investigation.html")
+    # The rail is drawn from a typed ledger of counts and flags, never from the scenario: the
+    # renderer's inputs stay narrow so an internal lead has no field to leave through.
+    marks = stage_ledger(result)
     destination.write_text(
         render_investigation(
             result.attribute.result,
             stages=tuple(name for name, _ in result.stages()),
+            marks=marks,
         ),
         encoding="utf-8",
     )
     _heading(console, "ANALYST VIEW")
     _field(console, "written", str(destination.resolve()))
     _field(console, "dimensions", str(len(result.attribute.result.assessments)))
+    _field(console, "stages on the rail", str(len(marks)))
     _field(console, "self-contained", "no external fonts, no scripts, no network")
     console.print()
     console.print(Text("  Open it in a browser. Nothing on the page is calibrated.", style="dim"))
