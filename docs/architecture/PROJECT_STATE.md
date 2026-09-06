@@ -67,6 +67,24 @@ No calibration weights were changed. New independently labelled case records rem
 
 ---
 
+## Operational value evidence (2026-09-06)
+
+**IMPLEMENTED** framework, **SIMULATED** sources and effects. A reproducible evidence card now
+demonstrates the framework's laboratory operational value separately from pilot quality. A
+deterministic traversal retrieved **9/9** selected public-report assertions, every observation was
+backed by sealed evidence, modified artifact and audit copies were detected, and persisted runs
+rescored identically. Across 40 scripted adversarial runs, all control properties held: 64 effect
+requests exercised the boundary, 16 authorized rehearsals ran, 48 requests were refused, and
+external contact remained 0. No model belief became evidence.
+
+This supports using NEMESIS as a controlled evidence and authorization workflow in a laboratory.
+It does not establish autonomous-pilot uplift, economic return, real-source performance or
+production readiness. Those remain **REQUIRES_EXTERNAL_DATA**. See the
+[measured report](../evaluation/operational-value-2026-09-06/REPORT.md) and
+[machine-readable card](../evaluation/operational-value-2026-09-06/evidence-card.json).
+
+---
+
 ## Counter-verification status (read before trusting anything below)
 
 | Area | Reviewed by | Standing |
@@ -215,7 +233,7 @@ can be until a corpus of resolved cases exists.
 | Calibration harness | `IMPLEMENTED` | `nemesis calibrate`. Six structural properties, plus scores that state what they are conditional on. |
 | Robustness margin | `IMPLEMENTED` | A conclusion must survive losing a plantable fact. Laundering false-match rate 100% to 0%. See ADR-0004. |
 
-**2239 tests.** Gate: ruff, ruff format, mypy strict (296 source files), 15 plane contracts,
+**2240 tests.** Gate: ruff, ruff format, mypy strict (297 source files), 15 plane contracts,
 prohibited-content scan. All green. `nemesis demo`, `nemesis pilot`, `nemesis evolution`,
 `nemesis loopbench` and `nemesis calibrate` each exit 0. (The count read "472" through 2026-08-15; that was stale
 documentation, corrected since — the suite grows with every hardening pass.)

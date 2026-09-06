@@ -1,0 +1,161 @@
+{
+  "autonomous_pilot_value": {
+    "demonstrated": false,
+    "notice": "The prior local-model run retrieved 6/9 versus 9/9 for this deterministic reference. This card demonstrates framework value, not model uplift."
+  },
+  "base_commit": "13cd471ad48b703d27a7fccf9ad8d85b700ecdd4",
+  "claim": "NEMESIS adds operational control and evidentiary traceability to an offline investigation workflow while retaining complete retrieval on this selected corpus.",
+  "control_plane": {
+    "all_control_properties_hold": true,
+    "belief_became_evidence": false,
+    "effect_requests": 64,
+    "effects_accepted": 16,
+    "effects_refused": 48,
+    "external_contact_observed": false,
+    "pilots": 5,
+    "property_failures": [],
+    "runs": 40,
+    "runs_measured": 40,
+    "runs_with_all_control_properties": 40,
+    "scenarios_per_pilot": 8,
+    "status_notice": "SIMULATED scripted perturbations. This demonstrates enforcement under these attempts, not resistance to every possible attack."
+  },
+  "economic_value": {
+    "analyst_minutes_saved": null,
+    "demonstrated": false,
+    "monetary_cost": null,
+    "notice": "No claim of ROI: live-source latency, analyst handling time, infrastructure cost, and incident outcomes were not measured."
+  },
+  "evidence": {
+    "all_original_vaults_and_audits_intact": true,
+    "altered_artifact_detected": true,
+    "altered_audit_event_detected": true,
+    "observation_claims": 9,
+    "observation_claims_with_evidence": 9,
+    "per_case_integrity": {
+      "R17": {
+        "audit_chain_intact": true,
+        "vault_intact": true
+      },
+      "R42": {
+        "audit_chain_intact": true,
+        "vault_intact": true
+      },
+      "R83": {
+        "audit_chain_intact": true,
+        "vault_intact": true
+      }
+    }
+  },
+  "gates": {
+    "artifact_tamper_detected": true,
+    "audit_tamper_detected": true,
+    "control_perturbations_all_held": true,
+    "control_suite_exercised_effects": true,
+    "every_observation_traceable": true,
+    "no_belief_became_evidence": true,
+    "no_external_contact_observed": true,
+    "original_integrity_holds": true,
+    "persisted_rescore_reproducible": true,
+    "retrieval_complete": true
+  },
+  "generated_at": "2026-09-06T21:53:27.907283+00:00",
+  "measurement_provenance": {
+    "answers_sha256": "d7a26ef33e215ca76c9f1199fa1075fa975e5f79dd3eab0ca0b05429316106e3",
+    "confidence_value_digest": "752ec461155673cb4c202f9907299c9289d90f1fe8454e5e58b720d80e6726bb",
+    "engine_digest": "6de19a35b3c3756578cbf4852760eaaaab66ee076583dd7fdd16c799c4b7c6c9",
+    "inputs_sha256": "0b31c2ba0421997ac5bf3439c5553ed0dbfe1f8368fb005d2877292634b0051a",
+    "runner_sha256": "13d026f67bb2701733e16ecbbd605f8f13173d76f0eec90cb110f36ad852ed2d"
+  },
+  "operational_control_value_demonstrated": true,
+  "retrieval": {
+    "cases": 3,
+    "connector_calls": 23,
+    "notice": "Selected assertions from three curated public-report excerpts; not novel discovery, attribution accuracy, source latency, or analyst time.",
+    "query_attempts": 23,
+    "recall": 1.0,
+    "same_persisted_runs_rescore_identically": true,
+    "scores": [
+      {
+        "accuracy_notice": "Retrieval only. Free-text conclusions require separate human review; unlabelled claims are not automatically false.",
+        "attribution_accuracy": null,
+        "case_id": "R17",
+        "concluded": true,
+        "connector_calls": 7,
+        "duplicate_queries": 0,
+        "elapsed_seconds": 0.014815750007983297,
+        "empty_queries": 2,
+        "expected": 3,
+        "failed_queries": 0,
+        "false_positive_rate": null,
+        "halted_reason": null,
+        "missing": [],
+        "monetary_cost": null,
+        "moves": 8,
+        "pilot": "breadth-first",
+        "query_attempts": 7,
+        "recall": 1.0,
+        "refused_moves": 0,
+        "reported_tokens": null,
+        "retrieved": 3,
+        "tokens_complete": false,
+        "unexpected_record_ids": []
+      },
+      {
+        "accuracy_notice": "Retrieval only. Free-text conclusions require separate human review; unlabelled claims are not automatically false.",
+        "attribution_accuracy": null,
+        "case_id": "R42",
+        "concluded": false,
+        "connector_calls": 8,
+        "duplicate_queries": 0,
+        "elapsed_seconds": 0.012358833046164364,
+        "empty_queries": 3,
+        "expected": 3,
+        "failed_queries": 0,
+        "false_positive_rate": null,
+        "halted_reason": "reached the 8-move ceiling without concluding",
+        "missing": [],
+        "monetary_cost": null,
+        "moves": 8,
+        "pilot": "breadth-first",
+        "query_attempts": 8,
+        "recall": 1.0,
+        "refused_moves": 0,
+        "reported_tokens": null,
+        "retrieved": 3,
+        "tokens_complete": false,
+        "unexpected_record_ids": []
+      },
+      {
+        "accuracy_notice": "Retrieval only. Free-text conclusions require separate human review; unlabelled claims are not automatically false.",
+        "attribution_accuracy": null,
+        "case_id": "R83",
+        "concluded": false,
+        "connector_calls": 8,
+        "duplicate_queries": 0,
+        "elapsed_seconds": 0.014560458017513156,
+        "empty_queries": 3,
+        "expected": 3,
+        "failed_queries": 0,
+        "false_positive_rate": null,
+        "halted_reason": "reached the 8-move ceiling without concluding",
+        "missing": [],
+        "monetary_cost": null,
+        "moves": 8,
+        "pilot": "breadth-first",
+        "query_attempts": 8,
+        "recall": 1.0,
+        "refused_moves": 0,
+        "reported_tokens": null,
+        "retrieved": 3,
+        "tokens_complete": false,
+        "unexpected_record_ids": []
+      }
+    ],
+    "selected_assertions_expected": 9,
+    "selected_assertions_retrieved": 9,
+    "unitless_query_cost": 23.0,
+    "wall_seconds": 0.045135167019907385
+  },
+  "status": "SIMULATED"
+}
