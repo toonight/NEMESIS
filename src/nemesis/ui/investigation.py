@@ -77,6 +77,7 @@ from nemesis.attribute.disclosure import DELIVERABLE_DIMENSIONS
 from nemesis.attribute.engine import AttributionResult
 from nemesis.core.confidence import BAND_RANGES, ConfidenceBand, Opinion
 from nemesis.core.fusion import summarize_fact
+from nemesis.ui.claim_details import ClaimDetail, EvidenceDetail
 from nemesis.ui.rail import Phase, StageMark, meta_for
 
 SIMULATED_NOTICE: Final = (
@@ -263,9 +264,68 @@ def _gap(gap: MissingEvidence) -> str:
     )
 
 
-def _claim_ref(claim_id: str) -> str:
+def _claim_ref(claim_id: str, *, delta: float | None = None) -> str:
     shown = claim_id if len(claim_id) <= 28 else f"{claim_id[:26]}…"
-    return f'<li><code class="clm" title="{_e(claim_id)}">{_e(shown)}</code></li>'
+    contribution = (
+        f'<span class="contribution">{delta * 100:+.2f} percentage points '
+        "compared with removing this signal</span>"
+        if delta is not None
+        else '<span class="contribution">Contribution not measured</span>'
+    )
+    return (
+        f'<li><a class="clm" href="#claim-{_e(claim_id)}" title="{_e(claim_id)}">'
+        f"{_e(shown)}</a>{contribution}</li>"
+    )
+
+
+def _evidence_detail(item: EvidenceDetail) -> str:
+    origin = f"Origin {item.origin_number}" if item.origin_number is not None else "Origin unknown"
+    status = "SIMULATED" if item.is_simulated else "IMPLEMENTED"
+    influence = (
+        "adversary-influenceable" if item.adversary_influenceable else "not adversary-authored"
+    )
+    return (
+        '<li class="evidence-record">'
+        f'<p><span class="chip">{status}</span> Source {item.source_number} · '
+        f"{_e(item.source_class.value.replace('_', ' '))} · "
+        f"reliability {_e(item.reliability.value)}"
+        f" · {origin} · {influence}</p>"
+        f"<p>Preserved reference <code>{_e(item.evidence_id)}</code></p>"
+        f"<p>Collected at {_e(item.collected_at.isoformat())}; "
+        f"{item.custody_events} custody events, {item.processing_steps} processing steps. "
+        f"Lossy processing: {'yes' if item.lossy_processing else 'no'}; "
+        f"model processing: {'yes' if item.model_processed else 'no'}.</p></li>"
+    )
+
+
+def _claim_detail(item: ClaimDetail) -> str:
+    if item.withheld:
+        content = "<p>Claim detail withheld by the portable view's disclosure rules.</p>"
+    elif item.statement is None:
+        content = (
+            "<p>Claim record unavailable. The absence of a record is not evidence against "
+            "the claim.</p>"
+        )
+    else:
+        evidence = "".join(_evidence_detail(e) for e in item.evidence)
+        content = (
+            f'<p class="hypothesis">{_e(item.statement)}</p>'
+            f"<p>{_e(item.kind.value if item.kind else 'unknown')} · "
+            f"{_e(item.derivation.value if item.derivation else 'unknown')} · "
+            f"recorded {_e(item.asserted_at)}</p>"
+            f"<p>Observed from {_e(item.observed_from)} to {_e(item.observed_until)}.</p>"
+            + (
+                f'<ul class="evidence-records">{evidence}</ul>'
+                if evidence
+                else "<p>No directly cited preserved artifact is available in this view.</p>"
+            )
+            + f"<p>{item.missing_evidence} cited artifacts unavailable; "
+            f"{item.premise_count} premise claims (their records are not included here).</p>"
+        )
+    return (
+        f'<article class="claim-record" id="claim-{_e(item.claim_id)}" tabindex="-1">'
+        f"<h3>Claim <code>{_e(item.claim_id)}</code></h3>{content}</article>"
+    )
 
 
 def _facet(title: str, body: str, kind: str, *, empty: bool) -> str:
@@ -311,12 +371,26 @@ def _assessment(item: DimensionAssessment) -> str:
             "</div>"
         )
 
-    contradicting = "".join(_claim_ref(claim) for claim in item.contradicting_claims)
+    contributions = {
+        signal.claim_id: signal.delta_projected for signal in item.signal_contributions
+    }
+    supporting = "".join(
+        _claim_ref(claim, delta=contributions.get(claim)) for claim in item.supporting_claims
+    )
+    contradicting = "".join(
+        _claim_ref(claim, delta=contributions.get(claim)) for claim in item.contradicting_claims
+    )
     alternatives = "".join(_alternative(alt) for alt in item.alternatives)
     missing = "".join(_gap(gap) for gap in item.missing_evidence)
 
     facets = (
         _facet(
+            "Supporting",
+            f'<ul class="claims">{supporting}</ul>',
+            "support",
+            empty=not item.supporting_claims,
+        )
+        + _facet(
             "Contradicting",
             f'<ul class="claims">{contradicting}</ul>',
             "against",
@@ -345,7 +419,7 @@ def _assessment(item: DimensionAssessment) -> str:
         + "".join(blocks)
         + _opinion_bar(item.opinion, ghost=item.evidential_opinion)
         + _sources(item.source_diversity, item.temporal_consistency)
-        + '<details class="why"><summary>Why NEMESIS says this</summary>'
+        + '<details class="why" open><summary>Why NEMESIS says this</summary>'
         f'<p class="reasoning">{_e(item.reasoning)}</p>'
         f'<p class="counts">{supports} supporting claim{"" if supports == 1 else "s"}, '
         f"{contradicts} contradicting</p>"
@@ -758,6 +832,17 @@ footer{margin-top:64px;border-top:1px solid var(--rule);padding-top:16px;
   .dim-head{align-items:flex-start;flex-direction:column}
 }
 
+.claims a{color:var(--belief-hi);text-decoration:underline;text-underline-offset:3px}
+.claims a:focus-visible{outline:2px solid var(--alarm);outline-offset:4px}
+.contribution{display:block;margin-top:4px;color:var(--bone-dim);font-size:12px}
+.claim-record{border:1px solid var(--rule);padding:20px;margin-top:16px;scroll-margin-top:24px}
+.claim-record:target{border-color:var(--alarm);outline:1px solid var(--alarm)}
+.claim-record h3{font-size:14px}
+.claim-record code{overflow-wrap:anywhere}
+.evidence-records{padding-left:20px}
+.evidence-record{padding:8px 0;border-top:1px solid var(--rule)}
+.claim-record p{line-height:1.65}
+
 /* ---- print: a case file is a thing that gets printed ---- */
 @media print{
   :root{--ink:#fff;--ink2:#fff;--ink3:#f4f4f4;--rule:#bbb;--rule2:#999;--bone:#111;--bone-dim:#444;
@@ -785,6 +870,7 @@ def render_investigation(
     *,
     stages: tuple[str, ...] = (),
     marks: tuple[StageMark, ...] = (),
+    claims: tuple[ClaimDetail, ...] = (),
     generated_at: datetime | None = None,
 ) -> str:
     """One self-contained HTML page for one investigation.
@@ -805,6 +891,28 @@ def render_investigation(
     stations = marks or tuple(StageMark(name=name) for name in stages)
     rail = _rail(stations)
     dims = "".join(_assessment(item) for item in shown)
+    supplied = {claim.claim_id: claim for claim in claims}
+    referenced = dict.fromkeys(
+        claim_id
+        for item in shown
+        for claim_id in (*item.supporting_claims, *item.contradicting_claims)
+    )
+    claim_records = "".join(
+        _claim_detail(supplied.get(claim_id, ClaimDetail(claim_id=claim_id)))
+        for claim_id in referenced
+    )
+    claim_section = (
+        '<h2 class="section">Claims and provenance</h2>'
+        '<p class="sub">Entity keys and source identifiers are withheld. '
+        "Numbered entities, sources and origins are "
+        "references within this file. A shared origin records dependence; different origins "
+        "do not prove independence. Unknown origins must not be counted as independent. "
+        "Signal contributions are changes in projected probability, not additive weights. "
+        "Artifact bytes are not embedded.</p>"
+        f'<div class="claim-records">{claim_records}</div>'
+        if referenced
+        else ""
+    )
 
     shipped = {item.dimension for item in shown}
     # Withheld is not silent. Each withheld dimension is reported with the *band it reached*
@@ -873,6 +981,7 @@ def render_investigation(
 <h2 class="section">Attribution &mdash; each dimension separately</h2>
 <div class="dims">{dims}</div>
 {withheld_block}
+{claim_section}
 
 <footer>
   There is deliberately no overall figure. A weighted mean of these dimensions would be

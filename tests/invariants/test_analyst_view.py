@@ -29,7 +29,7 @@ from nemesis.collect.fixtures.glass_anvil import (
 from nemesis.core.confidence import BAND_RANGES, ConfidenceBand
 from nemesis.slice.scenario import STAGE_NAMES, ScenarioResult, run_glass_anvil_scenario
 from nemesis.ui.investigation import SIMULATED_NOTICE, render_investigation
-from nemesis.ui.ledger import FACT_LABELS, STAGE_META, StageMark, stage_ledger
+from nemesis.ui.ledger import FACT_LABELS, STAGE_META, StageMark, claim_ledger, stage_ledger
 
 pytestmark = pytest.mark.invariant
 
@@ -53,6 +53,7 @@ def page(scenario: ScenarioResult, marks: tuple[StageMark, ...]) -> str:
         scenario.attribute.result,
         stages=tuple(name for name, _ in scenario.stages()),
         marks=marks,
+        claims=claim_ledger(scenario),
     )
 
 
@@ -300,3 +301,125 @@ def test_missing_evidence_carries_its_availability_label(
 def test_motion_is_opt_out_and_the_file_prints(page: str) -> None:
     assert "prefers-reduced-motion" in page
     assert "@media print" in page
+
+
+def test_every_disclosed_claim_has_a_link_and_a_readable_record(scenario):
+    from nemesis.attribute.disclosure import DELIVERABLE_DIMENSIONS
+    from nemesis.ui.ledger import claim_ledger
+
+    details = claim_ledger(scenario)
+    rendered = render_investigation(scenario.attribute.result, claims=details)
+    for item in scenario.attribute.result.assessments:
+        if item.dimension not in DELIVERABLE_DIMENSIONS:
+            continue
+        for claim_id in (*item.supporting_claims, *item.contradicting_claims):
+            assert f'href="#claim-{claim_id}"' in rendered
+            assert rendered.count(f'id="claim-{claim_id}"') == 1
+    assert "Supporting" in rendered
+    assert "Collected at" in rendered
+    assert "Source 1" in rendered
+    assert "Origin" in rendered
+    assert "percentage points" in rendered
+    assert any(detail.evidence for detail in details)
+    for detail in details:
+        for evidence in detail.evidence:
+            assert evidence.evidence_id in rendered
+
+
+def test_claim_records_do_not_forward_raw_prose_or_source_identities(scenario):
+    from nemesis.ui.ledger import claim_ledger
+
+    rendered = render_investigation(scenario.attribute.result, claims=claim_ledger(scenario))
+    for marker in (NAMED_PERSON, PERSONA_CURRENT, "human_identity_lead", "same_operator_as"):
+        assert marker.lower() not in rendered.lower()
+    assert "vault_locator" not in rendered
+    assert "source identifiers are withheld" in rendered.lower()
+
+
+def test_an_unavailable_claim_is_named_as_unavailable(scenario):
+    rendered = render_investigation(scenario.attribute.result)
+    assert "Claim record unavailable" in rendered
+    assert "absence of a record is not evidence against the claim" in rendered.lower()
+
+
+@pytest.mark.parametrize("restriction", ["content", "source"])
+def test_restricted_evidence_withholds_the_entire_claim_record(scenario, monkeypatch, restriction):
+    from nemesis.core.evidence import ContentSafety
+
+    original = scenario.stores.vault.get
+
+    async def restricted(evidence_id):
+        evidence = await original(evidence_id)
+        if evidence is None:
+            return None
+        if restriction == "content":
+            return evidence.model_copy(update={"content_safety": ContentSafety.LEGALLY_RESTRICTED})
+        source = evidence.provenance.source.model_copy(
+            update={"handling_restrictions": ("TLP:RED",)}
+        )
+        return evidence.model_copy(
+            update={"provenance": evidence.provenance.model_copy(update={"source": source})}
+        )
+
+    monkeypatch.setattr(scenario.stores.vault, "get", restricted)
+    details = claim_ledger(scenario)
+    assert details
+    assert all(detail.withheld for detail in details)
+    assert all(detail.statement is None and not detail.evidence for detail in details)
+
+
+def test_private_source_names_and_raw_prose_never_enter_claim_details(scenario, monkeypatch):
+    private_marker = "PRIVATE-SOURCE-AND-PROSE"
+    get_evidence = scenario.stores.vault.get
+    get_claim = scenario.stores.claims.get
+
+    async def evidence_with_private_source(evidence_id):
+        evidence = await get_evidence(evidence_id)
+        if evidence is None:
+            return None
+        source = evidence.provenance.source.model_copy(
+            update={
+                "identifier": private_marker,
+                "operator": private_marker,
+                "upstream_of_record": private_marker,
+            }
+        )
+        return evidence.model_copy(
+            update={
+                "summary": private_marker,
+                "vault_locator": private_marker,
+                "provenance": evidence.provenance.model_copy(update={"source": source}),
+            }
+        )
+
+    async def claim_with_private_prose(claim_id):
+        claim = await get_claim(claim_id)
+        if claim is None:
+            return None
+        statement = claim.statement.model_copy(
+            update={
+                "natural_language": private_marker,
+                "qualifiers": {"private_marker": private_marker},
+            }
+        )
+        return claim.model_copy(update={"statement": statement, "notes": private_marker})
+
+    monkeypatch.setattr(scenario.stores.vault, "get", evidence_with_private_source)
+    monkeypatch.setattr(scenario.stores.claims, "get", claim_with_private_prose)
+    details = claim_ledger(scenario)
+    assert any(detail.evidence for detail in details)
+    assert private_marker not in " ".join(detail.model_dump_json() for detail in details)
+
+
+def test_unreferenced_claims_cannot_be_added_to_the_portable_page(scenario):
+    from nemesis.core.ids import IdPrefix, content_id
+    from nemesis.ui.claim_details import ClaimDetail
+
+    extra = ClaimDetail(
+        claim_id=content_id(IdPrefix.CLAIM, b"unreferenced"), statement=NAMED_PERSON
+    )
+    rendered = render_investigation(
+        scenario.attribute.result, claims=(*claim_ledger(scenario), extra)
+    )
+    assert extra.claim_id not in rendered
+    assert NAMED_PERSON not in rendered

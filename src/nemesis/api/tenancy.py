@@ -22,8 +22,8 @@ that could reach across.
 place the assurance ceiling comes from, and for the same reason. An assertion carrying its own
 tenant field would be a caller-supplied value, and a caller-supplied value is an
 attacker-supplied one: a single edited string and they are in another customer's graph.
-Registering a second issuer for a second tenant is therefore the whole of multi-tenant
-configuration, and there is no way to obtain an identity for a tenant nobody registered.
+Registering an issuer binds its identities to a tenant. The deployment must also register
+that tenant's investigation and claim stores; issuer registration alone grants no data access.
 
 **Honest scope.** This isolates the *stores this registry hands out*. It is not a guarantee
 about a shared SQLite file, an operator with disk access, or a bug in a store implementation
@@ -34,7 +34,7 @@ which is the one that actually happens.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Final
 
 from nemesis.core.identity import DEFAULT_TENANT, Principal
@@ -74,6 +74,15 @@ class TenantStores[StoreT]:
         self._factory = factory
         self._strict = strict
         self._stores: dict[str, StoreT] = {}
+
+    @classmethod
+    def from_mapping(cls, stores: Mapping[str, StoreT]) -> TenantStores[StoreT]:
+        """Register an explicit set of stores and refuse every other tenant."""
+        registered = dict(stores)
+        registry = cls(registered.__getitem__, strict=True)
+        for tenant in registered:
+            registry.register(tenant)
+        return registry
 
     def register(self, tenant: str) -> StoreT:
         """Serve a tenant from now on, and return its store."""

@@ -1913,7 +1913,7 @@ def view(
     file, and production value reads as confidence.
     """
     from nemesis.ui import render_investigation
-    from nemesis.ui.ledger import stage_ledger
+    from nemesis.ui.ledger import claim_ledger, stage_ledger
 
     console = Console()
     result = run_glass_anvil_scenario(workspace=workspace)
@@ -1926,6 +1926,7 @@ def view(
             result.attribute.result,
             stages=tuple(name for name, _ in result.stages()),
             marks=marks,
+            claims=claim_ledger(result),
         ),
         encoding="utf-8",
     )

@@ -13,15 +13,29 @@ that crosses, made deliberately narrow:
 - A mark carries **integers and booleans only**, under labels chosen in code from the closed
   registry in :mod:`nemesis.ui.rail`. There is no free-text field. A persona, a domain, a name
   or a fingerprint has nowhere to travel, and a test dumps every mark to JSON and looks.
-- The scenario is read in one function, :func:`stage_ledger`, and nowhere else in
-  ``nemesis.ui``. The renderer imports :mod:`nemesis.ui.rail`, not this module, so it cannot
-  reach the scenario even by accident.
+- :func:`claim_ledger` separately projects referenced claims into portable records. Entity
+  and source identities become numbered references; raw prose and artifacts stay in the
+  stores. The renderer imports only the value types, never this scenario-reading module.
 
 Status: `IMPLEMENTED` over the `SIMULATED` reference scenario.
 """
 
 from __future__ import annotations
 
+import asyncio
+
+from nemesis.attribute.disclosure import DELIVERABLE_DIMENSIONS
+from nemesis.attribute.engine import AttributionResult
+from nemesis.core.disclosure import (
+    DisclosureClass,
+    disclosure_of_entity,
+    scan_for_internal_material,
+)
+from nemesis.core.evidence import ContentSafety
+from nemesis.core.relationships import RelationType
+from nemesis.evidence.lineage import EvidenceReader
+from nemesis.ports.storage import ClaimStore
+from nemesis.pursuit.materialize import parse_reference
 from nemesis.slice.scenario import (
     AttributionStage,
     AuthorizationStage,
@@ -37,6 +51,7 @@ from nemesis.slice.scenario import (
     ResurgenceStage,
     ScenarioResult,
 )
+from nemesis.ui.claim_details import ClaimDetail, EvidenceDetail
 from nemesis.ui.rail import (
     FACT_FORMS,
     FACT_LABELS,
@@ -46,6 +61,125 @@ from nemesis.ui.rail import (
     StageMeta,
     meta_for,
 )
+
+
+async def inspect_claims(
+    attribution: AttributionResult, claims: ClaimStore, vault: EvidenceReader
+) -> tuple[ClaimDetail, ...]:
+    """Project referenced claims through the portable view's disclosure boundary.
+
+    Only recognized, deliverable entity triples are printed, with numbered entities.
+    Raw prose, entity keys, qualifiers,
+    source identities, locators and artifact bytes never enter the projection. Numbered
+    source/origin references preserve dependence without disclosing who the sources are.
+    Evidence under handling restrictions is withheld, including the associated statement.
+    """
+    claim_ids = dict.fromkeys(
+        claim_id
+        for item in attribution.assessments
+        if item.dimension in DELIVERABLE_DIMENSIONS
+        for claim_id in (*item.supporting_claims, *item.contradicting_claims)
+    )
+    source_numbers: dict[tuple[str, str, str | None], int] = {}
+    origin_numbers: dict[str, int] = {}
+    entity_numbers: dict[tuple[str, str], int] = {}
+    details: list[ClaimDetail] = []
+    for claim_id in claim_ids:
+        claim = await claims.get(claim_id)
+        if claim is None:
+            details.append(ClaimDetail(claim_id=claim_id))
+            continue
+        subject = parse_reference(claim.statement.subject)
+        obj = parse_reference(claim.statement.obj)
+        try:
+            relation = RelationType(claim.statement.predicate)
+        except ValueError:
+            relation = None
+        if (
+            subject is None
+            or obj is None
+            or relation is None
+            or disclosure_of_entity(subject.entity_type) is not DisclosureClass.DELIVERABLE
+            or disclosure_of_entity(obj.entity_type) is not DisclosureClass.DELIVERABLE
+            or relation in {RelationType.SAME_OPERATOR_AS, RelationType.ALIAS_OF}
+        ):
+            details.append(ClaimDetail(claim_id=claim_id, withheld=True))
+            continue
+        if scan_for_internal_material({"subject": subject.natural_key, "object": obj.natural_key}):
+            details.append(ClaimDetail(claim_id=claim_id, withheld=True))
+            continue
+        subject_number = entity_numbers.setdefault(
+            (subject.entity_type.value, subject.natural_key), len(entity_numbers) + 1
+        )
+        object_number = entity_numbers.setdefault(
+            (obj.entity_type.value, obj.natural_key), len(entity_numbers) + 1
+        )
+        statement = (
+            f"{subject.entity_type.value.replace('_', ' ')} {subject_number} "
+            f"{relation.value.replace('_', ' ')} "
+            f"{obj.entity_type.value.replace('_', ' ')} {object_number}"
+        )
+        evidence_details: list[EvidenceDetail] = []
+        missing = 0
+        withheld = False
+        for evidence_id in claim.supported_by_evidence:
+            evidence = await vault.get(evidence_id)
+            if evidence is None:
+                missing += 1
+                continue
+            provenance = evidence.provenance
+            source = provenance.source
+            if evidence.content_safety is not ContentSafety.ROUTINE or source.handling_restrictions:
+                withheld = True
+                break
+            key = (source.source_class.value, source.identifier, source.operator)
+            source_number = source_numbers.setdefault(key, len(source_numbers) + 1)
+            origin_number = (
+                origin_numbers.setdefault(source.provenance_cluster(), len(origin_numbers) + 1)
+                if source.has_known_lineage
+                else None
+            )
+            evidence_details.append(
+                EvidenceDetail(
+                    evidence_id=evidence.evidence_id,
+                    source_number=source_number,
+                    source_class=source.source_class,
+                    reliability=source.reliability,
+                    origin_number=origin_number,
+                    adversary_influenceable=source.is_adversary_influenceable,
+                    collected_at=provenance.collected_at,
+                    custody_events=len(provenance.custody),
+                    processing_steps=len(provenance.processing),
+                    lossy_processing=provenance.has_lossy_processing,
+                    model_processed=provenance.touched_by_model,
+                    is_simulated=provenance.is_simulated,
+                )
+            )
+        if withheld:
+            details.append(ClaimDetail(claim_id=claim_id, withheld=True))
+            continue
+        details.append(
+            ClaimDetail(
+                claim_id=claim_id,
+                statement=statement,
+                kind=claim.kind,
+                derivation=claim.derivation,
+                asserted_at=claim.asserted_at,
+                observed_from=claim.valid_extent.known_from,
+                observed_until=claim.valid_extent.known_until,
+                evidence=tuple(evidence_details),
+                missing_evidence=missing,
+                premise_count=len(claim.derived_from_claims),
+            )
+        )
+    return tuple(details)
+
+
+def claim_ledger(result: ScenarioResult) -> tuple[ClaimDetail, ...]:
+    """Resolve only the claims referenced by the deliverable dimensions of this run."""
+    return asyncio.run(
+        inspect_claims(result.attribute.result, result.stores.claims, result.stores.vault)
+    )
 
 
 def _fact(label: str, value: int | bool) -> StageFact:

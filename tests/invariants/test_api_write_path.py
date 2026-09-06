@@ -280,3 +280,42 @@ def test_check_may_submit_raises_rather_than_returning_a_verdict() -> None:
     auditor = ACTORS.verify(DEV.enrol("Otto", Role.AUDITOR))
     with pytest.raises(SubmissionRefusedError):
         check_may_submit(auditor)
+
+
+@pytest.mark.parametrize("observed_at", ["2026-09-05T12:00:00", "2026-09-05"])
+def test_a_naive_submission_date_is_a_client_error(result, observed_at):
+    client, _ = _client(result)
+    body = {**_body(), "observed_at": observed_at}
+    response = client.post("/submissions", json=body, headers=_credential())
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["loc"] == ["body", "observed_at"]
+
+
+@pytest.mark.parametrize("body", ["{", "null", "[]", '{"observed_at":"invalid"}'])
+def test_invalid_http_bodies_consume_the_submission_quota(result, body):
+    client, _ = _client(result, rate_limiter=RateLimiter(per_hour=2))
+    headers = {**_credential(), "Content-Type": "application/json"}
+    responses = [client.post("/submissions", content=body, headers=headers) for _ in range(3)]
+    assert [r.status_code for r in responses] == [422, 422, 429]
+    assert client.post("/submissions", json=_body(), headers=headers).status_code == 429
+
+
+def test_an_invalid_body_does_not_bypass_authentication(result):
+    client, _ = _client(result)
+    response = client.post(
+        "/submissions", content="{", headers={"Content-Type": "application/json"}
+    )
+    assert response.status_code == 401
+
+
+def test_submission_offsets_are_normalized_before_recording(result):
+    client, store = _client(result)
+    body = {**_body(), "observed_at": "2026-09-05T12:00:00+02:00"}
+    response = client.post("/submissions", json=body, headers=_credential())
+    assert response.status_code == 201
+    import asyncio
+
+    claim = asyncio.run(store.get(response.json()["claim_id"]))
+    assert claim is not None
+    assert claim.valid_extent.known_from == datetime(2026, 9, 5, 10, tzinfo=UTC)
+    assert claim.valid_extent.known_from.utcoffset() == timedelta(0)

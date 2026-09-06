@@ -35,7 +35,8 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Final
 
-from fastapi import Depends, FastAPI, Header, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from nemesis.api.submission import (
@@ -51,7 +52,7 @@ from nemesis.attribute.disclosure import ExternalAttributionProduct, redact_for_
 from nemesis.attribute.engine import AttributionResult
 from nemesis.authz.attestation import AttestationError, PrincipalVerifier
 from nemesis.authz.rbac import AuthorizationPolicyError, check_may_request
-from nemesis.core.identity import IdentityAssertion, Principal
+from nemesis.core.identity import DEFAULT_TENANT, IdentityAssertion, Principal
 from nemesis.ports.storage import ClaimStore
 
 API_VERSION: Final = "0.1.0"
@@ -112,13 +113,13 @@ class InvestigationView(BaseModel):
 
 def build_app(
     *,
-    investigation: InvestigationView,
+    investigation: InvestigationView | TenantStores[InvestigationView],
     verifier: PrincipalVerifier,
     provider_name: str,
     claims: ClaimStore | TenantStores[ClaimStore] | None = None,
     rate_limiter: RateLimiter | None = None,
 ) -> FastAPI:
-    """Build the API over one investigation.
+    """Build the API over explicitly tenant-bound investigations and claim stores.
 
     ``claims`` enables the write path and is optional on purpose: a deployment that does not
     want an HTTP route appending to its adversary graph gets one without it, and the absence
@@ -126,7 +127,14 @@ def build_app(
 
     Takes the view rather than reaching for a global, so a test drives the same object a
     deployment does and there is exactly one place that decides what is served.
+    A bare view or claim store belongs only to DEFAULT_TENANT. Serving named tenants
+    requires a registry; accepting a second issuer never shares the first tenant's data.
     """
+    investigations = (
+        investigation
+        if isinstance(investigation, TenantStores)
+        else TenantStores.from_mapping({DEFAULT_TENANT: investigation})
+    )
     app = FastAPI(
         title="NEMESIS",
         version=API_VERSION,
@@ -161,6 +169,14 @@ def build_app(
             # anything they did not already supply.
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
 
+    async def tenant_investigation(
+        caller: Principal = Depends(principal),
+    ) -> InvestigationView:
+        try:
+            return investigations.for_principal(caller)
+        except TenantIsolationError as isolated:
+            raise HTTPException(status_code=403, detail=str(isolated)) from isolated
+
     # `caller: Principal = Depends(principal)` rather than an `Annotated` alias: this module
     # uses `from __future__ import annotations`, so FastAPI resolves hints as strings against
     # module globals — where a local alias does not exist, and every route silently became a
@@ -176,6 +192,7 @@ def build_app(
     @app.get("/investigation", response_model=dict)
     async def investigation_summary(
         caller: Principal = Depends(principal),
+        view: InvestigationView = Depends(tenant_investigation),
     ) -> dict[str, Any]:
         """The shape of the run: stages, counts, and what each stage refused.
 
@@ -186,11 +203,11 @@ def build_app(
         return {
             "notice": SIMULATED_NOTICE,
             "requested_by": caller.describe(),
-            "stages": list(investigation.stages),
-            "entities": investigation.entity_count,
-            "relationships": investigation.relationship_count,
-            "evidence_sealed": investigation.evidence_sealed,
-            "attribution_names_a_person": investigation.names_a_person,
+            "stages": list(view.stages),
+            "entities": view.entity_count,
+            "relationships": view.relationship_count,
+            "evidence_sealed": view.evidence_sealed,
+            "attribution_names_a_person": view.names_a_person,
             # The persona-linkage band is deliberately NOT served, and its absence is a
             # decision rather than an oversight. D1 makes persona linkage an internal lead;
             # whether an *analyst-facing* surface may show one over HTTP is a product
@@ -202,7 +219,7 @@ def build_app(
 
     @app.get("/attribution", response_model=ExternalAttributionProduct)
     async def attribution(
-        caller: Principal = Depends(principal),
+        view: InvestigationView = Depends(tenant_investigation),
     ) -> ExternalAttributionProduct:
         """The attribution, as a product a recipient may be given.
 
@@ -211,7 +228,7 @@ def build_app(
         withheld, because silence would read as "nothing was found", which is a different
         claim entirely.
         """
-        return redact_for_disclosure(investigation.attribution)
+        return redact_for_disclosure(view.attribution)
 
     @app.post("/authorizations", response_model=Refusal, status_code=status.HTTP_403_FORBIDDEN)
     async def request_authorization(caller: Principal = Depends(principal)) -> Refusal:
@@ -238,11 +255,36 @@ def build_app(
 
     if claims is not None:
         limiter = rate_limiter or RateLimiter()
+        claim_stores = (
+            claims
+            if isinstance(claims, TenantStores)
+            else TenantStores.from_mapping({DEFAULT_TENANT: claims})
+        )
+
+        async def submitting_principal(caller: Principal = Depends(principal)) -> Principal:
+            try:
+                limiter.check(f"{caller.tenant}:{caller.actor_id}")
+                check_may_submit(caller)
+            except SubmissionRefusedError as refusal:
+                raise HTTPException(status_code=refusal.status, detail=refusal.reason) from refusal
+            return caller
+
+        async def incident_submission(
+            request: Request,
+            caller: Principal = Depends(submitting_principal),
+        ) -> IncidentSubmission:
+            # A body parameter makes FastAPI decode JSON before dependencies run. Read it
+            # here instead so malformed JSON, not just invalid fields, costs an attempt.
+            try:
+                return IncidentSubmission.model_validate_json(await request.body())
+            except ValidationError as exc:
+                errors = [{**error, "loc": ("body", *error["loc"])} for error in exc.errors()]
+                raise RequestValidationError(errors) from exc
 
         @app.post("/submissions", response_model=SubmissionReceipt, status_code=201)
         async def submit_incident(
-            submission: IncidentSubmission,
-            caller: Principal = Depends(principal),
+            submission: IncidentSubmission = Depends(incident_submission),
+            caller: Principal = Depends(submitting_principal),
         ) -> SubmissionReceipt:
             """Accept an incident report from outside, as an assertion and nothing more.
 
@@ -251,16 +293,10 @@ def build_app(
             attributed to the caller — never an observation, which the domain model would
             refuse anyway because no artifact was sealed.
             """
-            try:
-                limiter.check(caller.actor_id)
-                check_may_submit(caller)
-            except SubmissionRefusedError as refusal:
-                raise HTTPException(status_code=refusal.status, detail=refusal.reason) from refusal
-
             # One store per tenant, resolved from the verified principal. A route that
             # picked a tenant from a header would be picking it from the attacker.
             try:
-                store = claims.for_principal(caller) if isinstance(claims, TenantStores) else claims
+                store = claim_stores.for_principal(caller)
             except TenantIsolationError as isolated:
                 raise HTTPException(status_code=403, detail=str(isolated)) from isolated
 

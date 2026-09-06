@@ -234,3 +234,126 @@ def test_a_registry_says_whether_it_is_actually_multi_tenant() -> None:
     stores.register(ACME)
     assert stores.is_multi_tenant() is True
     assert stores.served == {DEFAULT_TENANT, ACME}
+
+
+@pytest.mark.parametrize("route", ["/investigation", "/attribution"])
+def test_a_bare_investigation_is_never_shared_with_named_tenants(result, route):
+    client = _app(result, TenantStores(lambda _: InMemoryClaimStore()))
+    response = client.get(route, headers=_credential(INITECH_IDP))
+    assert response.status_code == 403
+    assert result.attribute.result.subject not in response.text
+
+
+@pytest.mark.parametrize("route", ["/investigation", "/attribution"])
+def test_reads_resolve_the_verified_tenants_own_investigation(result, route):
+    views = {}
+    for tenant in (ACME, INITECH):
+        views[tenant] = InvestigationView(
+            stages=(tenant,),
+            attribution=result.attribute.result.model_copy(update={"subject": tenant}),
+            names_a_person=False,
+            entity_count=1,
+            relationship_count=0,
+            evidence_sealed=0,
+        )
+    investigations = TenantStores(lambda tenant: views[tenant], strict=True)
+    for tenant in views:
+        investigations.register(tenant)
+    client = TestClient(
+        build_app(
+            investigation=investigations,
+            verifier=VERIFIER,
+            provider_name=PROVIDER_NAME,
+        )
+    )
+    for provider, own, other in ((ACME_IDP, ACME, INITECH), (INITECH_IDP, INITECH, ACME)):
+        response = client.get(route, headers=_credential(provider))
+        assert response.status_code == 200
+        assert own in response.text
+        assert other not in response.text
+
+
+@pytest.mark.parametrize("route", ["/investigation", "/attribution"])
+def test_unregistered_tenants_cannot_read_an_investigation(result, route):
+    view = InvestigationView(
+        stages=(),
+        attribution=result.attribute.result,
+        names_a_person=False,
+        entity_count=1,
+        relationship_count=0,
+        evidence_sealed=0,
+    )
+    investigations = TenantStores(lambda _: view, strict=True)
+    investigations.register(ACME)
+    client = TestClient(
+        build_app(
+            investigation=investigations,
+            verifier=VERIFIER,
+            provider_name=PROVIDER_NAME,
+        )
+    )
+    response = client.get(route, headers=_credential(INITECH_IDP))
+    assert response.status_code == 403
+    assert result.attribute.result.subject not in response.text
+
+
+def test_a_bare_claim_store_is_not_shared_with_named_tenants(result):
+    view = InvestigationView(
+        stages=(),
+        attribution=result.attribute.result,
+        names_a_person=False,
+        entity_count=1,
+        relationship_count=0,
+        evidence_sealed=0,
+    )
+    client = TestClient(
+        build_app(
+            investigation=view,
+            verifier=VERIFIER,
+            provider_name=PROVIDER_NAME,
+            claims=InMemoryClaimStore(),
+        )
+    )
+    assert (
+        client.post(
+            "/submissions",
+            json=_body("a.example"),
+            headers=_credential(ACME_IDP),
+        ).status_code
+        == 403
+    )
+
+
+def test_submission_quotas_do_not_collide_across_tenants(result):
+    from nemesis.api.submission import RateLimiter
+
+    view = InvestigationView(
+        stages=(),
+        attribution=result.attribute.result,
+        names_a_person=False,
+        entity_count=1,
+        relationship_count=0,
+        evidence_sealed=0,
+    )
+    stores: TenantStores[ClaimStore] = TenantStores.from_mapping(
+        {ACME: InMemoryClaimStore(), INITECH: InMemoryClaimStore()}
+    )
+    client = TestClient(
+        build_app(
+            investigation=view,
+            verifier=VERIFIER,
+            provider_name=PROVIDER_NAME,
+            claims=stores,
+            rate_limiter=RateLimiter(per_hour=1),
+        )
+    )
+    first = ACME_IDP.enrol("Shared subject", Role.ANALYST)
+    second = INITECH_IDP.enrol("Shared subject", Role.ANALYST, subject=first.subject)
+    for assertion in (first, second):
+        headers = {"Authorization": f"Assertion {assertion.model_dump_json()}"}
+        assert (
+            client.post("/submissions", json=_body("a.example"), headers=headers).status_code == 201
+        )
+        assert (
+            client.post("/submissions", json=_body("a.example"), headers=headers).status_code == 429
+        )
