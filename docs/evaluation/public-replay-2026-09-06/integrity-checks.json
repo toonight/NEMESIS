@@ -1,0 +1,26 @@
+{
+  "R17-baseline": {
+    "vault_intact": true,
+    "audit_chain_intact": true
+  },
+  "R17-local": {
+    "vault_intact": true,
+    "audit_chain_intact": true
+  },
+  "R42-baseline": {
+    "vault_intact": true,
+    "audit_chain_intact": true
+  },
+  "R42-local": {
+    "vault_intact": true,
+    "audit_chain_intact": true
+  },
+  "R83-baseline": {
+    "vault_intact": true,
+    "audit_chain_intact": true
+  },
+  "R83-local": {
+    "vault_intact": true,
+    "audit_chain_intact": true
+  }
+}

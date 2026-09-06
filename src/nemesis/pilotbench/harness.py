@@ -256,6 +256,7 @@ async def run_scenario(
     challenger: MoveChallenger | None = None,
     challenge_policy: ChallengePolicy | None = None,
     propose_timeout: float = 240.0,
+    connectors: tuple[IntelligenceConnector, ...] | None = None,
 ) -> ScenarioRun:
     """Drive one pilot through one scenario, and return everything it left behind.
 
@@ -263,7 +264,12 @@ async def run_scenario(
     exception here. The mediator already contains a raising pilot as a refused move and a
     recorded halt, so an unwired provider produces a real session that halted with a reason,
     which is itself the demonstration that provider failure cannot weaken policy enforcement.
+
+    Custom connectors replace the default corpus completely and must be simulated. This
+    seam is for replaying a different offline corpus, not for admitting live collection.
     """
+    if connectors is not None and any(not c.capabilities.is_simulated for c in connectors):
+        raise ValueError("The benchmark accepts only simulated connectors")
     root = Path(workspace or tempfile.mkdtemp(prefix=f"nemesis-bench-{scenario.scenario_id}-"))
     root.mkdir(parents=True, exist_ok=True)
 
@@ -294,7 +300,9 @@ async def run_scenario(
         )
         if scenario.planted
         else connector
-        for connector in simulated_connectors(as_of=scenario.as_of)
+        for connector in (
+            simulated_connectors(as_of=scenario.as_of) if connectors is None else connectors
+        )
     )
     engine = PursuitEngine(
         graph=graph,

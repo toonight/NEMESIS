@@ -1,0 +1,182 @@
+#!/usr/bin/env python3
+"""IMPLEMENTED runner; SIMULATED data, optional inference on loopback only.
+
+Freeze first, run without opening answers, score in a separate invocation. Never overwrites
+an experiment directory. No vendor endpoint, API key, or live intelligence source is accepted.
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import http.client
+import json
+import platform
+import sys
+from collections.abc import Mapping
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+from nemesis.calibration.freeze import engine_digest, freeze_digest
+from nemesis.pilot.providers.contract import DecodingParameters
+from nemesis.pilot.providers.ollama import LocalPilot
+from nemesis.pilot.providers.reliability import RetryPolicy
+from nemesis.pilotbench.replay import (
+    BreadthFirstPilot,
+    read_cases,
+    run_replay,
+    score_report,
+    sha256,
+)
+
+ROOT = Path(__file__).resolve().parent.parent
+CORPUS = ROOT / "data/benchmarks/public-replay-v1"
+
+
+class LoopbackTransport:
+    """Laboratory transport, outside src: fixed local endpoint; no redirects or proxies."""
+
+    async def request(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
+        # Any: the provider's JSON protocol is an untrusted mapping.
+        return await asyncio.to_thread(self._request, payload)
+
+    def _request(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
+        # Any: parsed vendor response, validated by the existing provider seat.
+        connection = http.client.HTTPConnection("127.0.0.1", 11434, timeout=170)
+        try:
+            connection.request(
+                "POST", "/api/chat", json.dumps(payload), {"Content-Type": "application/json"}
+            )
+            response = connection.getresponse()
+            body = response.read()
+            if response.status != 200:
+                raise RuntimeError(f"Local model HTTP {response.status}")
+            parsed: dict[str, Any] = json.loads(body)
+            return parsed
+        finally:
+            connection.close()
+
+
+def write_json(path: Path, value: object) -> None:
+    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
+
+
+def verify(manifest: Mapping[str, Any]) -> None:
+    # Any: manifest fields are independently typed experiment metadata.
+    if manifest["inputs_sha256"] != sha256(CORPUS / "inputs.json"):
+        raise ValueError("Inputs changed after protocol freeze")
+    if manifest["engine_digest"] != engine_digest():
+        raise ValueError("Engine changed after protocol freeze")
+    if manifest["runner_sha256"] != sha256(Path(__file__)):
+        raise ValueError("Runner changed after protocol freeze")
+
+
+async def execute(out: Path) -> None:
+    manifest = json.loads((out / "manifest.json").read_text())
+    verify(manifest)
+    runs = out / "runs"
+    runs.mkdir()  # A rerun requires a new frozen directory; preserve every first pass.
+    for case in read_cases(CORPUS / "inputs.json"):
+        for arm in ("baseline", "local"):
+            pilot = (
+                BreadthFirstPilot()
+                if arm == "baseline"
+                else LocalPilot(
+                    model=manifest["model"],
+                    transport=LoopbackTransport(),
+                    decoding=DecodingParameters(
+                        max_output_tokens=512, temperature=0.6, seed=manifest["seed"]
+                    ),
+                    retries=RetryPolicy(max_attempts=1),
+                )
+            )
+            print(f"Starting {case.case_id}/{arm}", flush=True)
+            result = await run_replay(
+                case,
+                pilot,
+                workspace=runs / f"{case.case_id}-{arm}",
+                max_moves=manifest["max_moves"],
+            )
+            write_json(runs / f"{case.case_id}-{arm}.json", result)
+            print(
+                f"Finished {case.case_id}/{arm}: {result['moves']} moves, "
+                f"{result['query_attempts']} query attempts, {result['elapsed_seconds']:.2f}s",
+                flush=True,
+            )
+    files = sorted(runs.glob("*.json"))
+    write_json(out / "runs-sealed.json", {p.name: sha256(p) for p in files})
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("command", choices=("freeze", "run", "score"))
+    parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--model", default="qwen3.8:27b-q8_0")
+    args = parser.parse_args()
+    out: Path = args.out
+    if args.command == "freeze":
+        out.mkdir(parents=True, exist_ok=False)
+        write_json(
+            out / "manifest.json",
+            {
+                "status": "SIMULATED",
+                "protocol": "public-replay-v1",
+                "frozen_at": datetime.now(UTC).isoformat(),
+                "model": args.model,
+                "seed": 20260906,
+                "max_moves": 8,
+                "max_output_tokens": 512,
+                "temperature": 0.6,
+                "repetitions": 1,
+                "order": "case-order; baseline then local",
+                "inputs_sha256": sha256(CORPUS / "inputs.json"),
+                "answers_sha256": sha256(CORPUS / "answers.json"),
+                "engine_digest": engine_digest(),
+                "confidence_value_digest": freeze_digest(),
+                "runner_sha256": sha256(Path(__file__)),
+                "python": sys.version,
+                "platform": platform.platform(),
+                "inference": "Loopback only; model weights must already be installed.",
+            },
+        )
+    elif args.command == "run":
+        asyncio.run(execute(out))
+    else:
+        manifest = json.loads((out / "manifest.json").read_text())
+        if manifest["inputs_sha256"] != sha256(CORPUS / "inputs.json"):
+            raise ValueError("Inputs changed after protocol freeze")
+        if manifest["answers_sha256"] != sha256(CORPUS / "answers.json"):
+            raise ValueError("Answers changed after protocol freeze")
+        sealed = json.loads((out / "runs-sealed.json").read_text())
+        cases = read_cases(CORPUS / "inputs.json")
+        required = {f"{c.case_id}-{arm}.json" for c in cases for arm in ("baseline", "local")}
+        if set(sealed) != required:
+            raise ValueError("Incomplete run matrix; not a completed evaluation")
+        for name, digest in sealed.items():
+            if sha256(out / "runs" / name) != digest:
+                raise ValueError("Transcript changed after sealing")
+        # The first semantic read of evaluator answers, after all run files are sealed.
+        answers = json.loads((CORPUS / "answers.json").read_text())
+        scores = []
+        for name in sorted(sealed):
+            run = json.loads((out / "runs" / name).read_text())
+            expected = set(answers["cases"][run["case_id"]]["expected_record_ids"])
+            scores.append(score_report(run, expected))
+        if (out / "scores.json").exists():
+            raise FileExistsError("Preserve existing scores; use a new output directory")
+        write_json(
+            out / "scores.json",
+            {
+                "status": "SIMULATED",
+                "labels_opened_at": datetime.now(UTC).isoformat(),
+                "manifest_sha256": sha256(out / "manifest.json"),
+                "runs_sealed_sha256": sha256(out / "runs-sealed.json"),
+                "scores": scores,
+            },
+        )
+        print(json.dumps(scores, indent=2))
+
+
+if __name__ == "__main__":
+    main()

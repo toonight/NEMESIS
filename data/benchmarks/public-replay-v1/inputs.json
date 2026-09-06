@@ -1,0 +1,210 @@
+{
+  "status": "SIMULATED",
+  "version": "public-replay-v1",
+  "cases": [
+    {
+      "case_id": "R17",
+      "seed": "domain:k17.example",
+      "as_of": "2023-04-20T00:00:00Z",
+      "source_id": "report-R17",
+      "records": [
+        {
+          "record_id": "R17-1",
+          "statement": {
+            "subject": "domain:k17.example",
+            "predicate": "resolves_to",
+            "obj": "ip_address:192.0.2.17",
+            "natural_language": "Report records a historical DNS resolution."
+          },
+          "observed_at": "2022-04-08T00:00:00Z",
+          "routes": [
+            {
+              "pivot_type": "resolution_history",
+              "entity_key": "k17.example"
+            },
+            {
+              "pivot_type": "reverse_resolution",
+              "entity_key": "192.0.2.17"
+            }
+          ]
+        },
+        {
+          "record_id": "R17-2",
+          "statement": {
+            "subject": "domain:k28.example",
+            "predicate": "resolves_to",
+            "obj": "ip_address:192.0.2.17",
+            "natural_language": "Report records a resolution on a different date; simultaneous occupancy is not established."
+          },
+          "observed_at": "2021-11-26T00:00:00Z",
+          "routes": [
+            {
+              "pivot_type": "reverse_resolution",
+              "entity_key": "192.0.2.17"
+            },
+            {
+              "pivot_type": "resolution_history",
+              "entity_key": "k28.example"
+            }
+          ]
+        },
+        {
+          "record_id": "R17-3",
+          "statement": {
+            "subject": "malware:0000000000000000000000000000000000000000000000000000000000000011",
+            "predicate": "communicates_with",
+            "obj": "domain:k17.example",
+            "natural_language": "Report identifies this configured command-and-control domain in the investigated environment."
+          },
+          "observed_at": "2023-04-20T00:00:00Z",
+          "routes": [
+            {
+              "pivot_type": "threat_intel_lookup",
+              "entity_key": "k17.example"
+            },
+            {
+              "pivot_type": "c2_extraction",
+              "entity_key": "0000000000000000000000000000000000000000000000000000000000000011"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "R42",
+      "seed": "domain:k42.example",
+      "as_of": "2022-04-28T00:00:00Z",
+      "source_id": "report-R42",
+      "records": [
+        {
+          "record_id": "R42-1",
+          "statement": {
+            "subject": "malware:000000000000000000000000000000000000000000000000000000000000002a",
+            "predicate": "communicates_with",
+            "obj": "domain:k42.example",
+            "natural_language": "Reported downloader requests use an API of a legitimate shared web service."
+          },
+          "observed_at": "2022-04-28T00:00:00Z",
+          "routes": [
+            {
+              "pivot_type": "threat_intel_lookup",
+              "entity_key": "k42.example"
+            },
+            {
+              "pivot_type": "c2_extraction",
+              "entity_key": "000000000000000000000000000000000000000000000000000000000000002a"
+            }
+          ]
+        },
+        {
+          "record_id": "R42-2",
+          "statement": {
+            "subject": "malware:000000000000000000000000000000000000000000000000000000000000002a",
+            "predicate": "communicates_with",
+            "obj": "domain:k63.example",
+            "natural_language": "Reported payload retrieval uses attachments on the same legitimate service."
+          },
+          "observed_at": "2022-04-28T00:00:00Z",
+          "routes": [
+            {
+              "pivot_type": "c2_extraction",
+              "entity_key": "000000000000000000000000000000000000000000000000000000000000002a"
+            },
+            {
+              "pivot_type": "threat_intel_lookup",
+              "entity_key": "k63.example"
+            }
+          ]
+        },
+        {
+          "record_id": "R42-3",
+          "statement": {
+            "subject": "malware:000000000000000000000000000000000000000000000000000000000000003f",
+            "predicate": "delivered_by",
+            "obj": "malware:000000000000000000000000000000000000000000000000000000000000002a",
+            "natural_language": "Report describes the downloader retrieving this subsequent payload."
+          },
+          "observed_at": "2022-04-28T00:00:00Z",
+          "routes": [
+            {
+              "pivot_type": "malware_lookup",
+              "entity_key": "000000000000000000000000000000000000000000000000000000000000002a"
+            },
+            {
+              "pivot_type": "malware_lookup",
+              "entity_key": "000000000000000000000000000000000000000000000000000000000000003f"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "R83",
+      "seed": "domain:k83.example",
+      "as_of": "2020-12-18T00:00:00Z",
+      "source_id": "report-R83",
+      "records": [
+        {
+          "record_id": "R83-1",
+          "statement": {
+            "subject": "malware:0000000000000000000000000000000000000000000000000000000000000053",
+            "predicate": "communicates_with",
+            "obj": "domain:k83.example",
+            "natural_language": "Report gives this generated subdomain as a command-and-control URL example."
+          },
+          "observed_at": "2020-12-18T00:00:00Z",
+          "routes": [
+            {
+              "pivot_type": "threat_intel_lookup",
+              "entity_key": "k83.example"
+            },
+            {
+              "pivot_type": "c2_extraction",
+              "entity_key": "0000000000000000000000000000000000000000000000000000000000000053"
+            }
+          ]
+        },
+        {
+          "record_id": "R83-2",
+          "statement": {
+            "subject": "domain:k83.example",
+            "predicate": "subdomain_of",
+            "obj": "domain:k91.example",
+            "natural_language": "The reported generated hostname is beneath this parent domain."
+          },
+          "observed_at": "2020-12-18T00:00:00Z",
+          "routes": [
+            {
+              "pivot_type": "threat_intel_lookup",
+              "entity_key": "k83.example"
+            },
+            {
+              "pivot_type": "threat_intel_lookup",
+              "entity_key": "k91.example"
+            }
+          ]
+        },
+        {
+          "record_id": "R83-3",
+          "statement": {
+            "subject": "malware:0000000000000000000000000000000000000000000000000000000000000053",
+            "predicate": "associated_with",
+            "obj": "domain:k07.example",
+            "natural_language": "Report says the backdoor checks resolution of this vendor API during activation; this is not a C2 classification."
+          },
+          "observed_at": "2020-12-18T00:00:00Z",
+          "routes": [
+            {
+              "pivot_type": "malware_lookup",
+              "entity_key": "0000000000000000000000000000000000000000000000000000000000000053"
+            },
+            {
+              "pivot_type": "threat_intel_lookup",
+              "entity_key": "k07.example"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

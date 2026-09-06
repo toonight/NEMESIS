@@ -1,0 +1,78 @@
+{
+  "status": "SIMULATED",
+  "version": "public-replay-v1",
+  "cases": {
+    "R17": {
+      "title": "3CX infrastructure overlap",
+      "source_url": "https://cloud.google.com/blog/topics/threat-intelligence/3cx-software-supply-chain-compromise",
+      "published_at": "2023-04-20",
+      "publisher": "Mandiant",
+      "source_sections": [
+        "Threat Actor Spotlight: UNC4736; tables 1\u20132"
+      ],
+      "mapping": {
+        "k17.example": "journalide.org",
+        "k28.example": "nxmnv.site",
+        "192.0.2.17": "172.93.201.88",
+        "malware:0000000000000000000000000000000000000000000000000000000000000011": "POOLRAT (sample identifier replaced; no binary included)"
+      },
+      "expected_record_ids": [
+        "R17-1",
+        "R17-2",
+        "R17-3"
+      ],
+      "cautions": [
+        "Historical IP overlap does not establish common ownership, simultaneous hosting, or one operator.",
+        "Attribution in the original report is qualified, not ground truth."
+      ]
+    },
+    "R42": {
+      "title": "BEATDROP and legitimate web services",
+      "source_url": "https://cloud.google.com/blog/topics/threat-intelligence/tracking-apt29-phishing-campaigns",
+      "published_at": "2022-04-28",
+      "publisher": "Mandiant",
+      "source_sections": [
+        "Initial Access; Establish Foothold"
+      ],
+      "mapping": {
+        "k42.example": "api.trello.com",
+        "k63.example": "trello.com",
+        "malware:000000000000000000000000000000000000000000000000000000000000002a": "BEATDROP (family represented by synthetic sample)",
+        "malware:000000000000000000000000000000000000000000000000000000000000003f": "BEACON (payload represented by synthetic sample)"
+      },
+      "expected_record_ids": [
+        "R42-1",
+        "R42-2",
+        "R42-3"
+      ],
+      "cautions": [
+        "Abuse of an account or attachment does not establish ownership of the whole service by an attacker.",
+        "The corpus does not label unobserved infrastructure benign."
+      ]
+    },
+    "R83": {
+      "title": "Solorigate backdoor analysis",
+      "source_url": "https://www.microsoft.com/en-us/security/blog/2020/12/18/analyzing-solorigate-the-compromised-dll-file-that-started-a-sophisticated-cyberattack-and-how-microsoft-defender-helps-protect/",
+      "published_at": "2020-12-18",
+      "publisher": "Microsoft",
+      "source_sections": [
+        "Activation; The backdoor"
+      ],
+      "mapping": {
+        "k83.example": "3mu76044hgf7shjf.appsync-api.eu-west-1.avsvmcloud.com",
+        "k91.example": "avsvmcloud.com",
+        "k07.example": "api.solarwinds.com",
+        "malware:0000000000000000000000000000000000000000000000000000000000000053": "Solorigate backdoored DLL (synthetic sample identifier)"
+      },
+      "expected_record_ids": [
+        "R83-1",
+        "R83-2",
+        "R83-3"
+      ],
+      "cautions": [
+        "Activation-time resolution checks do not make the vendor API an attacker-controlled C2.",
+        "The generated hostname is a published example, not newly observed telemetry."
+      ]
+    }
+  }
+}
