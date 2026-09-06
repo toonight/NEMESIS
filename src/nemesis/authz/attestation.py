@@ -62,8 +62,8 @@ class RegisteredIssuer:
     the caller supplies is a value an attacker supplies — one edited string and they address
     another customer's graph.
 
-    Registering a second issuer for a second tenant is therefore the whole of multi-tenant
-    configuration, and there is no way to hold an identity for a tenant nobody registered.
+    Registering an issuer establishes the tenant identity. The API separately registers
+    that tenant's investigations and stores; an identity alone grants no shared-store access.
     """
 
 

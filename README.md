@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/toonight/NEMESIS/actions/workflows/ci.yml/badge.svg)](https://github.com/toonight/NEMESIS/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.13-1f6feb)
-![Tests](https://img.shields.io/badge/tests-2206-2ea043)
+![Tests](https://img.shields.io/badge/tests-2229-2ea043)
 ![Typing](https://img.shields.io/badge/mypy-strict-2ea043)
 ![Plane contracts](https://img.shields.io/badge/plane%20contracts-15%20enforced-ff8a3d)
 ![Status](https://img.shields.io/badge/status-default%20simulated%20%7C%20opt--in%20Tor-e5a50a)
@@ -109,9 +109,11 @@ is **not** an offensive platform and this repository will not become one.
 
 - The demo and every default command **never touch infrastructure we do not own**. Their seven
   connectors read fixtures, and every address in the reference scenario is reserved for
-  documentation. One opt-in [Tor onion snapshot connector](docs/connectors/dark-web.md) exists;
+  documentation. An opt-in [Tor onion snapshot connector](docs/connectors/dark-web.md) exists;
   it makes real external contact only when a deployment constructs it with an explicit v3
-  onion allowlist, and it refuses to run without kernel confinement.
+  onion allowlist, and it refuses to run without kernel confinement. A separate opt-in
+  `ransomware.live` reader pins its API host; whether that host pin meets the MVP allowlist
+  requirement remains an explicit [founder decision](docs/architecture/FOUNDER_DECISIONS.md).
 - No autonomous purchasing, transactions, impersonation, or engagement with criminal
   personas.
 - No exploitation, persistence, credential attacks, malware deployment or destructive
@@ -196,7 +198,7 @@ them are the investigation pipeline; the twelfth sits above it and drives it.
 
 | Plane | | Status |
 |---|---|---|
-| 1 · Collection | sensors, connectors, quarantine — **hostile by definition** | `IMPLEMENTED` — simulated by default; one opt-in Tor snapshot connector |
+| 1 · Collection | sensors, connectors, quarantine — **hostile by definition** | `IMPLEMENTED` — simulated by default; opt-in Tor snapshot and ransomware.live readers |
 | 2 · Pursuit | investigation state, hypotheses, budget, pivot selection | `IMPLEMENTED` |
 | 3 · Graph | temporal, provenance-aware, confidence-scored | `IMPLEMENTED` |
 | 4 · Dark web | isolated observation | `IMPLEMENTED` snapshot / `SIMULATED` demo |

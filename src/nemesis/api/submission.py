@@ -50,12 +50,12 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Final
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from nemesis.core.claims import Claim, ClaimKind, DerivationKind, Statement
 from nemesis.core.entities import EntityType
 from nemesis.core.identity import Principal, Role
-from nemesis.core.temporal import TemporalExtent, utcnow
+from nemesis.core.temporal import TemporalExtent, require_utc, utcnow
 
 MAY_SUBMIT: Final[frozenset[Role]] = frozenset({Role.ANALYST, Role.INVESTIGATION_LEAD})
 """Roles permitted to write into the graph.
@@ -114,6 +114,11 @@ class IncidentSubmission(BaseModel):
         description="The submitter's own ticket or case number, so they can correlate. Opaque "
         "to NEMESIS and never interpreted.",
     )
+
+    @field_validator("observed_at")
+    @classmethod
+    def _observed_at_is_utc(cls, value: datetime) -> datetime:
+        return require_utc(value, "observed_at")
 
 
 class SubmissionReceipt(BaseModel):
