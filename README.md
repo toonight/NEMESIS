@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/toonight/NEMESIS/actions/workflows/ci.yml/badge.svg)](https://github.com/toonight/NEMESIS/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.13-1f6feb)
-![Tests](https://img.shields.io/badge/tests-2239-2ea043)
+![Tests](https://img.shields.io/badge/tests-2240-2ea043)
 ![Typing](https://img.shields.io/badge/mypy-strict-2ea043)
 ![Plane contracts](https://img.shields.io/badge/plane%20contracts-15%20enforced-ff8a3d)
 ![Status](https://img.shields.io/badge/status-default%20simulated%20%7C%20opt--in%20Tor-e5a50a)
@@ -311,3 +311,12 @@ run recovered 6/9 selected assertions versus 9/9 for breadth-first traversal. Th
 establish operational usefulness or attribution accuracy. See the
 [protocol](docs/evaluation/PUBLIC_REPLAY.md) and
 [measured report](docs/evaluation/public-replay-2026-09-06/REPORT.md).
+
+### Operational value demonstrated
+
+**SIMULATED laboratory evidence.** NEMESIS retrieved 9/9 selected report assertions with sealed
+provenance, detected copied evidence and audit tampering, and held all control properties across
+40 adversarial scripted runs. Of 64 effect requests exercised, 16 authorized rehearsals ran,
+48 were refused, and 0 made external contact. This demonstrates value as an evidence and control
+framework; autonomous-pilot and economic value remain unproven. See the
+[evidence card](docs/evaluation/operational-value-2026-09-06/REPORT.md).
