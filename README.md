@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/toonight/NEMESIS/actions/workflows/ci.yml/badge.svg)](https://github.com/toonight/NEMESIS/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.13-1f6feb)
-![Tests](https://img.shields.io/badge/tests-2229-2ea043)
+![Tests](https://img.shields.io/badge/tests-2239-2ea043)
 ![Typing](https://img.shields.io/badge/mypy-strict-2ea043)
 ![Plane contracts](https://img.shields.io/badge/plane%20contracts-15%20enforced-ff8a3d)
 ![Status](https://img.shields.io/badge/status-default%20simulated%20%7C%20opt--in%20Tor-e5a50a)
@@ -303,3 +303,11 @@ derivative works require prior written permission. See [`LICENSE`](LICENSE), whi
 the intended-use boundary — this is a defensive platform, and using it or a derivative to gain
 unauthorised access or to conduct surveillance without lawful basis falls outside any
 permission given here.
+
+### Public-case retrieval evaluation
+
+**SIMULATED**, based on three anonymized published-case excerpts. The first measured local-pilot
+run recovered 6/9 selected assertions versus 9/9 for breadth-first traversal. These results do not
+establish operational usefulness or attribution accuracy. See the
+[protocol](docs/evaluation/PUBLIC_REPLAY.md) and
+[measured report](docs/evaluation/public-replay-2026-09-06/REPORT.md).

@@ -1,0 +1,19 @@
+{
+  "answers_sha256": "d7a26ef33e215ca76c9f1199fa1075fa975e5f79dd3eab0ca0b05429316106e3",
+  "engine_digest": "752ec461155673cb4c202f9907299c9289d90f1fe8454e5e58b720d80e6726bb",
+  "frozen_at": "2026-09-06T16:39:49.577566+00:00",
+  "inference": "Loopback only; model weights must already be installed.",
+  "inputs_sha256": "0b31c2ba0421997ac5bf3439c5553ed0dbfe1f8368fb005d2877292634b0051a",
+  "max_moves": 8,
+  "max_output_tokens": 512,
+  "model": "qwen3.8:27b-q8_0",
+  "order": "case-order; baseline then local",
+  "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "protocol": "public-replay-v1",
+  "python": "3.13.2 (main, Mar 17 2025, 21:26:38) [Clang 20.1.0 ]",
+  "repetitions": 1,
+  "runner_sha256": "e929cd94c68d9fb43d00cf83bd733930833f7b31c3ac61146e8eb7efa14db29b",
+  "seed": 20260906,
+  "status": "SIMULATED",
+  "temperature": 0.6
+}
