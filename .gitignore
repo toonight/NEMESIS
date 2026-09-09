@@ -41,6 +41,9 @@ var/
 quarantine/
 evidence-vault/
 
+# Local operational POC runs may contain restricted evidence and Tor client state.
+artifacts/
+
 # OS / editor
 .DS_Store
 .idea/

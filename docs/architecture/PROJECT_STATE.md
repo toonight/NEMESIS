@@ -1,6 +1,6 @@
 # Project state
 
-**Last updated: 2026-09-06.** How a future session finds its bearings quickly.
+**Last updated: 2026-09-09.** How a future session finds its bearings quickly.
 
 Everything below carries its epistemic label. These are never silently upgraded, and a
 label change is a documented event.
@@ -82,6 +82,25 @@ It does not establish autonomous-pilot uplift, economic return, real-source perf
 production readiness. Those remain **REQUIRES_EXTERNAL_DATA**. See the
 [measured report](../evaluation/operational-value-2026-09-06/REPORT.md) and
 [machine-readable card](../evaluation/operational-value-2026-09-06/evidence-card.json).
+
+---
+
+## Passive public-IOC POC (2026-09-09)
+
+**IMPLEMENTED** collection and controls, **0 SIMULATED records**, operational POC only. An
+external Codex pilot directed ten bounded moves from one published SHA-256 IOC. Four public
+sources produced eight verified observation claims, two explicitly allowlisted onion endpoints
+responded through confined Tor, and all ten claims resolve to sealed evidence metadata. A
+non-empty authorization envelope refused a deliberately forbidden registrar-suspension request
+as `refused_out_of_envelope` with no external contact. Five evidence objects and 21 audit events
+passed independent chain and content-hash verification.
+
+The run remains `attribution_uncertain`. Raw captures, the restricted Tor object, Tor client
+state, and prior defective attempts are excluded from the public repository. The result has no
+collection-time external integrity anchor, no independently reproducible two-response Tor
+correlation, and only point-sighting valid-time extents. See the
+[sanitized report](../evaluation/public-ioc-2026-09-09/REPORT.md) and
+[verification summary](../evaluation/public-ioc-2026-09-09/verification.json).
 
 ---
 
