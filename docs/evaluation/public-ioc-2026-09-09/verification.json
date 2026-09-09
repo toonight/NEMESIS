@@ -1,0 +1,26 @@
+{
+  "audit_entries_verified": 21,
+  "audit_intact": true,
+  "claims_total": 10,
+  "claims_with_resolvable_evidence": 10,
+  "external_anchor_present_at_collection": false,
+  "issues": [],
+  "max_collection_to_seal_lag_seconds": 7.539381,
+  "metadata_records_verified": 5,
+  "public_claim_records": [
+    "bgp-asn",
+    "bgp-provider",
+    "bgp-ptr",
+    "cisa-play-association",
+    "cisa-systembc",
+    "deepdarkcti-play-a",
+    "deepdarkcti-play-b",
+    "triage-systembc-c2"
+  ],
+  "public_claims_tokens_verified_against_sealed_bytes": 8,
+  "restricted_objects_withheld": 1,
+  "simulated_metadata_records": 0,
+  "unique_objects_sha256_verified": 5,
+  "vault_entries_verified": 5,
+  "vault_head": "61d6266cde93caab26a949788dbe280c32bd9c291adac4900566cf766e537c5b"
+}

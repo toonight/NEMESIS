@@ -1,0 +1,44 @@
+{
+  "entries": [
+    {
+      "content_safety": "routine",
+      "evidence_id": "evd_sha256-323dedbcd9132364eed30561b98e351c7a56fc820e461d3420611b45c71486b2",
+      "is_simulated": false,
+      "source": "fastfire/deepdarkCTI",
+      "withheld_from_git": true
+    },
+    {
+      "content_safety": "routine",
+      "evidence_id": "evd_sha256-880b706dad42712d7e172f5e11f1e0769d3e7e417b22c52566baceca6a1d85ce",
+      "is_simulated": false,
+      "source": "Hurricane Electric BGP Toolkit",
+      "withheld_from_git": true
+    },
+    {
+      "content_safety": "malicious_code",
+      "evidence_id": "evd_sha256-c1d40d2aa33fda779e44c20578e35762287a564272ef4c145b6e632bc84a976d",
+      "is_simulated": false,
+      "source": "FBI / CISA / ASD's ACSC advisory",
+      "withheld_from_git": true
+    },
+    {
+      "content_safety": "routine",
+      "evidence_id": "evd_sha256-ccd9644eac22e65edc58696afe394d8dbfa98d1bec05b9f5796eeeb39aafdf6c",
+      "is_simulated": false,
+      "source": "Hatching Triage",
+      "withheld_from_git": true
+    },
+    {
+      "content_safety": "legally_restricted",
+      "evidence_id": "evd_sha256-dd5093cc412d17f965cde146d328cfcb56ccc2565f2b5594259f89a8f4744508",
+      "handling_restrictions": [
+        "no redistribution"
+      ],
+      "is_simulated": false,
+      "source": "withheld allowlisted onion endpoint",
+      "withheld_from_git": true
+    }
+  ],
+  "raw_content_in_repository": false,
+  "schema": "nemesis-public-evidence-manifest-v1"
+}
