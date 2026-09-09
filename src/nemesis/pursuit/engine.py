@@ -68,7 +68,7 @@ from nemesis.pursuit.investigation import (
     PivotCandidate,
 )
 from nemesis.pursuit.materialize import materialize
-from nemesis.pursuit.policy import PursuitPolicy, RuleBasedPursuitPolicy
+from nemesis.pursuit.policy import PursuitPolicy, RuleBasedPursuitPolicy, prior_gain
 from nemesis.pursuit.standing import reassess_standing
 
 ENGINE_ACTOR_KIND = "agent"
@@ -307,14 +307,36 @@ class PursuitEngine:
             return investigation, None
 
         branch = next(iter(investigation.open_branches), None) or investigation.branches[0]
+
+        # The prior belongs to the (entity type, pivot type) pair, not to whoever named the
+        # pivot. This used to be a hardcoded 0.0, and the consequence is visible in every
+        # pilot-driven run this repository has recorded: fifty executed pivots across seven
+        # runs, every one of them scored zero, so nothing could be said afterwards about
+        # whether the model chose better or worse than the policy would have. Recording the
+        # policy's prior here is what makes that comparison possible — it is not a claim that
+        # the pilot's reasoning matched it.
+        gain, through_shared = prior_gain(entity.entity_type, pivot_type)
+
+        # The hypothesis this branch was opened on, unless it has since been settled: a pivot
+        # still naming a closed hypothesis would report progress against a question already
+        # answered. Falling back to any open one keeps `consecutive_uninformative` measuring
+        # something, which is what drives abandonment.
+        hypothesis_id = branch.hypothesis_id
+        current = investigation.hypothesis(hypothesis_id) if hypothesis_id else None
+        if current is None or current.is_settled:
+            fallback = next(iter(investigation.open_hypotheses), None)
+            hypothesis_id = fallback.hypothesis_id if fallback else None
+
         candidate = PivotCandidate(
             pivot_type=pivot_type,
             entity_id=entity.entity_id,
             entity_type=entity.entity_type,
             entity_key=entity.natural_key,
-            expected_information_gain=0.0,
+            addresses_hypothesis=hypothesis_id,
+            expected_information_gain=gain,
             estimated_cost=self._connectors.cost_table().get(pivot_type.value, 1.0),
             rationale=rationale or f"Pilot-selected {pivot_type.value} on {entity.natural_key}.",
+            would_pivot_through_shared_infrastructure=through_shared,
         )
 
         if candidate.estimated_cost > investigation.budget_remaining:

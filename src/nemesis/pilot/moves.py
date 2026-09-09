@@ -221,6 +221,51 @@ class EntityView(BaseModel):
     natural_key: str
 
 
+MAX_FRONTIER_ITEMS: Final = 12
+"""How many unexplored leads a briefing offers.
+
+The frontier is a prompt to think with, not an inventory. Past a dozen entries the ranking stops
+being read and the tail is paid for on every turn — and for a hosted model, sent to a vendor on
+every turn.
+"""
+
+MAX_FRONTIER_KEY_LENGTH: Final = 200
+MAX_FRONTIER_RATIONALE_LENGTH: Final = 240
+
+
+class PivotCandidateView(BaseModel):
+    """One unexplored lead, scored, as the pilot is shown it.
+
+    The pilot has never had this. Across seven live runs it named every pivot out of its own
+    head while the engine's ranking policy sat unused, so the transcripts record what a model
+    chose but not what it chose *against* — and "did the model do better than the rules" is the
+    question the seam exists to answer.
+
+    Offering a lead is not authorising it. Every entry still has to be proposed as a move and
+    still passes every check in the mediator; a frontier entry is a suggestion the pilot is free
+    to ignore, and a pivot the pilot invents that is not on the frontier is not thereby refused.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    pivot_type: str
+    entity_id: str
+    entity_type: str
+    entity_key: Annotated[str, Field(max_length=MAX_FRONTIER_KEY_LENGTH)]
+    """Truncated, and carrying whatever redaction the matching :class:`EntityView` carries: it
+    is the same adversary-chosen string, so it gets the same treatment on both routes out."""
+
+    expected_information_gain: Annotated[float, Field(ge=0.0, le=1.0)]
+    estimated_cost: Annotated[float, Field(ge=0.0)]
+    value_per_cost: float
+    rationale: Annotated[str, Field(max_length=MAX_FRONTIER_RATIONALE_LENGTH)]
+    addresses_hypothesis: str | None = None
+    would_pivot_through_shared_infrastructure: bool = False
+    """Surfaced rather than hidden. A discounted lead that stays visible lets a pilot say "the
+    hosting provider *is* the answer here" and be judged on it; silently dropping it would make
+    the frontier look complete when it was not."""
+
+
 MAX_CONTEXT_ITEMS: Final = 8
 """How many items of any one research-context list a briefing may carry.
 
@@ -326,6 +371,14 @@ class Briefing(BaseModel):
     """Only what this investigation surfaced, not the global graph. Minimum necessary: the
     pilot is untrusted, so it is shown the leads it needs to drive and no standing map of
     everything NEMESIS knows."""
+
+    frontier: Annotated[tuple[PivotCandidateView, ...], Field(max_length=MAX_FRONTIER_ITEMS)] = ()
+    """Unexplored leads the pursuit policy scored, best value-per-cost first.
+
+    Empty unless the mediator was given a policy, which keeps the seam byte-identical for every
+    caller that has not opted in — including every containment test written before this field
+    existed, whose subject is what the pilot may *do* rather than what it is shown.
+    """
 
     envelope: EnvelopeView
     research_context: ResearchContext | None = None

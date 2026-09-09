@@ -64,6 +64,7 @@ from nemesis.core.disclosure import (
     disclosure_of_entity,
     scan_for_internal_material,
 )
+from nemesis.core.entities import Entity
 from nemesis.core.ids import IdPrefix, new_id
 from nemesis.core.temporal import TemporalExtent, utcnow
 from nemesis.effects.registry import (
@@ -80,6 +81,9 @@ from nemesis.pilot.challenger import (
     validation_detail,
 )
 from nemesis.pilot.moves import (
+    MAX_FRONTIER_ITEMS,
+    MAX_FRONTIER_KEY_LENGTH,
+    MAX_FRONTIER_RATIONALE_LENGTH,
     PILOT_MOVE_ADAPTER,
     Briefing,
     Conclude,
@@ -88,6 +92,7 @@ from nemesis.pilot.moves import (
     EnvelopeView,
     HypothesisView,
     PilotMove,
+    PivotCandidateView,
     RecordBelief,
     RequestEffect,
     ResearchContext,
@@ -112,6 +117,7 @@ from nemesis.ports.isolation import EffectsExecutor
 from nemesis.ports.storage import AuditEvent, AuditSink, ClaimStore, GraphStore
 from nemesis.pursuit.engine import PursuitEngine
 from nemesis.pursuit.investigation import IncidentSeed, Investigation
+from nemesis.pursuit.policy import PursuitPolicy
 
 DEFAULT_MAX_MOVES = 40
 DEFAULT_MAX_CONSECUTIVE_MALFORMED = 3
@@ -195,6 +201,19 @@ def _redacted_context(context: ResearchContext | None) -> ResearchContext | None
 def _redact(text: str) -> str:
     """Substitute every internal marker with a token no longer than the marker it replaces."""
     return _MARKER_PATTERN.sub(CONTEXT_REDACTION, text)
+
+
+def _truncate(text: str, limit: int) -> str:
+    """Bound a projected string, marking that it was cut rather than cutting silently.
+
+    Truncation and not rejection. These fields are bounded because a briefing is sent onward on
+    every turn, not because a long value is an attack — and a projection that raised on an
+    over-long natural key would hand an adversary a denial of service payable by registering a
+    long domain.
+    """
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 1)] + "…"
 
 
 def _redact_markers(text: str) -> str:
@@ -503,6 +522,7 @@ class PilotMediator:
         challenger: MoveChallenger | None = None,
         challenge_policy: ChallengePolicy | None = None,
         stagnation: SessionStagnationDetector | None = None,
+        policy: PursuitPolicy | None = None,
     ) -> None:
         self._engine = engine
         self._graph = graph
@@ -524,6 +544,12 @@ class PilotMediator:
         self._propose_timeout = propose_timeout
         self._challenger = challenger
         self._challenge_policy = challenge_policy or ChallengePolicy()
+        # Optional, and there is deliberately no default. A policy here changes what the pilot
+        # is *shown*, never what it is allowed to do, so a wiring site that wants the pilot
+        # navigating against the engine's own ranking says so by name — and one that wants to
+        # measure an unaided model leaves it out. Defaulting it on would silently rewrite the
+        # subject of every containment test that predates the frontier.
+        self._policy = policy
         # Default-on, and there is no boolean that switches it off. A deployment that wants a
         # longer leash widens the thresholds, which is a visible configuration change; a flag
         # would be an invisible one, and this repository's own commit history records what a
@@ -1317,6 +1343,71 @@ class PilotMediator:
 
     # -- briefing -------------------------------------------------------------
 
+    def _frontier(
+        self,
+        investigation: Investigation,
+        briefed: list[Entity],
+        views: list[EntityView],
+    ) -> tuple[PivotCandidateView, ...]:
+        """The unexplored leads the policy scores, ranked, for the entities the pilot may see.
+
+        Advisory in the strict sense: nothing here widens what the pilot may propose, and a
+        move is validated identically whether or not it appeared on the frontier. What it
+        changes is that a refusal to take a highly-ranked lead, or a preference for a
+        discounted one, becomes a *recorded* choice rather than an unobservable one.
+
+        The candidates come from one branch — the same one ``execute_pivot`` would act on — so
+        the pilot's frontier and the engine's next move are computed against identical state.
+        A consequence worth naming: the policy's ``already_run`` is per-branch and not
+        per-entity, so a pivot type run on one entity stops being offered on the others too.
+        That is conservative in the direction that costs a lead rather than repeats one, and it
+        is the policy's existing semantics rather than something invented here.
+        """
+        if self._policy is None or not briefed:
+            return ()
+
+        branch = next(iter(investigation.open_branches), None)
+        if branch is None:
+            branch = investigation.branches[0] if investigation.branches else None
+        if branch is None:
+            return ()
+
+        redacted = {view.entity_id: view.natural_key for view in views}
+        candidates = [
+            candidate
+            for entity in briefed
+            for candidate in self._policy.propose(branch, entity, investigation.hypotheses)
+        ]
+        candidates.sort(key=lambda c: (-c.value_per_cost, c.pivot_type.value, c.entity_key))
+
+        return tuple(
+            PivotCandidateView(
+                pivot_type=candidate.pivot_type.value,
+                entity_id=candidate.entity_id,
+                entity_type=candidate.entity_type.value,
+                # The key the matching EntityView carries, so an adversary-chosen natural key
+                # is redacted once and reaches the pilot the same way by both routes. Truncated
+                # rather than rejected: a long key is a briefing that fails to build, and a
+                # projection that raises on a legitimate value is a control an adversary fires
+                # by registering a long domain.
+                entity_key=_truncate(
+                    redacted.get(candidate.entity_id, candidate.entity_key),
+                    MAX_FRONTIER_KEY_LENGTH,
+                ),
+                expected_information_gain=candidate.expected_information_gain,
+                estimated_cost=candidate.estimated_cost,
+                value_per_cost=candidate.value_per_cost,
+                # Platform-authored, from the policy's own table, so it is bounded but not
+                # redacted — there is no adversary-controlled substring in it to neutralise.
+                rationale=_truncate(candidate.rationale, MAX_FRONTIER_RATIONALE_LENGTH),
+                addresses_hypothesis=candidate.addresses_hypothesis,
+                would_pivot_through_shared_infrastructure=(
+                    candidate.would_pivot_through_shared_infrastructure
+                ),
+            )
+            for candidate in candidates[:MAX_FRONTIER_ITEMS]
+        )
+
     async def _brief(
         self,
         investigation: Investigation,
@@ -1338,6 +1429,7 @@ class PilotMediator:
                     entity_ids.append(eid)
 
         entities: list[EntityView] = []
+        briefed: list[Entity] = []
         # The cap counts entities the pilot is actually shown, not entities considered. It used
         # to slice `entity_ids` before the disclosure filter below, so internal-class nodes
         # consumed cap slots and were then dropped — an investigation that surfaced fifty
@@ -1369,6 +1461,11 @@ class PilotMediator:
             # deployment sending briefings to a hosted vendor must not read it as the latter.
             if disclosure_of_entity(entity.entity_type) is not DisclosureClass.DELIVERABLE:
                 continue
+            # Kept alongside the view so the frontier below can be built from *exactly* the
+            # entities that survived this filter. Deriving it from `entity_ids` instead would
+            # route an internal-class node's natural key to the pilot through a frontier
+            # entry's `entity_key`, having just spent this loop keeping it out of `entities`.
+            briefed.append(entity)
             entities.append(
                 EntityView(
                     entity_id=entity.entity_id,
@@ -1444,6 +1541,7 @@ class PilotMediator:
             moves_remaining=moves_remaining,
             hypotheses=hypotheses,
             entities=tuple(entities),
+            frontier=self._frontier(investigation, briefed, entities),
             envelope=envelope,
             research_context=_redacted_context(research_context),
             last_ruling=safe_last_ruling,

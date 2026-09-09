@@ -245,6 +245,11 @@ def test_a_session_holds_no_reference_a_pilot_could_write_through() -> None:
         "moves_remaining",
         "hypotheses",
         "entities",
+        # Scored leads, not a handle to the policy that scored them: a tuple of frozen
+        # `PivotCandidateView` values, each naming an entity the pilot is already shown in
+        # `entities` and carrying the same redaction. It widens nothing — a frontier entry is
+        # still only proposable as an ordinary move, and every check runs on it unchanged.
+        "frontier",
         "envelope",
         "research_context",
         "last_ruling",
