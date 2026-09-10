@@ -85,6 +85,35 @@ appear in any confidence figure, so a badly tuned prior costs time rather than c
 MAX_CONSECUTIVE_UNINFORMATIVE = 3
 MAX_BRANCH_DEPTH = 4
 
+SHARED_INFRASTRUCTURE_DISCOUNT = 0.1
+"""How far the expected value of a pivot through shared infrastructure collapses.
+
+Not forbidden — sometimes the CDN address really is the answer — but it sinks below everything
+else and only runs when nothing better is left.
+"""
+
+
+def prior_gain(entity_type: EntityType, pivot_type: PivotType) -> tuple[float, bool]:
+    """The prior for one (entity type, pivot type) pair, and whether it crosses shared
+    infrastructure.
+
+    Extracted so both callers read the same table. The discount is a *control*, not a tuning
+    knob: applying it where the engine picks a pivot but not where a pilot names one would
+    score the same move differently depending on who asked for it, and the audit line would
+    show a pilot taking a lead the policy would have sunk — while looking like it had agreed.
+    That is exactly the drift a shared helper exists to prevent.
+
+    A pair the table has no opinion about scores ``0.0``. That is a statement about our priors
+    and not about the pivot, and inventing a number here would put a measurement-shaped value
+    in front of an analyst with no way to tell it from a real one.
+    """
+    through_shared = entity_type in SHARED_INFRASTRUCTURE_TYPES
+    gain = next(
+        (g for pivot, g, _ in PIVOTS_FOR_ENTITY.get(entity_type, ()) if pivot is pivot_type),
+        0.0,
+    )
+    return (gain * SHARED_INFRASTRUCTURE_DISCOUNT if through_shared else gain, through_shared)
+
 
 @runtime_checkable
 class PursuitPolicy(Protocol):
@@ -118,16 +147,14 @@ class RuleBasedPursuitPolicy:
         open_hypothesis = next((h for h in hypotheses if not h.is_settled), None)
 
         candidates: list[PivotCandidate] = []
-        for pivot_type, gain, rationale in PIVOTS_FOR_ENTITY.get(entity.entity_type, ()):
+        for pivot_type, _prior, rationale in PIVOTS_FOR_ENTITY.get(entity.entity_type, ()):
             if pivot_type in already_run:
                 continue
 
-            through_shared = entity.entity_type in SHARED_INFRASTRUCTURE_TYPES
-
-            # A pivot on shared infrastructure is not forbidden — sometimes the CDN address
-            # really is the answer — but its expected value collapses, so it sinks below
-            # everything else and only runs when nothing better is left.
-            effective_gain = gain * 0.1 if through_shared else gain
+            # One source of truth with the pilot-driven path in `PursuitEngine.execute_pivot`.
+            # The `gain` from the table above is re-derived rather than reused so that a future
+            # change to the discount cannot apply to one caller and not the other.
+            effective_gain, through_shared = prior_gain(entity.entity_type, pivot_type)
 
             candidates.append(
                 PivotCandidate(
