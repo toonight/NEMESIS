@@ -70,8 +70,8 @@ from nemesis.ports.collection import (
     PivotType,
 )
 
-CONNECTOR_VERSION: Final = "0.1.0"
-DEFAULT_BASE_URL: Final = "https://www.ransomware.live/api"
+CONNECTOR_VERSION: Final = "0.1.1"
+DEFAULT_BASE_URL: Final = "https://api.ransomware.live/v2"
 DEFAULT_TIMEOUT_SECONDS: Final = 30.0
 DEFAULT_MAX_RESPONSE_BYTES: Final = 4 * 1_024 * 1_024
 MAX_TIMEOUT_SECONDS: Final = 120.0

@@ -1,0 +1,52 @@
+{
+  "audit_chain_intact": true,
+  "audit_entries_verified": 22,
+  "claims_total": 110,
+  "claims_with_resolvable_evidence": 110,
+  "connector_calls": 9,
+  "daybreak": {
+    "cached_input_tokens": 0,
+    "calls": 10,
+    "codex_attempts": 10,
+    "errors": 0,
+    "input_tokens": 205883,
+    "model": "gpt-daybreak-blue-latest",
+    "nonzero_return_codes": 0,
+    "output_tokens": 1712,
+    "reasoning_effort": "high",
+    "reasoning_output_tokens": 705
+  },
+  "elapsed_seconds": 180.173,
+  "evidence_id_set_sha256": "b86b810c518df1de44fd7c49594bd587b3a6d9d7f39ca99d906f5303fc5e36ca",
+  "evidence_objects_verified": 105,
+  "evidence_vault_intact": true,
+  "external_anchor_present_at_collection": false,
+  "failed_queries": 1,
+  "failed_source": {
+    "connector": "direct-joe-sandbox",
+    "result": "HTTP 403; no claim or evidence admitted"
+  },
+  "local_llm_calls": 0,
+  "outcome": "scope_exhausted",
+  "query_attempts": 9,
+  "ransomware_live": {
+    "claims_admitted": 100,
+    "connector_version": "0.1.1",
+    "handling": "sensitive_personal_data; no redistribution",
+    "result_truncated_at_requested_bound": true
+  },
+  "run_finished_at": "2026-09-10T02:27:20.608177+00:00",
+  "run_started_at": "2026-09-10T02:24:20.328099+00:00",
+  "simulated_evidence_objects": 0,
+  "successful_queries": 8,
+  "tor": {
+    "authentication_or_interaction": false,
+    "attempts": 2,
+    "content_read_or_parsed": false,
+    "evidence_references": 2,
+    "raw_content_redistributed": false,
+    "restricted_unique_objects": 1,
+    "successful": 2
+  },
+  "vault_head": "f32fcfe942315826f145b275119d67627e5d2ffbc2cf527359dae906092bb586"
+}

@@ -1,0 +1,56 @@
+{
+  "entries": [
+    {
+      "content_safety": "routine",
+      "evidence_id": "evd_sha256-323dedbcd9132364eed30561b98e351c7a56fc820e461d3420611b45c71486b2",
+      "is_simulated": false,
+      "source": "fastfire/deepdarkCTI",
+      "withheld_from_git": true
+    },
+    {
+      "content_safety": "routine",
+      "evidence_id": "evd_sha256-880b706dad42712d7e172f5e11f1e0769d3e7e417b22c52566baceca6a1d85ce",
+      "is_simulated": false,
+      "source": "Hurricane Electric BGP Toolkit",
+      "withheld_from_git": true
+    },
+    {
+      "content_safety": "malicious_code",
+      "evidence_id": "evd_sha256-c1d40d2aa33fda779e44c20578e35762287a564272ef4c145b6e632bc84a976d",
+      "is_simulated": false,
+      "source": "FBI / CISA / ASD's ACSC advisory",
+      "withheld_from_git": true
+    },
+    {
+      "content_safety": "routine",
+      "evidence_id": "evd_sha256-fb17132f17b0c5baeee63af84cbefec9e46d107a32ff3b0731aa1c2195de4817",
+      "is_simulated": false,
+      "source": "Hatching Triage",
+      "withheld_from_git": true
+    },
+    {
+      "content_safety": "legally_restricted",
+      "evidence_id": "evd_sha256-b54f6298c3be0b7023c425e501229824ea1c7d2cf1583c01c11852e00c714a4a",
+      "evidence_references": 2,
+      "handling_restrictions": [
+        "no redistribution"
+      ],
+      "is_simulated": false,
+      "source": "withheld allowlisted Play onion endpoints",
+      "withheld_from_git": true
+    }
+  ],
+  "raw_content_in_repository": false,
+  "schema": "nemesis-actor-hunt-evidence-manifest-v1",
+  "sensitive_collection": {
+    "content_safety": "sensitive_personal_data",
+    "count": 100,
+    "evidence_ids_sha256_in_full_set": "b86b810c518df1de44fd7c49594bd587b3a6d9d7f39ca99d906f5303fc5e36ca",
+    "handling_restrictions": [
+      "no redistribution"
+    ],
+    "is_simulated": false,
+    "source": "ransomware.live API v2",
+    "withheld_from_git": true
+  }
+}
