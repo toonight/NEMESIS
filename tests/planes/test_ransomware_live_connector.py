@@ -40,7 +40,7 @@ from nemesis.ports.collection import PivotRequest, PivotType
 from nemesis.sandbox.process import sandbox_available
 
 NOW = datetime(2026, 8, 26, 12, 0, tzinfo=UTC)
-FEED_URL = "https://www.ransomware.live/api/groupvictims/synthlock"
+FEED_URL = "https://api.ransomware.live/v2/groupvictims/synthlock"
 
 # Synthetic feed shaped like /groupvictims/<group>. No real victim data appears in this repo.
 SYNTHETIC_FEED = [
@@ -205,6 +205,18 @@ def test_a_real_transport_refuses_direct_unconfined_collection() -> None:
     assert not result.succeeded
     assert result.error is not None and "collect_confined" in result.error
     assert not result.evidence and not result.observations
+
+
+def test_default_authority_builds_the_v2_groupvictims_route() -> None:
+    transport = RecordingTransport(
+        FetchedFeed(url=FEED_URL, status_code=200, media_type="application/json", body=b"[]")
+    )
+    connector = RansomwareLiveConnector(as_of=NOW, transport=transport)
+
+    result = asyncio.run(connector.pivot(_request()))
+
+    assert result.succeeded
+    assert transport.calls == [FEED_URL]
 
 
 def test_an_unsafe_actor_key_never_reaches_the_transport() -> None:
