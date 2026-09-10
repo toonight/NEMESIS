@@ -19,12 +19,12 @@ answer.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 
-from nemesis.audit.trail import AuditEvent
 from nemesis.authz.envelope import AutonomyEnvelope
 from nemesis.authz.gateway import RevocationRegistry
 from nemesis.authz.keys import CapabilitySigningKey
@@ -43,11 +43,11 @@ from nemesis.core.ids import EvidenceId, IdPrefix, new_id
 from nemesis.core.temporal import TemporalExtent
 from nemesis.effects.isolation import InProcessEffectsExecutor
 from nemesis.effects.registry import default_registry
-from nemesis.evidence.vault import VaultIntegrityReport
 from nemesis.graph.memory import InMemoryClaimStore, InMemoryGraphStore
 from nemesis.pilot.mediator import PilotMediator
-from nemesis.pilot.moves import Briefing, Conclude
+from nemesis.pilot.moves import Briefing, Conclude, PilotMove
 from nemesis.ports.collection import PivotType
+from nemesis.ports.storage import AuditEvent, VaultIntegrityReport
 from nemesis.pursuit.engine import ConnectorRegistry, PursuitEngine
 from nemesis.pursuit.investigation import IncidentSeed
 from nemesis.pursuit.policy import PIVOTS_FOR_ENTITY, RuleBasedPursuitPolicy
@@ -103,6 +103,9 @@ class RecordingAudit:
     ) -> Sequence[AuditEvent]:
         raise NotImplementedError("these tests inspect .events directly")
 
+    async def verify_chain(self) -> bool:
+        raise NotImplementedError("chain verification is tested against the real audit trail")
+
 
 class RecordingPilot:
     """Concludes immediately, keeping every briefing it was handed."""
@@ -114,7 +117,7 @@ class RecordingPilot:
     def name(self) -> str:
         return "recording-pilot"
 
-    async def propose(self, briefing: Briefing) -> object:
+    async def propose(self, briefing: Briefing) -> PilotMove | Mapping[str, Any]:
         self.briefings.append(briefing)
         return Conclude(summary="captured the briefing")
 
