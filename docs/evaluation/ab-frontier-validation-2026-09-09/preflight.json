@@ -1,0 +1,42 @@
+{
+  "arm_a_wire_frontier_key_present": true,
+  "arm_a_wire_frontier_length": 0,
+  "arm_b_initial_frontier": [
+    {
+      "expected_information_gain": 0.8,
+      "pivot_type": "resolution_history",
+      "value_per_cost": 0.8
+    },
+    {
+      "expected_information_gain": 0.65,
+      "pivot_type": "certificate_history",
+      "value_per_cost": 0.65
+    },
+    {
+      "expected_information_gain": 0.55,
+      "pivot_type": "registration_record",
+      "value_per_cost": 0.55
+    },
+    {
+      "expected_information_gain": 0.4,
+      "pivot_type": "subdomain_discovery",
+      "value_per_cost": 0.4
+    }
+  ],
+  "available_fixture_default_moves_remaining": 40,
+  "configured_hosted_models": 0,
+  "fixed_pilot_arm_equivalence": true,
+  "full_repository_suite": "pass_outside_outer_sandbox",
+  "live_sessions_completed": 0,
+  "minimum_two_sided_p_at_six_paired_blocks": 0.03125,
+  "minimum_two_sided_p_at_six_unpaired_per_arm": 0.0021645021645021645,
+  "minimum_two_sided_p_at_eight_paired_blocks": 0.0078125,
+  "move_tool_schema_version": "1acf5fe818d36547",
+  "prompt_digest": "280cc00ac80f8c4d",
+  "prompt_version": "2026-08-22",
+  "prohibited_content_scan": "pass",
+  "status": "REQUIRES_EXTERNAL_DATA",
+  "strict_mypy": "pass",
+  "targeted_tests_passed": 20,
+  "top_p_supported": false
+}
