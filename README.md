@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/toonight/NEMESIS/actions/workflows/ci.yml/badge.svg)](https://github.com/toonight/NEMESIS/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.13-1f6feb)
-![Tests](https://img.shields.io/badge/tests-2249-2ea043)
+![Tests](https://img.shields.io/badge/tests-2251-2ea043)
 ![Typing](https://img.shields.io/badge/mypy-strict-2ea043)
 ![Plane contracts](https://img.shields.io/badge/plane%20contracts-15%20enforced-ff8a3d)
 ![Status](https://img.shields.io/badge/status-default%20simulated%20%7C%20opt--in%20Tor-e5a50a)
@@ -259,8 +259,12 @@ the refusal is in code it cannot reach.
 
 **No request has ever been sent to a hosted vendor from this repository.** The five provider
 adapters are written from vendor documentation and confirmed by tests against hand-written
-responses. Their request shapes are `IMPLEMENTED` and *unconfirmed on the wire*; opt-in live
-tests exist to close that gap and no CI run performs one.
+responses. The hosted request shapes remain *unconfirmed on the wire*; opt-in live tests exist
+to close that gap and no CI run performs one. The local Ollama seat was exercised through its
+real localhost transport on 2026-09-11: four valid tool calls drove four accepted pivots and
+sealed eight claims. That local run says nothing about the hosted adapters. The validation
+boundary and retained checksums are published in the
+[local Ollama report](docs/evaluation/ollama-thinking-2026-09-11/REPORT.md).
 
 **PilotBench grades a model against a corpus we wrote.** Its control-plane half — nothing left,
 no move escaped the vocabulary, no belief became evidence — is a fact about NEMESIS. Its quality

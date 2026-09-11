@@ -179,8 +179,10 @@ Every item is in the hash-chained trail today:
 | Which provider and model drove | read once at session open from a typed identity, never from a turn |
 | What the call cost | latency, tokens, attempts — descriptive, read by no ruling |
 
-What is deliberately **not** there: any field a reasoning trace could occupy. The parsers read
-tool blocks only; a `thinking` block that arrives is dropped where it lands.
+What is deliberately **not** there: any persistent field a reasoning trace could occupy. The
+parsers read tool blocks only; a `thinking` block that arrives is dropped where it lands. The
+local Ollama transport receives such a block when `think:true` is enabled, but it remains
+transient local process data and never enters the parsed move, metadata or audit trail.
 
 ---
 

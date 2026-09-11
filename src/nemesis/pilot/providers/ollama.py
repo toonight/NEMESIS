@@ -60,6 +60,12 @@ agree on one address; nothing in this package opens it."""
 DEFAULT_MODEL: Final = "qwen3.8:27b-q8_0"
 DEFAULT_TIMEOUT_SECONDS: Final = 180.0
 
+THINKING_NUM_PREDICT_FLOOR: Final = 8192
+"""Minimum output budget once ``think`` is on, because a reasoning trace spends tokens before
+the answer starts. Measured: an xhigh trace plus its answer finished well under this bound
+(``done_reason=stop`` at ~2400 eval tokens), while a 1024 ceiling returned empty content —
+the whole budget consumed by thinking. The floor never lowers a larger request."""
+
 LAB_NOTICE: Final = (
     "Local inference. No briefing leaves this machine, so the hosted-model data-governance "
     "question does not arise — and does not get answered by omission either."
@@ -84,12 +90,25 @@ prose either way — the vendor-side narrowing is a convenience, never the contr
 def build_request(request: PilotRequest, tools: list[dict[str, Any]]) -> dict[str, Any]:
     """Compose the request from the briefing, and only the briefing.
 
-    ``think`` is off: Qwen3 defaults to a long hidden reasoning trace, and a review that produced
-    zero bytes for ten minutes was that trace being generated and buffered. It is off for a
-    second reason that outranks the first — this platform does not request private reasoning
-    traces from any vendor, and a local model is not an exception because the trace stays on the
-    machine. The sampling settings are the ones measured to avoid repetition collapse; see
-    ``scripts/local-review.sh``, where the same lesson was learned the hard way.
+    ``think`` is on for this local-only seat. This differs materially from Gemini: Gemini gets
+    ``thinkingBudget > 0`` with ``includeThoughts`` absent, so its trace never comes back; Ollama
+    returns ``message.thinking`` to the injected localhost transport. :func:`parse_chat` ignores
+    that field, so the trace exists transiently in local process memory but never enters a
+    :class:`~nemesis.pilot.providers.seat.ParsedResponse`, move, metadata record or audit event.
+    The honest guarantee is therefore local-only handling with no persistence or exposure, not
+    that NEMESIS never receives the trace.
+
+    A blind comparison motivated the change: with the trace on, Qwen was preferred in all four
+    sampled persona scenarios against the no-reasoning path, largely on deception-awareness —
+    the faculty that layer exists for (invariant 13). That was four scenarios, one trial per
+    condition and one judge model evaluated in both presentation orders; it is an integration
+    signal, not a general quality estimate.
+
+    ``num_predict`` is therefore floored at :data:`THINKING_NUM_PREDICT_FLOOR`. A reasoning trace
+    consumes output budget before the answer begins, and the ceiling that was fine without a
+    trace produced empty content with one — all of it spent thinking. The floor only raises a
+    ceiling that is too low; a caller asking for more still gets more. The sampling settings are
+    the ones measured to avoid repetition collapse; see ``scripts/local-review.sh``.
     """
     options: dict[str, Any] = {
         "temperature": 0.6
@@ -97,7 +116,7 @@ def build_request(request: PilotRequest, tools: list[dict[str, Any]]) -> dict[st
         else request.decoding.temperature,
         "repeat_penalty": 1.15,
         "num_ctx": 16384,
-        "num_predict": request.decoding.max_output_tokens,
+        "num_predict": max(request.decoding.max_output_tokens, THINKING_NUM_PREDICT_FLOOR),
     }
     if request.decoding.seed is not None:
         options["seed"] = request.decoding.seed
@@ -109,7 +128,7 @@ def build_request(request: PilotRequest, tools: list[dict[str, Any]]) -> dict[st
         ],
         "tools": tools,
         "stream": False,
-        "think": False,
+        "think": True,
         "options": options,
     }
 

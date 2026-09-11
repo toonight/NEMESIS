@@ -94,11 +94,13 @@ explain why two runs differed is one dial short. The attempt count reaches the a
 which closes a gap the mediator's own comment had opened: it claimed "never a silent retry" and
 nothing asserted it.
 
-**Reasoning is requested only where the trace does not come back.** OpenAI's `reasoning_effort`
-and Gemini's `thinkingConfig` without `includeThoughts` are used. Anthropic's extended thinking
-returns `thinking` blocks, so this platform declines the feature and refuses a configured
-reasoning effort at construction rather than dropping it silently. NEMESIS does not request or
-persist private reasoning traces; there is no field on the way out for one to occupy.
+**Hosted reasoning is requested only where the trace does not come back.** OpenAI's
+`reasoning_effort` and Gemini's `thinkingConfig` without `includeThoughts` are used. Anthropic's
+extended thinking returns `thinking` blocks, so this platform declines the feature and refuses a
+configured reasoning effort at construction rather than dropping it silently. The local Ollama
+seat is different: `think:true` returns a trace over localhost, and its parser drops the field
+before constructing a move or metadata. That trace is transient local process data; it is never
+persisted or exposed, but it is received. There is no field on the way out for it to occupy.
 
 **The move vocabulary forbids unknown arguments.** `extra="forbid"` on all four moves. An
 argument the vocabulary does not define is an argument nobody validated.
@@ -275,12 +277,18 @@ Verified against this repository, by running it:
   bare IP address where the materializer requires `<entity_type>:<key>`, so two scenarios planted
   nothing and the check caught it.
 
-**Not verified, and explicitly so:** every vendor API detail — endpoint shapes, field names,
-which models accept `reasoning_effort`, Gemini's exact schema subset — is written from
-documentation and is *unconfirmed against a live vendor* in this repository. No CI run contacts
-any of them. `tests/planes/test_live_providers.py` exists to close that gap and is opt-in,
-gated on `NEMESIS_LIVE_<PROVIDER>=1` plus a credential; until somebody runs it, treat every
-provider adapter as `IMPLEMENTED` in shape and unconfirmed on the wire.
+**Verification status:** every hosted API detail — endpoint shapes, field names, which models
+accept `reasoning_effort`, Gemini's exact schema subset — is written from documentation and is
+*unconfirmed against a live vendor* in this repository. No CI run contacts any of them.
+`tests/planes/test_live_providers.py` exists to close that gap and is opt-in, gated on
+`NEMESIS_LIVE_<PROVIDER>=1` plus a credential.
+
+The local Ollama adapter crossed its real localhost transport on 2026-09-11. Four valid tool
+calls drove four accepted pivots and eight sealed claims; the eight-object vault and 11-entry
+audit chain verified, and the audit contained no `thinking` field. This validates the local
+request/response path only. It does not validate any hosted adapter. The aggregate facts,
+limitations, and retained file digests are in the
+[local validation report](../evaluation/ollama-thinking-2026-09-11/REPORT.md).
 
 ## Revisit when
 

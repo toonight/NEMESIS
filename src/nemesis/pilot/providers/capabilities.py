@@ -61,10 +61,11 @@ class ModelCapability(StrEnum):
     REASONING_EFFORT = "reasoning_effort"
     """A reasoning level can be requested **without the trace being returned**.
 
-    The qualification is the whole point. NEMESIS does not request or persist private reasoning
-    traces, so a vendor whose reasoning mode returns thinking blocks does not carry this
+    The qualification is the whole point for hosted seats. They do not request private reasoning
+    traces, so a hosted vendor whose reasoning mode returns thinking blocks does not carry this
     capability here even though it reasons perfectly well — see
-    :mod:`nemesis.pilot.providers.anthropic`."""
+    :mod:`nemesis.pilot.providers.anthropic`. The local Ollama seat handles reasoning separately:
+    its localhost response may contain a trace, which the parser discards before persistence."""
 
     SEEDING = "seeding"
     """A seed makes sampling reproducible. Best-effort at every vendor that offers it, and

@@ -25,11 +25,12 @@ exists to establish. :class:`ProviderIdentity` also carries what the vendor *sai
 provider silently substituting a model is visible (:attr:`PilotResponseMetadata.model_substituted`)
 rather than invisible.
 
-**There is nowhere for a credential or a reasoning trace to go.** Every field below is a scalar
-or a bounded structure. There is no header map, no raw request, no raw response, and no field
-for hidden chain-of-thought — NEMESIS does not request private reasoning traces and has nowhere
-to persist one if a vendor sent it anyway. Token *counts* for reasoning are kept, because a
-count is a cost and not a thought.
+**There is nowhere for a credential or a reasoning trace to persist.** Every field below is a
+scalar or a bounded structure. There is no header map, no raw request, no raw response, and no
+field for hidden chain-of-thought. Hosted seats do not request traces. The local Ollama seat may
+receive one transiently from localhost when thinking is enabled, but its parser discards that
+field before constructing these types. Token *counts* for reasoning are kept, because a count is
+a cost and not a thought.
 """
 
 from __future__ import annotations

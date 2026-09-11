@@ -25,7 +25,7 @@ guarantee, and it is the only one that sees a bare literal inside a function bod
 field default, or a two-line logic change that touches no constant at all. `engine_drifted()`
 names the modules that moved.
 
-**Every module-level constant**, by normalised syntax, in `CONSTANT_DIGESTS` — 792 of them,
+**Every module-level constant**, by normalised syntax, in `CONSTANT_DIGESTS` — 793 of them,
 with no classification whatsoever. A dial does not have to hold a digit and does not have to
 look like a table; four rules for deciding what counted were tried and all four excluded
 something load-bearing. `constants_drifted()` names what moved, appeared or vanished.
@@ -135,7 +135,7 @@ CALIBRATION_CONSTANTS: Final[tuple[str, ...]] = (
 """The curated epistemic subset, named as ``module:NAME`` and frozen by **imported value**.
 
 Not "every number": most of what decides a published figure here is not a number at all — of the
-792 dials `discovered_constants()` covers, 556 hold no numeric literal. And not the completeness
+793 dials `discovered_constants()` covers, 556 hold no numeric literal. And not the completeness
 guarantee either, which is the job of the two syntactic digests; this list is deliberately
 curated, so it is allowed to be incomplete in a way they are not.
 
@@ -792,12 +792,13 @@ CONSTANT_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis.pilot.providers.ollama:OLLAMA_CAPABILITIES": "47b33531e62a27f3",
         "nemesis.pilot.providers.ollama:OLLAMA_DIALECT": "b8bdcc3499837b38",
         "nemesis.pilot.providers.ollama:PROVIDER": "1607b4a2e9259d73",
+        "nemesis.pilot.providers.ollama:THINKING_NUM_PREDICT_FLOOR": "f6ebc93587c6e89c",
         "nemesis.pilot.providers.openai:API_KEY_ENVIRONMENT_VARIABLE": "dfa9a73805cbdaa6",
         "nemesis.pilot.providers.openai:OPENAI_CAPABILITIES": "f4958643323e1b80",
         "nemesis.pilot.providers.openai:OPENAI_DIALECT": "82c2e8e7be7a1023",
         "nemesis.pilot.providers.openai:PROVIDER": "8c6d2d4a939baa64",
         "nemesis.pilot.providers.openai_dialect:OPENAI_COMPATIBLE_CAPABILITIES": "379476d2d663d5aa",
-        "nemesis.pilot.providers.registry:PROVIDERS": "f2c1ccc6b7fc32b7",
+        "nemesis.pilot.providers.registry:PROVIDERS": "7caa6b613f4ffb8e",
         "nemesis.pilot.providers.registry:PROVIDER_NAMES": "7e4cbc8484653aa8",
         "nemesis.pilot.providers.reliability:DEFAULT_BASE_DELAY_SECONDS": "dd9b4f9965b4b079",
         "nemesis.pilot.providers.reliability:DEFAULT_MAX_ATTEMPTS": "aa8f0f382ba251f3",
@@ -1100,7 +1101,7 @@ def discovered_constants(tree: Path | None = None) -> dict[str, str]:
     `EXCLUDED_CONCLUSIONS`, four security tables made of plain strings. The module digest covered
     them, so it was never a bypass; the claim that every dial was *named* was simply false.
 
-    So there is no rule now. Every module-level upper-case assignment is a dial, 792 of them,
+    So there is no rule now. Every module-level upper-case assignment is a dial, 793 of them,
     and the cost of including the genuine prose is nothing: rewording a message already moves
     that module's syntax digest, so no new failure mode is introduced by naming it too.
 
@@ -1362,10 +1363,10 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/pilot/providers/contract.py": "e9c24563d39d6579",
         "nemesis/pilot/providers/errors.py": "b3d0dfc04003b068",
         "nemesis/pilot/providers/gemini.py": "670fa44bd869452c",
-        "nemesis/pilot/providers/ollama.py": "3ae12fff3e55396a",
+        "nemesis/pilot/providers/ollama.py": "b19dd0a0f080e991",
         "nemesis/pilot/providers/openai.py": "52d7a9f81213b14f",
         "nemesis/pilot/providers/openai_dialect.py": "f82efc11b003a240",
-        "nemesis/pilot/providers/registry.py": "98e801a403b85c88",
+        "nemesis/pilot/providers/registry.py": "435dc3b04f831379",
         "nemesis/pilot/providers/reliability.py": "db9bb20750b897e6",
         "nemesis/pilot/providers/schema.py": "f5042bd8c7309804",
         "nemesis/pilot/providers/seat.py": "f9099d2210436e15",

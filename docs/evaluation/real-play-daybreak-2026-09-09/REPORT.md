@@ -13,8 +13,8 @@ local or embedded LLM was called.
   one Codex attempt per decision and no model errors.
 - NEMESIS executed nine connector pivots: eight succeeded and one failed visibly.
 - The run admitted 110 claims, and all 110 resolve to sealed evidence metadata.
-- The vault contains 105 unique real evidence objects: four ordinary public captures,
-  one official advisory classified for malicious-code handling, 100 sensitive
+- The vault contains 105 unique real evidence objects: four public captures — one of them
+  the official advisory, classified for malicious-code handling — 100 sensitive
   ransomware.live records, and one restricted Tor object.
 - All 105 evidence objects have `is_simulated=false`.
 - The two explicitly allowlisted Play onion endpoints responded through confined Tor.
@@ -22,6 +22,11 @@ local or embedded LLM was called.
 - The evidence-vault chain and the 22-entry audit chain passed independent verification.
 - No external effect was requested. The run performed no probing, scanning,
   authentication, payload execution, interaction, or infrastructure modification.
+- **No negative control was attempted.** `effects.negative_control.status` is `missing` in
+  the run record. Unlike the [public IOC evaluation](../public-ioc-2026-09-09/REPORT.md),
+  which had a deliberately forbidden request refused as `refused_out_of_envelope`, this run
+  contains no move the limiter had to stop. It therefore shows that no effect was needed,
+  not that the effect boundary holds. Read the two reports together, not this one alone.
 
 The move sequence was: C2 extraction from the malware sample, reverse resolution of the
 reported C2, official malware lookup, public actor search, ransomware.live actor lookup,
