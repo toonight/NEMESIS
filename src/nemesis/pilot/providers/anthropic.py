@@ -13,7 +13,7 @@ deliberate refusal. What differs, and only this:
 
 **Extended thinking is not requested here, and that is a decision rather than an omission.**
 Anthropic's reasoning mode returns the reasoning: ``thinking`` blocks come back in the response
-body. This platform does not request or persist private reasoning traces — a hidden chain of
+body. This hosted seat does not request or persist private reasoning traces — a hidden chain of
 thought is not evidence, is not a claim, and has nowhere in the evidence model to live — so the
 seat declines the feature rather than receiving a trace and discarding it, and
 :data:`ANTHROPIC_CAPABILITIES` does not declare ``REASONING_EFFORT``. Configuring a reasoning

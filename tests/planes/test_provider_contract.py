@@ -639,15 +639,15 @@ def test_a_thinking_block_that_arrives_anyway_is_dropped() -> None:
     assert "chain of thought" not in json.dumps(decision.metadata.model_dump(mode="json"))
 
 
-def test_the_local_seat_lets_the_model_reason_without_ingesting_the_trace() -> None:
-    """Ollama's ``think`` is on, aligning the local seat with how Gemini is already treated:
-    the model may reason, and the platform declines the trace rather than the reasoning.
+def test_the_local_seat_lets_the_model_reason_without_persisting_the_trace() -> None:
+    """Ollama's ``think`` is on for the local seat, whose localhost transport receives the
+    trace before the parser discards it. Gemini differs because its trace never comes back.
 
-    A blind quality comparison on the persona layer settled this — xhigh reasoning beat the
-    no-reasoning path on every scenario, decided by deception-awareness, the one faculty that
-    layer exists for. The trace stays on the machine and is never read (the companion test
-    below proves the second half). ``num_predict`` is floored high enough that the trace does
-    not starve the answer: a small ceiling produced empty content, all budget spent thinking.
+    A four-scenario, one-trial blind comparison motivated this integration choice; it is not a
+    general quality estimate. The trace stays on the machine and never enters the parsed move or
+    metadata (the companion test below proves that boundary). ``num_predict`` is floored high
+    enough that the trace does not starve the answer: a small ceiling produced empty content,
+    all budget spent thinking.
     """
     payload = seat("ollama").build_payload(briefing())
     assert payload["think"] is True

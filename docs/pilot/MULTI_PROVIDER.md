@@ -1,8 +1,9 @@
 # Driving NEMESIS with any frontier model
 
 **Status:** `IMPLEMENTED` (the seam, the five seats, the registry, the benchmark) ·
-`REQUIRES_EXTERNAL_DATA` (a live model — no transport ships wired) ·
-**unconfirmed on the wire** (no request in this repository has ever been sent to a vendor; see
+`VALIDATED_LOCAL` (Ollama through the real localhost transport, 2026-09-11) ·
+`REQUIRES_EXTERNAL_DATA` / **unconfirmed on the wire** for every hosted adapter (no request in
+this repository has ever been sent to a vendor; see
 [ADR-0009 § Verification status](../adr/0009-provider-neutral-pilot-seats.md)).
 
 NEMESIS is the harness an autonomous frontier model drives. This document is about who may sit
@@ -164,14 +165,20 @@ control an adversary can fire is a denial of service they were handed.
 
 ### Reasoning traces
 
-NEMESIS does not request or persist private chain-of-thought from any provider. Where a vendor
-offers deliberation *without* returning it, this platform uses it: OpenAI's `reasoning_effort`,
-Gemini's thinking budget with `includeThoughts` omitted. Where the feature returns the trace —
-Anthropic's extended thinking — the seat declines it, does not declare the capability, and
-**refuses a configured reasoning effort at construction** rather than dropping it silently. A
-`thinking` block that arrives anyway is dropped where it lands: the parsers read tool blocks
-only, and there is no field on the way out for a trace to occupy. Reasoning *token counts* are
-kept, because a count is a cost and not a thought.
+Hosted seats do not request or persist private chain-of-thought. Where a vendor offers
+deliberation *without* returning it, this platform uses it: OpenAI's `reasoning_effort` and
+Gemini's thinking budget with `includeThoughts` omitted. Where a hosted feature returns the
+trace — Anthropic's extended thinking — the seat declines it, does not declare the capability,
+and **refuses a configured reasoning effort at construction** rather than dropping a trace it
+asked for.
+
+The local Ollama seat is an explicit exception to the no-request rule. With `think:true`, Ollama
+returns `message.thinking` to the injected localhost transport. The parser ignores that field,
+so it is transient local process data and cannot enter the parsed move, metadata or audit trail.
+This is a no-persistence and no-exposure guarantee; it is not the stronger Gemini property that
+the trace never comes back. A `thinking` block that arrives unexpectedly at any other seat is
+also dropped where it lands. Reasoning *token counts* are kept, because a count is a cost and not
+a thought.
 
 ---
 
@@ -347,9 +354,10 @@ rather than imagining it.
 
 Real ones, not hedges.
 
-1. **No request in this repository has ever been sent to a vendor.** Every endpoint shape, field
-   name and capability declaration is written from documentation. Treat every adapter as correct
-   in shape and unconfirmed on the wire until a live test has been run.
+1. **No request in this repository has ever been sent to a hosted vendor.** Every hosted endpoint
+   shape, field name and capability declaration is written from documentation. Treat the hosted
+   adapters as correct in shape and unconfirmed on the wire until a live test has been run. The
+   Ollama adapter has one real local run; it does not validate any hosted dialect.
 2. **The benchmark grades against a corpus we wrote.** It measures agreement with our
    imagination of an attack.
 3. **`unsupported_inference` is 100% by construction.** `RecordBelief.derived_from_claims` asks

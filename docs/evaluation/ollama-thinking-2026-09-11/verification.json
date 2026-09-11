@@ -1,0 +1,39 @@
+{
+  "daybreak_healthcheck": {
+    "claims_total": 23,
+    "codex_errors": 0,
+    "frontier_adherence_demonstrated": false,
+    "model": "gpt-daybreak-blue-latest",
+    "moves": 8,
+    "own_telemetry_ever_on_frontier": false,
+    "own_telemetry_executed": true,
+    "own_telemetry_proposed": true,
+    "pivots_executed": 7,
+    "validates_ollama_path": false
+  },
+  "external_anchor_present_at_run_time": false,
+  "local_ollama": {
+    "audit_chain_intact": true,
+    "audit_entries_verified": 11,
+    "claims_sealed": 8,
+    "evidence_objects_verified": 8,
+    "evidence_vault_intact": true,
+    "forced_tool_choice_supported": false,
+    "model": "qwen3.8:27b-q4_k_m",
+    "outcome": "open",
+    "pivots_executed": 4,
+    "think": true,
+    "thinking_key_in_persisted_audit": false,
+    "trace_leaked_into_audit": false,
+    "valid_tool_calls": 4
+  },
+  "persona_comparison": {
+    "conditions_per_scenario": 3,
+    "explicit_judge_verdicts_retained": false,
+    "general_quality_claim_supported": false,
+    "judge_models": 1,
+    "scenarios": 4,
+    "trials_per_condition": 1
+  },
+  "run_date": "2026-09-11"
+}

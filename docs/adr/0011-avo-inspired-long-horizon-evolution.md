@@ -131,9 +131,10 @@ contradictory observations, source and evidence gaps, high-value and exhausted p
 branch notes, and untrusted hints — each entry carrying a `MemorySource`, a creator, a source
 reference and a repeat key.
 
-There is no `chain_of_thought` field and nowhere for one to go. NEMESIS does not request private
-reasoning traces and has nothing to persist one in — the rule
-`PilotResponseMetadata` states for a single turn, applied to a memory that outlives the turn.
+There is no `chain_of_thought` field and nowhere for one to persist. Hosted seats do not request
+private reasoning traces. The local Ollama seat can receive one transiently over localhost and
+drops it before constructing `PilotResponseMetadata` — the single-turn rule applied here to a
+memory that outlives the turn.
 
 The structure carries its own classification as a `Literal`:
 `MODEL_GENERATED_OPERATIONAL_MEMORY`. It is not evidence, not an observation, not a fact and not an

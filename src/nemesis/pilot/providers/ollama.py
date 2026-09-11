@@ -90,17 +90,19 @@ prose either way — the vendor-side narrowing is a convenience, never the contr
 def build_request(request: PilotRequest, tools: list[dict[str, Any]]) -> dict[str, Any]:
     """Compose the request from the briefing, and only the briefing.
 
-    ``think`` is on, which is the same posture the seat already takes with Gemini: the model is
-    allowed to reason, and the platform declines the *trace* rather than the reasoning. Gemini
-    gets ``thinkingBudget > 0`` with ``includeThoughts`` absent; Ollama gets ``think: True`` and
-    :func:`parse_chat` never reads the ``message.thinking`` field it returns. The trace is
-    generated on the machine and discarded, so "this platform does not receive or persist private
-    reasoning" holds exactly as before — what changed is that the local model is no longer denied
-    the reasoning itself.
+    ``think`` is on for this local-only seat. This differs materially from Gemini: Gemini gets
+    ``thinkingBudget > 0`` with ``includeThoughts`` absent, so its trace never comes back; Ollama
+    returns ``message.thinking`` to the injected localhost transport. :func:`parse_chat` ignores
+    that field, so the trace exists transiently in local process memory but never enters a
+    :class:`~nemesis.pilot.providers.seat.ParsedResponse`, move, metadata record or audit event.
+    The honest guarantee is therefore local-only handling with no persistence or exposure, not
+    that NEMESIS never receives the trace.
 
-    It was off until a blind quality comparison on the persona layer settled it: with the trace
-    on, Qwen won every scenario against the no-reasoning path, decided by deception-awareness —
-    the one faculty that layer exists for (invariant 13). Off, it lost all four.
+    A blind comparison motivated the change: with the trace on, Qwen was preferred in all four
+    sampled persona scenarios against the no-reasoning path, largely on deception-awareness —
+    the faculty that layer exists for (invariant 13). That was four scenarios, one trial per
+    condition and one judge model evaluated in both presentation orders; it is an integration
+    signal, not a general quality estimate.
 
     ``num_predict`` is therefore floored at :data:`THINKING_NUM_PREDICT_FLOOR`. A reasoning trace
     consumes output budget before the answer begins, and the ceiling that was fine without a

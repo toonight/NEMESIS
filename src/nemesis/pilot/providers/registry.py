@@ -137,7 +137,7 @@ PROVIDERS: Final[Mapping[str, ProviderSpec]] = MappingProxyType(
                 api_key_environment_variable=anthropic.API_KEY_ENVIRONMENT_VARIABLE,
                 notes=(
                     "Messages API. Extended thinking is NOT requested: it returns the trace, "
-                    "and this platform does not receive or persist private reasoning."
+                    "and this hosted seat declines private reasoning traces."
                 ),
             ),
             ProviderSpec(
