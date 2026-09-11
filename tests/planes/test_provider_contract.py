@@ -639,6 +639,42 @@ def test_a_thinking_block_that_arrives_anyway_is_dropped() -> None:
     assert "chain of thought" not in json.dumps(decision.metadata.model_dump(mode="json"))
 
 
+def test_the_local_seat_lets_the_model_reason_without_ingesting_the_trace() -> None:
+    """Ollama's ``think`` is on, aligning the local seat with how Gemini is already treated:
+    the model may reason, and the platform declines the trace rather than the reasoning.
+
+    A blind quality comparison on the persona layer settled this — xhigh reasoning beat the
+    no-reasoning path on every scenario, decided by deception-awareness, the one faculty that
+    layer exists for. The trace stays on the machine and is never read (the companion test
+    below proves the second half). ``num_predict`` is floored high enough that the trace does
+    not starve the answer: a small ceiling produced empty content, all budget spent thinking.
+    """
+    payload = seat("ollama").build_payload(briefing())
+    assert payload["think"] is True
+    assert payload["options"]["num_predict"] >= 8192
+
+
+def test_the_local_reasoning_trace_never_reaches_the_move_or_metadata() -> None:
+    """``message.thinking`` is the trace Ollama returns when ``think`` is on. It must not come
+    back into anything the platform persists — the same rule the Anthropic drop test enforces,
+    applied to the field the local provider uses."""
+    body = {
+        "message": {
+            "role": "assistant",
+            "thinking": "a long private chain of thought about the persona",
+            "tool_calls": [{"function": {"name": "conclude", "arguments": {"summary": "done"}}}],
+        },
+        "model": "as-served",
+    }
+    transport = RecordingTransport(body)
+    pilot = build_pilot(PilotConfig(provider="ollama", model="a-model-id"), transport=transport)
+    decision = asyncio.run(pilot.decide(briefing()))
+    assert PILOT_MOVE_ADAPTER.validate_python(decision.raw).kind == "conclude"
+    assert decision.metadata is not None
+    assert "chain of thought" not in json.dumps(decision.metadata.model_dump(mode="json"))
+    assert "chain of thought" not in json.dumps(decision.raw)
+
+
 def test_an_unknown_provider_is_refused_and_never_defaulted() -> None:
     """A deployment that misspells `anthropic` and silently gets OpenAI has transmitted every
     briefing to a vendor it did not choose."""
