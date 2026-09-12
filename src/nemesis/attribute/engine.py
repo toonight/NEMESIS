@@ -48,6 +48,7 @@ from nemesis.attribute.dimensions import (
     AttributionDimension,
     DimensionAssessment,
     EvidenceAvailability,
+    IdentityDisposition,
     IdentityGateResult,
     MissingEvidence,
     RefusalReason,
@@ -89,6 +90,27 @@ if one ever exists, and until then they are stated here so a reader can disagree
 rather than having to reverse-engineer them from an output.
 """
 
+
+HUMAN_IDENTITY_PROFILE_BASE_RATE = 0.15
+"""Prior for a name-free operator *profile* on the human-identity dimension (ADR-0015).
+
+Deliberately far higher than :data:`DEFAULT_BASE_RATE`'s ``0.01`` for a *named* person: the
+proposition is different. "A single operator with these characteristics stands behind this
+operation" is an ordinary shape of thing, priced like a persona-linkage prior; "this specific
+adult is that person" is one candidate out of every adult with a keyboard. A hypothesis on the
+profile proposition may never name anyone — that stays behind the strong-shape SCORED gate.
+
+Calibration choice, not a measurement. Provisional, and stated so a reader can disagree.
+"""
+
+HYPOTHESIS_CAVEAT = (
+    "HYPOTHESIS, not an identification: a name-free operator profile held as an internal, "
+    "deception-discounted lead. It names no natural person, it is RESTRICTED and never leaves "
+    "the platform, and it is not an accusation. Naming a person as a finding requires the "
+    "unplantable, corroborated evidence the SCORED gate demands."
+)
+"""The mandatory caveat on a human-identity hypothesis. Its presence is enforced by
+:class:`~nemesis.attribute.dimensions.DimensionAssessment`."""
 
 LOW_PLANTING_COSTS: frozenset[str] = frozenset({"trivial", "low"})
 """Planting costs at which a marker tells us more about the planter than about the named.
@@ -302,6 +324,21 @@ class DimensionInput(BaseModel):
     base_rate: Annotated[float, Field(ge=0.0, le=1.0)] | None = None
     """Prior for this proposition. Defaults to :data:`DEFAULT_BASE_RATE` for the dimension."""
 
+    is_profile: bool = False
+    """Human-identity only (ADR-0015). When True, ``hypothesis`` is a name-free operator
+    *profile* and the dimension emits a HYPOTHESIS rather than running the naming gate. The
+    caller — in the reference wiring, the local pilot — asserts the profile names no natural
+    person; the export wall keeps it internal regardless."""
+
+    @model_validator(mode="after")
+    def _profile_is_human_identity_only(self) -> Self:
+        if self.is_profile and self.dimension is not AttributionDimension.HUMAN_IDENTITY:
+            raise AttributionError(
+                "is_profile is a human-identity concept; it has no meaning on the "
+                f"{self.dimension.value} dimension"
+            )
+        return self
+
     @model_validator(mode="after")
     def _one_direction_per_claim(self) -> Self:
         directions: dict[str, EvidenceDirection] = {}
@@ -382,13 +419,17 @@ class AttributionResult(BaseModel):
 
     @property
     def names_a_person(self) -> bool:
-        """Whether this attribution asserts a natural person's identity.
+        """Whether this attribution *asserts* a natural person's identity.
 
-        The acceptance criterion of the GLASS ANVIL scenario is that this is False. It is
-        derived from the gate result rather than tracked separately, so it cannot drift out
-        of agreement with what the assessment actually says.
+        True only for the SCORED disposition — the strong-shape gate having passed. A
+        HYPOTHESIS is a name-free profile lead and a WITHHELD is a refusal; neither asserts
+        a person, so both are False (ADR-0015). Derived from the disposition rather than
+        tracked separately, so it cannot drift out of agreement with the assessment.
         """
-        return not self.for_dimension(AttributionDimension.HUMAN_IDENTITY).is_refused
+        return (
+            self.for_dimension(AttributionDimension.HUMAN_IDENTITY).identity_disposition
+            is IdentityDisposition.SCORED
+        )
 
     def render(self) -> str:
         """Plain text for an analyst or a report. Five blocks, no total."""
@@ -734,6 +775,12 @@ class AttributionEngine:
                 "No natural person is named by this attribution: the human-identity "
                 "dimension was refused at the structural gate."
             )
+        elif human.is_hypothesis:
+            warnings.append(
+                "The human-identity dimension is a name-free profile HYPOTHESIS: an internal, "
+                "deception-discounted lead, not an identification and not for disclosure. No "
+                "natural person is named by this attribution."
+            )
         if inverted_total:
             warnings.append(
                 f"{inverted_total} signal(s) offered in support were recorded as "
@@ -754,12 +801,24 @@ class AttributionEngine:
 
     def _assess_dimension(self, item: DimensionInput) -> tuple[DimensionAssessment, int]:
         base_rate = item.effective_base_rate()
+        proposition = proposition_of(item.dimension)
 
         gate: IdentityGateResult | None = None
+        disposition: IdentityDisposition | None = None
         if item.dimension is AttributionDimension.HUMAN_IDENTITY:
             # Before anything is scored. The ordering is the control, not a convenience.
             gate = run_identity_gate(item.evidence)
-            if not gate.passed:
+            if item.is_profile:
+                # ADR-0015: a name-free operator profile is a hypothesis, not a naming. It
+                # answers a shared-origin proposition ("these signals describe one operator")
+                # on a higher prior than the naming proposition, and may never name a person.
+                disposition = IdentityDisposition.HYPOTHESIS
+                proposition = PropositionClass.SHARED_ORIGIN
+                if item.base_rate is None:
+                    base_rate = HUMAN_IDENTITY_PROFILE_BASE_RATE
+            elif gate.passed:
+                disposition = IdentityDisposition.SCORED
+            else:
                 return self._refused_assessment(item, gate, base_rate), 0
 
         oriented = tuple(_orient(evidence, base_rate) for evidence in item.evidence)
@@ -773,7 +832,7 @@ class AttributionEngine:
             )
             for entry in oriented
         )
-        fusion = fuse(sourced, proposition=proposition_of(item.dimension))
+        fusion = fuse(sourced, proposition=proposition)
 
         supporting = _unique(
             entry.evidence.claim_id
@@ -793,7 +852,7 @@ class AttributionEngine:
             )
 
         contributions = self._contributions(
-            oriented, sourced, fusion.opinion, base_rate, item.dimension
+            oriented, sourced, fusion.opinion, base_rate, proposition
         )
         temporal = assess_temporal_consistency(
             [entry.evidence.claim.valid_extent for entry in oriented],
@@ -818,6 +877,20 @@ class AttributionEngine:
             if contribution.is_negligible
         )
 
+        extra_missing: tuple[MissingEvidence, ...] = ()
+        if disposition is IdentityDisposition.HYPOTHESIS:
+            # HYPOTHESIS is only assigned on the human-identity dimension, where the gate ran.
+            assert gate is not None
+            if band_of(fusion.opinion) is ConfidenceBand.INSUFFICIENT_BASIS:
+                # The profile's support collapsed — typically every signal was cheaply
+                # plantable and inverted. Nothing credible remains to hypothesise, so decline
+                # rather than dress an empty estimate as a low one.
+                return self._refused_assessment(item, gate, base_rate), len(inverted)
+            # The caveat is mandatory (the assessment refuses a hypothesis without it) and
+            # leads the warnings so it is the first thing a reader sees.
+            warnings.insert(0, HYPOTHESIS_CAVEAT)
+            extra_missing = tuple(_REFUSAL_REMEDY[reason] for reason in gate.reasons)
+
         assessment = DimensionAssessment(
             dimension=item.dimension,
             hypothesis=item.hypothesis,
@@ -829,12 +902,13 @@ class AttributionEngine:
             supporting_claims=supporting,
             contradicting_claims=contradicting,
             alternatives=tuple(alternatives),
-            missing_evidence=item.missing_evidence,
+            missing_evidence=item.missing_evidence + extra_missing,
             source_diversity=SourceDiversity.from_fusion(fusion),
             temporal_consistency=temporal,
             reasoning=self._reasoning(item, fusion.opinion, base_rate, contributions, temporal),
             signal_contributions=contributions,
             identity_gate=gate,
+            identity_disposition=disposition,
             warnings=tuple(warnings),
         )
         return assessment, len(inverted)
@@ -881,6 +955,7 @@ class AttributionEngine:
             reasoning=gate.explanation,
             signal_contributions=(),
             identity_gate=gate,
+            identity_disposition=IdentityDisposition.WITHHELD,
             warnings=(
                 "Insufficient basis is not a low probability. It is a refusal to estimate, "
                 "and it must not be reported as a hedged identification.",
@@ -893,7 +968,7 @@ class AttributionEngine:
         sourced: Sequence[SourcedOpinion],
         fused: Opinion,
         base_rate: float,
-        dimension: AttributionDimension,
+        proposition: PropositionClass,
     ) -> tuple[SignalContribution, ...]:
         """Leave-one-out: what each signal was actually worth in the company it kept.
 
@@ -909,7 +984,7 @@ class AttributionEngine:
             # fuse(()), whose default base rate of 0.5 would report a movement that is an
             # artifact of the empty case.
             without = (
-                fuse(remaining, proposition=proposition_of(dimension)).opinion
+                fuse(remaining, proposition=proposition).opinion
                 if remaining
                 else Opinion.vacuous(base_rate=base_rate)
             )

@@ -192,9 +192,14 @@ margin at `ACTOR_ATTRIBUTION` removes it, and the honest report is that nothing 
 established. A conclusion an adversary can manufacture by planting one artifact is not a
 conclusion.
 
-**Human identity is refused structurally, before anything is scored.** One anonymous post, one
-origin, an adversary-writable channel. The gate returns `SINGLE_SOURCED` and the assessment
-carries no number to hedge.
+**Human identity is `WITHHELD` — the disposition that carries no number to hedge.** One anonymous
+post, one origin, an adversary-writable channel, offered as a *naming* identification. Since
+[ADR-0015](../adr/0015-human-identity-may-be-hypothesised-never-asserted.md) the dimension has a
+third disposition — a name-free operator *profile* offered with `is_profile=True` is emitted as a
+low-confidence, deception-discounted `HYPOTHESIS`. IRON TIDE does not exercise it: its lead is a
+naming identification on a single adversary-writable source, so it routes to `WITHHELD` exactly as
+before (`names_a_person` stays False, band `insufficient basis`). The scenario is unchanged; the
+mechanism around it grew a disposition it does not reach.
 
 ### 3.6 EVIDENCE
 
