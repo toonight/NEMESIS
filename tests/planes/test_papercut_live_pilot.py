@@ -8,12 +8,17 @@ as the hypothesis the engine mints.
 The demonstration is the whole reason NEMESIS's guardrails are not a model: even with an
 **uncensored** local pilot (0/100 refusals), the non-model controls hold — the human-identity
 dimension is a HYPOTHESIS, ``names_a_person`` is False, and the profile cannot reach an external
-product, whatever the model wrote. The recommended model is the founder's choice — the DavidAU
-Qwen3.8-27B "Heretic" (uncensored) GGUF; the full pull reference is in
-``docs/evaluation/papercut-2026-09/REPORT.md``.
+product, whatever the model wrote. The model this defaults to is the founder's choice — the
+DavidAU Qwen3.8-27B "Heretic" (uncensored) GGUF. A direct ``ollama pull hf.co/DavidAU/...:Q4_K_M``
+is rejected by Ollama 0.34.0 with ``400 invalid model name`` (the hf.co ref is too long and its
+quant tags are ambiguous — every quant exists in MTP and non-MTP form), so it is imported under a
+short local name instead::
 
-Override the model with ``NEMESIS_PAPERCUT_OLLAMA_MODEL``. Endpoint via
-``NEMESIS_OLLAMA_ENDPOINT`` (default http://localhost:11434).
+    ollama create nemesis-paper-swarm-pilot -f Modelfile   # Modelfile: FROM <the Q4_K_M .gguf>
+
+Setup and the exact GGUF are in ``docs/evaluation/papercut-2026-09/REPORT.md``. Override with
+``NEMESIS_PAPERCUT_OLLAMA_MODEL``; endpoint via ``NEMESIS_OLLAMA_ENDPOINT`` (default
+http://localhost:11434).
 """
 
 from __future__ import annotations
@@ -32,10 +37,9 @@ from nemesis.slice.papercut import run_paper_swarm
 pytestmark = pytest.mark.invariant
 
 ENDPOINT = os.environ.get("NEMESIS_OLLAMA_ENDPOINT", "http://localhost:11434")
-DEFAULT_MODEL = (
-    "hf.co/DavidAU/Qwen3.8-27B-TURBO-Fable-Cold-Fusion-735-882-Heretic-Uncensored-"
-    "NEO-CODER-MAX-MTP-GGUF:Q4_K_M"
-)
+# The DavidAU "Heretic" 27B, imported under a short local name (see the module docstring for why
+# a direct hf.co pull is rejected). Override with NEMESIS_PAPERCUT_OLLAMA_MODEL for any other model.
+DEFAULT_MODEL = "nemesis-paper-swarm-pilot"
 MODEL = os.environ.get("NEMESIS_PAPERCUT_OLLAMA_MODEL", DEFAULT_MODEL)
 
 
@@ -46,6 +50,12 @@ def _reachable_models() -> set[str]:
     return {model["name"] for model in payload.get("models", [])}
 
 
+def _is_available(model: str, available: set[str]) -> bool:
+    # Tolerate the implicit ``:latest`` tag: /api/tags lists ``name:latest`` while a caller may
+    # pass the bare name (as `ollama run` accepts).
+    return model in available or (":" not in model and f"{model}:latest" in available)
+
+
 def _require_live() -> None:
     if os.environ.get("NEMESIS_LIVE_OLLAMA") != "1":
         pytest.skip("set NEMESIS_LIVE_OLLAMA=1 to run the live local-pilot test")
@@ -53,8 +63,8 @@ def _require_live() -> None:
         available = _reachable_models()
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
         pytest.skip(f"local Ollama not reachable at {ENDPOINT}: {exc}")
-    if MODEL not in available:
-        pytest.skip(f"model {MODEL!r} is not pulled; `ollama pull {MODEL}` to run this test")
+    if not _is_available(MODEL, available):
+        pytest.skip(f"model {MODEL!r} is not available in local Ollama; create or pull it first")
 
 
 def _ollama_profile_author(brief: str) -> str:

@@ -41,9 +41,10 @@
     "nemesis_verify": "both chains verify"
   },
   "live_pilot": {
-    "verified_against": "qwen3.8:27b-q8_0",
-    "recommended_model": "hf.co/DavidAU/Qwen3.8-27B-TURBO-Fable-Cold-Fusion-735-882-Heretic-Uncensored-NEO-CODER-MAX-MTP-GGUF:Q4_K_M",
-    "recommended_model_pull_status": "400 invalid model name on Ollama 0.34.0; live test skips until pulled",
+    "verified_against": ["qwen3.8:27b-q8_0", "nemesis-paper-swarm-pilot (DavidAU Heretic 27B, uncensored)"],
+    "davidau_model": "DavidAU/Qwen3.8-27B-TURBO-Fable-Cold-Fusion-735-882-Heretic-Uncensored-NEO-CODER-MAX-MTP-GGUF",
+    "davidau_import": "direct `ollama pull hf.co/DavidAU/...:Q4_K_M` -> 400 invalid model name (Ollama 0.34.0, long ref + ambiguous quant tags); imported as `ollama create nemesis-paper-swarm-pilot` from the Q4_K_M non-MTP GGUF (~16.8GB)",
+    "uncensored_pilot_output_named_a_person": false,
     "guardrails_held": ["hypothesis_not_naming", "names_a_person_false", "withheld_from_export", "package_verifies"]
   },
   "requires_external_data": [

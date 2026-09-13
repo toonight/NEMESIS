@@ -91,18 +91,27 @@ The profile is authored by an injected pilot. The offline default is a determini
 reference run is reproducible in CI. The opt-in live path
 ([`tests/planes/test_papercut_live_pilot.py`](../../../tests/planes/test_papercut_live_pilot.py))
 sends the name-free brief to the local Ollama pilot and feeds the model's own text back as the
-hypothesis. **Verified live against `qwen3.8:27b-q8_0`:** the model authored the profile and every
-non-model control held — HYPOTHESIS, `names_a_person` False, withheld from the external product, the
-sealed package still verifies. That is the point of the design: even an **uncensored** local pilot
-(the recommended model,
-`hf.co/DavidAU/Qwen3.8-27B-TURBO-Fable-Cold-Fusion-735-882-Heretic-Uncensored-NEO-CODER-MAX-MTP-GGUF`,
-selected precisely because it will not refuse to profile an actor) cannot make NEMESIS name or accuse
-a person. The guardrails are not the model.
+hypothesis. **Verified live against two local pilots** — `qwen3.8:27b-q8_0` and the founder's
+chosen **uncensored** DavidAU "Heretic" 27B — and every non-model control held in both: HYPOTHESIS,
+`names_a_person` False, the profile withheld from the external product, the sealed package still
+verifies. That is the point of the design: a model that *will not refuse* to profile an actor still
+cannot make NEMESIS name or accuse a person. The guardrails are not the model.
 
-> Note: pulling that specific model via `ollama pull hf.co/DavidAU/...:Q4_K_M` returned
-> `400 Bad Request: invalid model name` on Ollama 0.34.0 (name-validation, not a download failure).
-> The live test defaults to that reference and **skips gracefully** until it is pulled; set
-> `NEMESIS_PAPERCUT_OLLAMA_MODEL` to run against any pulled model.
+What the uncensored DavidAU pilot actually wrote (verbatim, name-free, and it hedged the
+nationality itself): *"A distributed, tool-agnostic group using open-source automation and
+AI-assisted scripting to run high-volume, low-friction exploitation campaigns at scale. Human
+operators supervise via chat-like sessions. The use of a CIS-country blacklist hints at regional
+origin or preference, but is unreliable for attribution. Likely motivated by broad access rather
+than specific data."* It named no one.
+
+> **Getting the DavidAU model into Ollama.** A direct `ollama pull hf.co/DavidAU/…:Q4_K_M` is
+> rejected with `400 Bad Request: invalid model name` on Ollama 0.34.0 — the hf.co reference is
+> too long and its quant tags are ambiguous (every quant ships in an MTP and a non-MTP file). So
+> the Q4_K_M **non-MTP** GGUF
+> (`Qwen3.8-27B-TurboFCFusion-735-882-Here-Uncen-NEO-CODER-MAX-Q4_K_M.gguf`, ~16.8 GB) is
+> downloaded and imported under a short name: `ollama create nemesis-paper-swarm-pilot -f Modelfile`
+> where the `Modelfile` is `FROM <that .gguf>`. The live test defaults to `nemesis-paper-swarm-pilot`
+> and **skips gracefully** if it is absent; override with `NEMESIS_PAPERCUT_OLLAMA_MODEL`.
 
 ---
 
