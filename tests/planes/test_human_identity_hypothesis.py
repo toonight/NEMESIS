@@ -20,6 +20,7 @@ import pytest
 
 from nemesis.attribute.dimensions import (
     AttributionDimension,
+    DimensionAssessment,
     IdentityDisposition,
 )
 from nemesis.attribute.disclosure import redact_for_disclosure
@@ -27,6 +28,7 @@ from nemesis.attribute.engine import (
     AttributionEngine,
     AttributionEvidence,
     AttributionRequest,
+    AttributionResult,
     DimensionInput,
 )
 from nemesis.core.claims import Claim, ClaimKind, DeceptionAssessment, DerivationKind, Statement
@@ -159,7 +161,7 @@ def _profile_input(*evidence: AttributionEvidence) -> DimensionInput:
     )
 
 
-def _assess(item: DimensionInput):
+def _assess(item: DimensionInput) -> tuple[AttributionResult, DimensionAssessment]:
     result = _engine().assess(
         AttributionRequest(subject="Operation PAPERCUT (agentic)", dimensions=(item,)),
         assessed_at=ASSESSED_AT,
