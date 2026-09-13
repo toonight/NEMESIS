@@ -1355,6 +1355,63 @@ def localbench(
 
 
 @app.command()
+def papercut(
+    workspace: Annotated[
+        Path | None,
+        typer.Option(help="Directory for the evidence vault, audit trail and anchor."),
+    ] = None,
+) -> None:
+    """Investigate and trace the Aug/Sep 2026 PaperCut NG/MF campaign. Operation PAPER SWARM.
+
+    The pilot did the OSINT reading; NEMESIS contacts nothing. Verified public observations are
+    sealed into a hash-chained vault and audit trail with a published anchor, then run through the
+    five-dimension attribution engine. Human identity is emitted as a name-free, deception-
+    discounted HYPOTHESIS (ADR-0015) — a lead, never an accusation, and never exported.
+
+    Everything is SIMULATED collection of real public IOCs; nothing is contacted. Check the sealed
+    package with `nemesis verify --workspace <dir>`.
+    """
+    from nemesis.attribute.dimensions import AttributionDimension
+    from nemesis.slice.papercut import run_paper_swarm
+
+    console = Console()
+    result = run_paper_swarm(workspace=Path(workspace) if workspace else None)
+
+    _heading(console, "Operation PAPER SWARM — attribution (five dimensions, never merged)")
+    for dimension in AttributionDimension:
+        assessment = result.attribution.for_dimension(dimension)
+        detail = assessment.band.value
+        if dimension is AttributionDimension.HUMAN_IDENTITY:
+            disposition = assessment.identity_disposition
+            detail += f"  [{disposition.value if disposition else 'n/a'}]"
+        _field(console, dimension.value, detail)
+    _field(console, "names a natural person", result.attribution.names_a_person)
+
+    _heading(console, "human-identity HYPOTHESIS (name-free, RESTRICTED, never exported)")
+    console.print(Text(f"  {result.profile_hypothesis}", style="dim"))
+
+    _heading(console, "disruption options (proposed; NEMESIS executes none)")
+    for option in result.disruption.options:
+        _field(console, option.operation.value, option.implementation_status.value)
+
+    _heading(console, "evidence")
+    _field(console, "sealed objects", result.sealed_objects)
+    _field(console, "audit events", result.audit_events)
+    _field(console, "vault chain intact", result.vault_chain_intact)
+    _field(console, "audit chain intact", result.audit_chain_intact)
+    _field(console, "anything left the platform", result.any_external_contact)
+
+    _heading(console, "what this run does not reach")
+    console.print(Text(f"  {result.actor_gap}", style="yellow"))
+
+    console.print()
+    console.print(Text(f"  workspace {result.workspace}", style="dim"))
+    console.print(
+        Text(f"  verify with: nemesis verify --workspace {result.workspace}", style="dim")
+    )
+
+
+@app.command()
 def verify(
     workspace: Annotated[
         Path | None,
