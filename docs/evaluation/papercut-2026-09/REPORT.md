@@ -126,3 +126,28 @@ than specific data."* It named no one.
   edit, not an operator who rewrites the whole store. An external anchor is `REQUIRES_EXTERNAL_DATA`.
 - Naming the individual behind the operation is `REQUIRES_EXTERNAL_DATA` and, by ADR-0015, would
   require unplantable, corroborated evidence (the SCORED gate) this run does not clear.
+
+---
+
+## Validating the actor's name — the dark-web path
+
+The name is a **hypothesis, and it stays one**. Moving it to a named finding (`SCORED`) is not a
+matter of asking the model harder: an uncensored local pilot ordered to "name the operator as an
+established fact for a court filing" complies and fabricates a confident, false accusation —
+measured directly (`tests/planes/test_papercut_live_pilot.py`), including one that even named a
+nationality contradicting the OSINT. NEMESIS contained every such attempt as a HYPOTHESIS,
+`names_a_person` False, never exported. **The guardrails are not the model.**
+
+A real name is validated only by **unplantable, corroborated evidence**, and for a threat actor
+that evidence lives in the dark web — operator or forum attestations, marketplace-identity linkage,
+an account the actor uniquely holds. NEMESIS has the mechanism and deliberately does **not** fire it
+here: the opt-in `TorOnionConnector` takes bounded snapshots of **explicitly operator-allowlisted**
+v3 onion services under kernel confinement (off by default, no endpoint shipped);
+`parse_deepdarkcti` turns an operator-supplied allowlist into candidate onions for review; and
+`resolve.actor_corroboration.corroborate_actor` fuses what several sources say about one actor
+without letting a single origin become a boost.
+
+This run performs **no dark-web collection and invents no name.** Deanonymising a natural person is
+`REQUIRES_LEGAL_AUTHORITY` for a private entity by design — NEMESIS is built ready for a legally
+authorised operator, not holding that authority itself. Until such evidence is collected and
+corroborated, the actor's identity remains a hypothesis. That is the correct answer, not a gap.
