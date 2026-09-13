@@ -25,7 +25,7 @@ guarantee, and it is the only one that sees a bare literal inside a function bod
 field default, or a two-line logic change that touches no constant at all. `engine_drifted()`
 names the modules that moved.
 
-**Every module-level constant**, by normalised syntax, in `CONSTANT_DIGESTS` — 793 of them,
+**Every module-level constant**, by normalised syntax, in `CONSTANT_DIGESTS` — 822 of them,
 with no classification whatsoever. A dial does not have to hold a digit and does not have to
 look like a table; four rules for deciding what counted were tried and all four excluded
 something load-bearing. `constants_drifted()` names what moved, appeared or vanished.
@@ -135,7 +135,7 @@ CALIBRATION_CONSTANTS: Final[tuple[str, ...]] = (
 """The curated epistemic subset, named as ``module:NAME`` and frozen by **imported value**.
 
 Not "every number": most of what decides a published figure here is not a number at all — of the
-793 dials `discovered_constants()` covers, 556 hold no numeric literal. And not the completeness
+822 dials `discovered_constants()` covers, 582 hold no numeric literal. And not the completeness
 guarantee either, which is the job of the two syntactic digests; this list is deliberately
 curated, so it is allowed to be incomplete in a way they are not.
 
@@ -197,6 +197,8 @@ CONSTANT_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis.attribute.engine:DECEPTION_BASE_RATE": "5097d8d3c07c0f02",
         "nemesis.attribute.engine:DEFAULT_BASE_RATE": "c7f54eb3c2804e6c",
         "nemesis.attribute.engine:DIMENSION_PROPOSITION": "a6e4dd5a1223a27d",
+        "nemesis.attribute.engine:HUMAN_IDENTITY_PROFILE_BASE_RATE": "33ed5d4a54c882a5",
+        "nemesis.attribute.engine:HYPOTHESIS_CAVEAT": "525208ecf753c172",
         "nemesis.attribute.engine:LOW_PLANTING_COSTS": "b32c8197cf2f7b04",
         "nemesis.attribute.engine:NEGLIGIBLE_CONTRIBUTION_NOTE": "3c1811a49b869c51",
         "nemesis.attribute.engine:PLANTED_EVIDENCE_DISBELIEF_CEILING": "176ae9fcc8b1a09f",
@@ -517,6 +519,29 @@ CONSTANT_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis.collect.fixtures.iron_tide:_REGISTRATION_EXPIRES": "b990aa1fbf63f584",
         "nemesis.collect.fixtures.iron_tide:_SCAN_OBSERVED_FROM": "aa395cfd9ed7ed78",
         "nemesis.collect.fixtures.iron_tide:_SCAN_OBSERVED_UNTIL": "6a8896d5719000f1",
+        "nemesis.collect.fixtures.papercut:COLLECTED_AT": "8d27352ac36777d4",
+        "nemesis.collect.fixtures.papercut:COLLECTION_METHOD": "b312f236b41c51b9",
+        "nemesis.collect.fixtures.papercut:CVE_AUTH_BYPASS": "939b16a559c9a9c0",
+        "nemesis.collect.fixtures.papercut:CVE_UNSAFE_REFLECTION": "53c529bd4e0909e1",
+        "nemesis.collect.fixtures.papercut:DEFAULT_OPERATOR_PROFILE": "127e2a3a592f3970",
+        "nemesis.collect.fixtures.papercut:DIM_CAMPAIGN": "cb66b2e52ecb9372",
+        "nemesis.collect.fixtures.papercut:DIM_HUMAN_IDENTITY": "5abac24ad3ba6998",
+        "nemesis.collect.fixtures.papercut:DIM_INFRASTRUCTURE": "d5d4520d4a563c39",
+        "nemesis.collect.fixtures.papercut:DIM_ORGANIZATION": "315a418250ba4178",
+        "nemesis.collect.fixtures.papercut:DIM_PERSONA": "daec5f4b1dc0d9bc",
+        "nemesis.collect.fixtures.papercut:FIXTURE_SET": "45c64236e24168c7",
+        "nemesis.collect.fixtures.papercut:ORCHESTRATION_IP": "23eca75e15ade128",
+        "nemesis.collect.fixtures.papercut:PAYLOAD_HOST": "f2c597b5083ca4e6",
+        "nemesis.collect.fixtures.papercut:PROFILE_BRIEF": "fc55edf4917ce021",
+        "nemesis.collect.fixtures.papercut:SECONDARY_IP": "884d3cfed6324da5",
+        "nemesis.collect.fixtures.papercut:WINDOW": "24cc7c692933f2dc",
+        "nemesis.collect.fixtures.papercut:_ARCTIC_WOLF": "c4996062107ae1ac",
+        "nemesis.collect.fixtures.papercut:_BLACKPOINT": "e4a603c2fe456ab6",
+        "nemesis.collect.fixtures.papercut:_CIS_FALSE_FLAG": "dbe25b3a06594c4e",
+        "nemesis.collect.fixtures.papercut:_COMMODITY": "662f339134203dea",
+        "nemesis.collect.fixtures.papercut:_GREYNOISE": "707e104063352c30",
+        "nemesis.collect.fixtures.papercut:_HUNTRESS": "97d88368ce37362b",
+        "nemesis.collect.fixtures.papercut:_VENDOR": "44d601b845e585cc",
         "nemesis.collect.isolation:ANALYSER_WORKER_MODULE": "49b109e83398e47f",
         "nemesis.collect.isolation:DEFAULT_DEADLINE_SECONDS": "555016a71b57c351",
         "nemesis.collect.isolation:SHIPPED_ANALYSER_FACTORY": "c6d8e6b1ef06ba5f",
@@ -928,6 +953,10 @@ CONSTANT_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis.slice.loopbench:PILOTS": "83e13176a07479fb",
         "nemesis.slice.loopbench:PIVOT_CYCLE": "aba8b10ea61907ca",
         "nemesis.slice.loopbench:RUN_LENGTHS": "55ca626f16420c7e",
+        "nemesis.slice.papercut:ACTOR_GAP": "087c5e41fbc7a2c2",
+        "nemesis.slice.papercut:COLLECTION_METHOD_MOMENT": "b7dfe2637efdc418",
+        "nemesis.slice.papercut:SUBJECT": "8451e8f057bdefee",
+        "nemesis.slice.papercut:_DIMENSION_HYPOTHESIS": "c4ba6cbbc5f856a7",
         "nemesis.slice.pilot_session:APPROVED_DOMAIN": "496bf76b2c4507ad",
         "nemesis.slice.pilot_session:APPROVED_STATE": "da38c5e43da5f6a6",
         "nemesis.slice.pilot_session:EFFECT_BUDGET": "167ee1ab79e38d0a",
@@ -1101,7 +1130,7 @@ def discovered_constants(tree: Path | None = None) -> dict[str, str]:
     `EXCLUDED_CONCLUSIONS`, four security tables made of plain strings. The module digest covered
     them, so it was never a bypass; the claim that every dial was *named* was simply false.
 
-    So there is no rule now. Every module-level upper-case assignment is a dial, 793 of them,
+    So there is no rule now. Every module-level upper-case assignment is a dial, 822 of them,
     and the cost of including the genuine prose is nothing: rewording a message already moves
     that module's syntax digest, so no new failure mode is introduced by naming it too.
 
@@ -1231,9 +1260,9 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/api/submission.py": "d9b10d9ea5882f59",
         "nemesis/api/tenancy.py": "a3a2aa8383794052",
         "nemesis/attribute/__init__.py": "ad2e13b69c4fc1fd",
-        "nemesis/attribute/dimensions.py": "824561b007fdcb7d",
+        "nemesis/attribute/dimensions.py": "57aa6ae2a1f80601",
         "nemesis/attribute/disclosure.py": "36bf502de5ab7a28",
-        "nemesis/attribute/engine.py": "491d53c3c16746a4",
+        "nemesis/attribute/engine.py": "744f61015a039924",
         "nemesis/audit/__init__.py": "ad2e13b69c4fc1fd",
         "nemesis/audit/trail.py": "7b55854825f4b82c",
         "nemesis/authz/__init__.py": "ad2e13b69c4fc1fd",
@@ -1263,7 +1292,7 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/calibration/scoring.py": "b2e7a193a30d65a1",
         "nemesis/calibration/sizing.py": "340861bb04cab7b6",
         "nemesis/cli/__init__.py": "ad2e13b69c4fc1fd",
-        "nemesis/cli/main.py": "9663208cd10ac624",
+        "nemesis/cli/main.py": "894a2d12118d7779",
         "nemesis/collaboration/__init__.py": "ca1145a798cbf210",
         "nemesis/collaboration/approvals.py": "9e5aef566b46d5d1",
         "nemesis/collaboration/base.py": "0f24972d696c4060",
@@ -1287,6 +1316,7 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/collect/fixtures/__init__.py": "697cd02f522bbe51",
         "nemesis/collect/fixtures/glass_anvil.py": "ee6a6c4241054d2a",
         "nemesis/collect/fixtures/iron_tide.py": "1185765cf3c3a1d9",
+        "nemesis/collect/fixtures/papercut.py": "ee14835082abdac6",
         "nemesis/collect/isolation.py": "3c085a3c364d2c8c",
         "nemesis/collect/quarantine.py": "9491b7e246bf55b7",
         "nemesis/collect/ransomware_live.py": "0921b4d66c8feae9",
@@ -1409,6 +1439,7 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/slice/evolution_session.py": "4a447486b30a1fd6",
         "nemesis/slice/iron_tide.py": "6dc3bb53496b8f71",
         "nemesis/slice/loopbench.py": "c225f027dba8a7f7",
+        "nemesis/slice/papercut.py": "44367d30c6ce9a5f",
         "nemesis/slice/pilot_session.py": "82fb530c399d87f4",
         "nemesis/slice/scenario.py": "7e8f481ea0c674e2",
         "nemesis/slice/standing_session.py": "a4fff0e9d61da449",

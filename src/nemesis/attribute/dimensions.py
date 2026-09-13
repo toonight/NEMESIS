@@ -314,6 +314,29 @@ class RefusalReason(StrEnum):
     a model's say-so is the failure this platform is built to make impossible."""
 
 
+class IdentityDisposition(StrEnum):
+    """What the human-identity dimension did with what it was offered (ADR-0015).
+
+    The dimension no longer has only "scored" and "refused". A name-free operator *profile*,
+    offered deliberately by a pilot, is emitted as a hypothesis — distinct from both naming a
+    natural person and declining to estimate.
+    """
+
+    SCORED = "scored"
+    """The strong-shape gate passed. The only disposition that may assert a natural person's
+    identity — and even then the finding is RESTRICTED and never leaves the platform."""
+
+    HYPOTHESIS = "hypothesis"
+    """A name-free operator profile, held as an explicitly low-confidence, deception-discounted
+    lead in the Intelligence Graph. It names no natural person and never reaches an external
+    product. A hypothesis is a lead, not an accusation."""
+
+    WITHHELD = "withheld"
+    """Nothing to hypothesise (no evidence), or a naming identification on evidence too thin or
+    too plantable to score. The refusal restates no name — the document that withholds an
+    accusation must not carry it."""
+
+
 class IdentityGateResult(BaseModel):
     """The outcome of the structural gate on :attr:`AttributionDimension.HUMAN_IDENTITY`.
 
@@ -399,6 +422,9 @@ class DimensionAssessment(BaseModel):
 
     signal_contributions: tuple[SignalContribution, ...] = ()
     identity_gate: IdentityGateResult | None = None
+    identity_disposition: IdentityDisposition | None = None
+    """Set only on the human-identity dimension (ADR-0015). SCORED may name a person; HYPOTHESIS
+    is a name-free profile lead; WITHHELD declines to estimate. None on every other dimension."""
     warnings: tuple[str, ...] = ()
 
     @model_validator(mode="after")
@@ -418,30 +444,54 @@ class DimensionAssessment(BaseModel):
                 "cannot be interpreted until it is resolved"
             )
 
-        # The gate is not optional bookkeeping: an assessment of this dimension that
-        # carries no gate result is one where the gate never ran.
-        if self.dimension is AttributionDimension.HUMAN_IDENTITY and self.identity_gate is None:
-            raise ValueError(
-                "a human_identity assessment must carry the result of the identity gate"
-            )
+        # The gate and the disposition are not optional bookkeeping: an assessment of this
+        # dimension that carries neither is one where the gate never ran.
+        if self.dimension is AttributionDimension.HUMAN_IDENTITY:
+            if self.identity_gate is None:
+                raise ValueError(
+                    "a human_identity assessment must carry the result of the identity gate"
+                )
+            if self.identity_disposition is None:
+                raise ValueError(
+                    "a human_identity assessment must carry an identity disposition (ADR-0015)"
+                )
 
-        if self.identity_gate is not None and not self.identity_gate.passed:
+        if self.identity_disposition is IdentityDisposition.WITHHELD:
             if self.band is not ConfidenceBand.INSUFFICIENT_BASIS:
                 raise ValueError(
-                    "a refused human-identity assessment must report insufficient_basis, "
+                    "a withheld human-identity assessment must report insufficient_basis, "
                     "not a probability band"
                 )
             if self.supporting_claims:
                 raise ValueError(
-                    "a refused human-identity assessment must cite no supporting claims; "
+                    "a withheld human-identity assessment must cite no supporting claims; "
                     "the offered claims belong in the gate's refused_claims"
+                )
+        elif self.identity_disposition is IdentityDisposition.HYPOTHESIS:
+            # A hypothesis carries an explicit low confidence, never a refusal-to-estimate:
+            # insufficient_basis is what WITHHELD is for.
+            if self.band is ConfidenceBand.INSUFFICIENT_BASIS:
+                raise ValueError(
+                    "a human-identity hypothesis carries an explicit confidence band, not "
+                    "insufficient_basis; too thin to estimate is WITHHELD, not a hypothesis"
+                )
+            if not any("hypothesis" in warning.casefold() for warning in self.warnings):
+                raise ValueError(
+                    "a human-identity hypothesis must carry the caveat marking it a hypothesis "
+                    "and not an accusation (ADR-0015)"
                 )
 
         return self
 
     @property
     def is_refused(self) -> bool:
-        return self.identity_gate is not None and not self.identity_gate.passed
+        """True when the human-identity dimension declined to estimate (WITHHELD)."""
+        return self.identity_disposition is IdentityDisposition.WITHHELD
+
+    @property
+    def is_hypothesis(self) -> bool:
+        """True when the human-identity dimension emitted a name-free profile hypothesis."""
+        return self.identity_disposition is IdentityDisposition.HYPOTHESIS
 
     def render(self) -> str:
         """Plain text for an analyst or a report."""
