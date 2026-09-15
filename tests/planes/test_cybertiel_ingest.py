@@ -22,14 +22,50 @@ from nemesis.collect.cybertiel import (
     ingest_model_assessment,
     triage_row_to_assessment,
 )
-from nemesis.core.claims import ClaimKind, DerivationKind
+from nemesis.core.claims import Claim, ClaimKind, DerivationKind, Statement
 from nemesis.core.entities import EntityType
 from nemesis.core.ids import IdPrefix, new_id
 from nemesis.core.relationships import RelationType
+from nemesis.core.temporal import TemporalExtent
 
 NOW = datetime(2026, 8, 26, 12, 0, tzinfo=UTC)
 MODEL = "CyberTiel-Coder-35B-A3B-MLX-oQ6e (mlx_vlm, MTP-off)"
 PILOT = new_id(IdPrefix.ACTOR)
+
+
+def _card_observation() -> Claim:
+    """A strength-4 observation claim, standing in for a knowledge-card claim a model cites."""
+    return Claim.create(
+        kind=ClaimKind.OBSERVATION,
+        statement=Statement(
+            subject="threat_actor:synthlock",
+            predicate=RelationType.HOSTED_ON.value,
+            obj="tor_infrastructure:example.onion",
+            natural_language="a collected leak-site snapshot",
+        ),
+        derivation=DerivationKind.DIRECT_COLLECTION,
+        asserted_by=PILOT,
+        asserted_at=NOW,
+        valid_extent=TemporalExtent.at(NOW),
+        supported_by_evidence=("evd_sha256-" + "a" * 64,),
+    )
+
+
+def _card_hypothesis() -> Claim:
+    """A strength-1 hypothesis claim — too weak to ground an inference on."""
+    return Claim.create(
+        kind=ClaimKind.HYPOTHESIS,
+        statement=Statement(
+            subject="threat_actor:synthlock",
+            predicate=RelationType.ASSOCIATED_WITH.value,
+            obj="intel_type:ransomware_dls",
+            natural_language="a bare guess",
+        ),
+        derivation=DerivationKind.EXTERNAL_REPORT,
+        asserted_by=PILOT,
+        asserted_at=NOW,
+        valid_extent=TemporalExtent.at(NOW),
+    )
 
 
 def _assess(**overrides: object):  # type: ignore[no-untyped-def]
@@ -53,11 +89,28 @@ def test_model_output_is_a_hypothesis_model_assertion_never_an_observation() -> 
     assert claim.supported_by_evidence == ()  # model output is never evidence
 
 
-def test_citing_card_claims_yields_an_inference_still_model_derived() -> None:
-    claim = _assess(derived_from_claims=("clm_sha256-" + "a" * 64,))
+def test_citing_an_observation_yields_an_inference_still_model_derived() -> None:
+    premise = _card_observation()
+    claim = _assess(derived_from=(premise,))
     assert claim.kind is ClaimKind.INFERENCE
     assert claim.derivation is DerivationKind.MODEL_ASSERTION
-    assert claim.derived_from_claims == ("clm_sha256-" + "a" * 64,)
+    assert claim.derived_from_claims == (premise.claim_id,)
+
+
+def test_grounding_on_a_hypothesis_is_refused_not_inflated() -> None:
+    # A model assessment cannot outrank its own premise: grounding an INFERENCE on a HYPOTHESIS
+    # would launder strength-1 model output into a strength-3 claim. check_derivation forbids it.
+    with pytest.raises(ModelIngestError, match="cannot be a inference"):
+        _assess(derived_from=(_card_hypothesis(),))
+
+
+def test_a_free_string_object_that_could_name_a_person_is_refused() -> None:
+    with pytest.raises(ModelIngestError):
+        _assess(obj="Jane Doe, Moscow")  # bare free-form string, not a namespaced tag
+    with pytest.raises(ModelIngestError):
+        _assess(obj="human_identity_lead:jane doe")  # a human-identity namespace
+    # A namespaced structured tag is accepted.
+    assert _assess(obj="intel_type:ransomware_dls").statement.obj == "intel_type:ransomware_dls"
 
 
 def test_assessing_a_human_identity_is_refused() -> None:

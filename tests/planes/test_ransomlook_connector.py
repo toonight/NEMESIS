@@ -297,6 +297,28 @@ def test_a_listing_naming_illegal_content_is_held_as_mandatory_report() -> None:
     assert ev.must_not_be_indexed
 
 
+def test_illegal_content_in_a_stored_qualifier_field_also_escalates() -> None:
+    # group_name and discovered are stored (as qualifiers), so they must be scanned too — not
+    # just post_title and description.
+    feed = [
+        GROUP_META,
+        [{"post_title": "Some Org", "group_name": "csam vendor", "discovered": "2026-07-01"}],
+    ]
+    result = asyncio.run(_connector(feed).pivot(_request()))
+    assert result.succeeded and len(result.evidence) == 1
+    assert result.evidence[0].content_safety is ContentSafety.MANDATORY_REPORT
+    assert result.evidence[0].must_not_be_indexed
+
+
+def test_trailing_malformed_items_are_not_counted_as_truncation() -> None:
+    # SYNTHETIC_FEED is 2 valid posts + 3 malformed. With max_results=2 the result is complete —
+    # the trailing malformed items must not raise a false `truncated`.
+    result = asyncio.run(_connector().pivot(_request(max_results=2)))
+    assert result.succeeded
+    assert len(result.observations) == 2
+    assert not result.truncated
+
+
 def test_the_connector_refuses_a_host_swapped_final_url() -> None:
     result = asyncio.run(
         _connector(url="https://evil.example/api/group/synthlock").pivot(_request())

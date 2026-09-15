@@ -24,9 +24,14 @@ external reporting and as hostile content, with a
 :class:`~nemesis.core.claims.DeceptionAssessment` on every record: a ransomware crew inflates,
 recycles and fabricates victim listings, so "the group said it" is never "the breach happened".
 The connector interprets none of the free-text fields as instruction (invariant 5) and never
-promotes a listing into a confirmed compromise. A listing whose free text carries an illegal-content
-indicator is classified :attr:`~nemesis.core.evidence.ContentSafety.MANDATORY_REPORT`, which the
-quarantine holds with no automated exit.
+promotes a listing into a confirmed compromise. The victim name is a normalized node key and the
+statement prose is a fixed template — no adversary text reaches a human-readable claim field — but,
+exactly as ransomware.live does, a few **bounded** adversary field values (the listed group, the
+reported date) are kept as :class:`~nemesis.core.claims.Statement` qualifiers, stored as data and
+marked ``content_is_hostile``. Every adversary field that is preserved or stored — the title, the
+description, and those qualifier values — is scanned for illegal content, and a match classifies the
+record :attr:`~nemesis.core.evidence.ContentSafety.MANDATORY_REPORT`, which the quarantine holds
+with no automated exit.
 
 **The channel is trusted more than the content.** ``SourceClass.OPEN_SOURCE`` with
 ``FAIRLY_RELIABLE`` grades *the aggregator's faithful relaying*, not the crews whose posts it
@@ -448,15 +453,18 @@ class RansomLookConnector:
         seen: set[str] = set()
         truncated = False
         for item in posts:
-            if len(observations) >= self._max_records or len(observations) >= request.max_results:
-                truncated = True
-                break
             record = self._observation_for(request, actor, url, feed.status_code, item)
             if record is None:
-                continue
+                continue  # a malformed item is dropped, never counted as "more we could not carry"
             ev, obs = record
             if ev.evidence_id in seen:
                 continue
+            # The cap is checked only once a *valid* record is in hand, so trailing malformed
+            # items do not raise a false `truncated` — an absence within a truncated result means
+            # nothing, and mislabelling a complete result as truncated hides evidence of absence.
+            if len(observations) >= self._max_records or len(observations) >= request.max_results:
+                truncated = True
+                break
             seen.add(ev.evidence_id)
             evidence.append(ev)
             observations.append(obs)
@@ -498,9 +506,14 @@ class RansomLookConnector:
 
         # A listing whose free text names illegal content is held, not indexed: the escalation
         # dominates the connector's ordinary victim-data classification. The engine opens the
-        # reporting obligation downstream; this plane cannot, and does not try to.
+        # reporting obligation downstream; this plane cannot, and does not try to. Every
+        # adversary-authored field that is preserved or stored — the title, the description, and
+        # the group/date values kept as qualifiers — is scanned, not just the title.
         record_safety = self._content_safety
-        if contains_illegal_indicator(f"{raw_victim} {description or ''}"):
+        scanned = " ".join(
+            field for field in (raw_victim, description, listed_group, discovered) if field
+        )
+        if contains_illegal_indicator(scanned):
             record_safety = ContentSafety.MANDATORY_REPORT
 
         qualifiers = {

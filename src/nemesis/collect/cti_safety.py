@@ -17,15 +17,24 @@ positive here costs an over-cautious hold — the cheap direction of the error.
 **On credentials, deliberately by omission.** These collectors do *not* redact or represent
 credential material, and this module does not import :mod:`nemesis.core.credentials`. That is not an
 oversight: invariant AUTH-04 keeps the credential types importable by exactly one module, so that
-"discovery" cannot be quietly wired to "use". The collect plane instead borrows the stronger
-guarantee the ransomware.live and dark-web connectors already rely on — it never stores
-adversary-authored free text in a human- or model-readable field (a victim name is a normalized
-node key, a summary is a fixed template, a model rationale is not carried into the graph at all),
-so there is nothing to redact and no credential to carry onward. Representing a discovered
+"discovery" cannot be quietly wired to "use".
+
+Be precise about what that does and does not guarantee, because an over-broad claim here is itself a
+defect. These collectors follow the ransomware.live and dark-web pattern exactly: adversary-authored
+text is never *interpreted* as instruction and never reaches a claim's human-readable prose (a
+victim name is a normalized node key, a connector summary is a fixed template, a model rationale is
+not carried into the graph). They do, however, preserve the raw record byte-for-byte as the sealed
+artifact, and they keep a few **bounded** adversary field values (a listed group, a reported date)
+as :class:`~nemesis.core.claims.Statement` qualifiers — stored as *data*, marked
+``content_is_hostile``, exactly as the sibling connectors store ``country`` or ``attackdate``. So a
+credential embedded in such a field would be preserved as data, not redacted, and the control that
+keeps it out of an export is the RESTRICTED disclosure wall downstream, not a redaction pass here —
+this module cannot run one without importing the credential types AUTH-04 forbids. Every preserved
+or stored adversary field *is* scanned for illegal content (:func:`contains_illegal_indicator`), so
+the handling-escalation control does not have the same blind spot. Representing a discovered
 credential as a keyed :class:`~nemesis.core.credentials.CredentialIndicator` is the engine's job,
-behind the
-independent authorization path AUTH-04 protects; a connector that one day collects real credential
-material would extend that invariant deliberately, not reach around it here.
+behind the independent authorization path AUTH-04 protects; a connector that one day collects real
+credential material would extend that invariant deliberately, not reach around it here.
 """
 
 from __future__ import annotations

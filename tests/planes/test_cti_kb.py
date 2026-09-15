@@ -108,6 +108,28 @@ def test_the_counts_reconcile() -> None:
     )
 
 
+def test_cards_beyond_the_cap_are_reported_not_silently_dropped() -> None:
+    cards = [
+        _card("Alpha", "markets", ONION_A),
+        _card("Beta", "markets", ONION_B),
+        _card("Gamma", "markets", ONION_C),
+    ]
+    report = parse_cti_kb(cards, max_cards=2)
+    assert report.cards_seen == 2  # only the examined cards
+    assert report.cards_over_cap == 1  # the unlooked-at remainder is surfaced, not hidden
+    # The reconciliation still holds over the examined cards.
+    assert report.cards_seen == (
+        report.accepted
+        + report.dropped_no_onion
+        + report.dropped_invalid_onion
+        + report.dropped_duplicate
+        + report.dropped_bad_name
+        + report.credentials_dropped
+        + report.illegal_content_dropped
+    )
+    assert "not examined" in report.render()
+
+
 def test_a_too_weak_content_safety_is_refused() -> None:
     with pytest.raises(CtiKbParseError):
         parse_cti_kb([_card("X", "markets", ONION_A)], content_safety=ContentSafety.ROUTINE)

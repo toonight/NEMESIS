@@ -35,6 +35,7 @@ reaches for.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from datetime import datetime
 from typing import Final
@@ -44,7 +45,9 @@ from nemesis.core.claims import (
     ClaimKind,
     DeceptionAssessment,
     DerivationKind,
+    EpistemicViolationError,
     Statement,
+    check_derivation,
 )
 from nemesis.core.entities import (
     CATEGORY_OF,
@@ -58,6 +61,12 @@ from nemesis.core.temporal import TemporalExtent, require_utc
 
 _MAX_OBJECT_CHARS: Final = 2048
 _PARSE_FAILURE_NOTE: Final = "MODEL_PARSE_FAILURE"
+_NAMESPACED_TAG: Final = re.compile(r"[a-z][a-z0-9_]*:.+", re.DOTALL)
+_HUMAN_IDENTITY_VALUES: Final = frozenset(
+    entity_type.value
+    for entity_type in EntityType
+    if CATEGORY_OF[entity_type] is EntityCategory.HUMAN_IDENTITY
+)
 
 _LEAD_NOTE: Final = (
     "Model-derived lead: verify against primary sources before acting. Not evidence, not a "
@@ -104,6 +113,20 @@ def _object_term(obj: tuple[EntityType, str] | str) -> str:
     term = obj.strip()
     if not term:
         raise ModelIngestError("the object of a model assessment must not be empty")
+    # A free-string object is not type-checked the way a tuple object is, so it is the seam a
+    # human naming would slip through (obj="Jane Doe" with predicate OPERATED_BY). Require a
+    # namespaced structured tag (e.g. "intel_type:ransomware_dls") and refuse a human-identity
+    # namespace; a bare free-form string that could name a person is refused outright.
+    if _NAMESPACED_TAG.fullmatch(term) is None:
+        raise ModelIngestError(
+            "a string object must be a namespaced tag like 'intel_type:...'; a bare free-form "
+            "object could name a person and is refused (pass a typed (EntityType, key) tuple)"
+        )
+    if term.split(":", 1)[0] in _HUMAN_IDENTITY_VALUES:
+        raise ModelIngestError(
+            "a model assessment may not name a human identity in its object; the platform emits "
+            "observations about the operator, never a model-authored naming of a person"
+        )
     return term[:_MAX_OBJECT_CHARS]
 
 
@@ -116,14 +139,22 @@ def ingest_model_assessment(
     asserted_by: str,
     asserted_at: datetime,
     valid_extent: TemporalExtent | None = None,
-    derived_from_claims: tuple[str, ...] = (),
+    derived_from: tuple[Claim, ...] = (),
     qualifiers: Mapping[str, str] | None = None,
 ) -> Claim:
     """Turn one local-model assessment into a ``MODEL_ASSERTION`` claim (a lead, not a fact).
 
-    ``derived_from_claims`` are the ids of the knowledge-card claims the model was grounded in; when
-    present the claim is an ``INFERENCE`` (grounded), otherwise a ``HYPOTHESIS`` (a bare proposal).
-    Either way it is a ``MODEL_ASSERTION`` and can never be an observation or a fact.
+    ``derived_from`` are the actual knowledge-card claims the model was grounded in — the Claim
+    objects, not bare ids, on purpose. When present the claim is an ``INFERENCE`` (grounded),
+    otherwise a ``HYPOTHESIS`` (a bare proposal); either way it is a ``MODEL_ASSERTION`` and can
+    never be an observation or a fact.
+
+    **Standing is verified, not assumed.** A claim can never be epistemically stronger than the
+    weakest thing it rests on. Choosing ``INFERENCE`` merely because *some* citation was supplied
+    would let a caller ground a model assessment on a hypothesis and mint it as a strength-3
+    inference outranking its own premise — precisely the laundering ``check_derivation`` exists to
+    stop. So the premises are the real claims and ``check_derivation`` runs before the kind is
+    accepted; a too-weak premise is refused, not silently inflated.
 
     ``qualifiers`` carries the *structured* facets of the assessment (a triage value, risk flags);
     the model's free-text reasoning is deliberately not accepted, so nothing an adversary planted in
@@ -140,7 +171,13 @@ def ingest_model_assessment(
         raise ModelIngestError(f"unusable subject key: {exc}") from exc
 
     object_term = _object_term(obj)
-    kind = ClaimKind.INFERENCE if derived_from_claims else ClaimKind.HYPOTHESIS
+    kind = ClaimKind.INFERENCE if derived_from else ClaimKind.HYPOTHESIS
+    try:
+        check_derivation(kind, derived_from)
+    except EpistemicViolationError as exc:
+        raise ModelIngestError(
+            f"model assessment cannot be a {kind.value} on these premises: {exc}"
+        ) from exc
 
     merged_qualifiers = {"model_derived": "true", **(dict(qualifiers) if qualifiers else {})}
     statement = Statement(
@@ -163,7 +200,7 @@ def ingest_model_assessment(
         asserted_by=asserted_by,
         asserted_at=asserted_at,
         valid_extent=valid_extent or TemporalExtent.at(asserted_at),
-        derived_from_claims=derived_from_claims,
+        derived_from_claims=tuple(claim.claim_id for claim in derived_from),
         model_identifier=model_identifier,
         deception=_MODEL_DECEPTION,
         notes=_LEAD_NOTE,

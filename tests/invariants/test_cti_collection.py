@@ -46,8 +46,25 @@ ONION = "3e7lo3ebsgrjp5wsb6msvoiqrvmrn4mxmtkepmoevgjxqew5ksnftmid.onion"
 # --- CTI-01: the local model can never manufacture an observation --------------------------
 
 
+def _observation_premise() -> Claim:
+    return Claim.create(
+        kind=ClaimKind.OBSERVATION,
+        statement=Statement(
+            subject="threat_actor:synthlock",
+            predicate=RelationType.HOSTED_ON.value,
+            obj="tor_infrastructure:example.onion",
+            natural_language="a collected snapshot",
+        ),
+        derivation=DerivationKind.DIRECT_COLLECTION,
+        asserted_by=PILOT,
+        asserted_at=NOW,
+        valid_extent=TemporalExtent.at(NOW),
+        supported_by_evidence=("evd_sha256-" + "b" * 64,),
+    )
+
+
 def test_model_output_can_only_be_a_model_assertion_hypothesis_or_inference() -> None:
-    for derived in ((), ("clm_sha256-" + "a" * 64,)):
+    for derived in ((), (_observation_premise(),)):
         claim = ingest_model_assessment(
             model_identifier="CyberTiel",
             subject=(EntityType.THREAT_ACTOR, "SynthLock"),
@@ -55,11 +72,38 @@ def test_model_output_can_only_be_a_model_assertion_hypothesis_or_inference() ->
             obj="intel_type:ransomware_dls",
             asserted_by=PILOT,
             asserted_at=NOW,
-            derived_from_claims=derived,
+            derived_from=derived,
         )
         assert claim.derivation is DerivationKind.MODEL_ASSERTION
         assert claim.kind in {ClaimKind.HYPOTHESIS, ClaimKind.INFERENCE}
         assert claim.kind not in {ClaimKind.OBSERVATION, ClaimKind.FACT}
+
+
+def test_model_output_cannot_be_inflated_above_its_weakest_premise() -> None:
+    """A model assessment may never outrank the claim it rests on (standing dilution)."""
+    weak = Claim.create(
+        kind=ClaimKind.HYPOTHESIS,
+        statement=Statement(
+            subject="threat_actor:synthlock",
+            predicate=RelationType.ASSOCIATED_WITH.value,
+            obj="intel_type:x",
+            natural_language="a guess",
+        ),
+        derivation=DerivationKind.EXTERNAL_REPORT,
+        asserted_by=PILOT,
+        asserted_at=NOW,
+        valid_extent=TemporalExtent.at(NOW),
+    )
+    with pytest.raises(ModelIngestError):
+        ingest_model_assessment(
+            model_identifier="CyberTiel",
+            subject=(EntityType.THREAT_ACTOR, "SynthLock"),
+            predicate=RelationType.ASSOCIATED_WITH,
+            obj="intel_type:ransomware_dls",
+            asserted_by=PILOT,
+            asserted_at=NOW,
+            derived_from=(weak,),
+        )
 
 
 def test_the_core_validator_forbids_a_model_observation_directly() -> None:
@@ -132,6 +176,20 @@ def test_the_model_ingester_refuses_a_human_identity_subject_or_object() -> None
                 obj=(EntityType.HUMAN_IDENTITY_LEAD, "person")
                 if target == "obj"
                 else "intel_type:x",
+                asserted_by=PILOT,
+                asserted_at=NOW,
+            )
+
+
+def test_the_model_ingester_refuses_naming_a_person_through_a_free_string_object() -> None:
+    """The free-string object branch is the seam a naming would slip through; it is closed."""
+    for obj in ("Jane Doe, Moscow", "human_identity_lead:jane doe"):
+        with pytest.raises(ModelIngestError):
+            ingest_model_assessment(
+                model_identifier="CyberTiel",
+                subject=(EntityType.THREAT_ACTOR, "SynthLock"),
+                predicate=RelationType.OPERATED_BY,
+                obj=obj,
                 asserted_by=PILOT,
                 asserted_at=NOW,
             )

@@ -110,13 +110,24 @@ class CtiKbReport(BaseModel):
     """Cards whose free text carried an illegal-content indicator. Not proposed for collection: a
     site that must be reported is not a site to add to a monitoring allowlist."""
 
+    cards_over_cap: int = 0
+    """Cards beyond ``max_cards`` that were never examined. Reported rather than silently dropped:
+    a truncated allowlist that looks complete is exactly the silent-cap failure the reconciling
+    arithmetic exists to prevent. These cards are *not* part of the ``cards_seen`` sum, because
+    they were never looked at — the count says how many were left unlooked-at."""
+
     def render(self) -> str:
+        over_cap = (
+            f"; {self.cards_over_cap} card(s) beyond the cap were not examined"
+            if self.cards_over_cap
+            else ""
+        )
         return (
             f"{self.accepted} candidate onion service(s) from {self.cards_seen} card(s); "
             f"dropped {self.dropped_no_onion} without an onion, {self.dropped_invalid_onion} "
             f"invalid, {self.dropped_duplicate} duplicate, {self.dropped_bad_name} unnamed; "
             f"{self.credentials_dropped} carried credentials and {self.illegal_content_dropped} "
-            "carried an illegal-content indicator, both refused."
+            f"carried an illegal-content indicator, both refused{over_cap}."
         )
 
 
@@ -197,9 +208,15 @@ def parse_cti_kb(
     """Parse operator KB cards into reviewable :class:`OnionService` candidates.
 
     ``cards`` is an iterable of the *text* of operator-supplied ``kb/*.md`` cards — this function
-    performs no I/O and no network access. ``content_safety`` defaults to
+    performs no I/O and no network access. ``content_safety`` **defaults to**
     :attr:`~nemesis.core.evidence.ContentSafety.MANDATORY_REPORT` because a leak site holds stolen
-    victim data; the entity type (forum vs marketplace) is inferred from each card's category.
+    victim data; an operator may pass a different at-least-sensitive class (the constructor refuses
+    anything below ``SENSITIVE_PERSONAL_DATA``), and it applies to every candidate in the batch. The
+    class chosen governs whether a candidate is
+    :attr:`~nemesis.core.evidence.EvidenceObject.must_not_be_indexed`: that follows only from
+    ``MANDATORY_REPORT`` or ``LEGALLY_RESTRICTED``, so a caller who lowers the class to
+    ``SENSITIVE_PERSONAL_DATA`` is deciding those targets may be indexed. The entity type
+    (forum vs marketplace) is inferred from each card's category.
 
     The result never contains credentials, never contains an unvalidated onion address, never
     contains two services that normalize to the same allowlist key, and never contains a candidate
@@ -223,7 +240,9 @@ def parse_cti_kb(
     cards_seen = 0
     no_onion = invalid = duplicate = bad_name = creds = illegal = 0
 
-    for card in list(cards)[:max_cards]:
+    all_cards = list(cards)
+    over_cap = max(0, len(all_cards) - max_cards)
+    for card in all_cards[:max_cards]:
         cards_seen += 1
 
         if contains_illegal_indicator(card):
@@ -267,6 +286,7 @@ def parse_cti_kb(
         dropped_bad_name=bad_name,
         credentials_dropped=creds,
         illegal_content_dropped=illegal,
+        cards_over_cap=over_cap,
     )
 
 
