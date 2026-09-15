@@ -143,6 +143,22 @@ ordinary commit widens by accident.
 
 ---
 
+## CTI — the defensive-CTI module observes, it does not obey
+
+The module that wraps the local `cti-toolkit` (a RansomLook tracker reader, a KB-card allowlist
+adapter, a local-model output ingester). See `docs/connectors/ransomlook.md` and
+`docs/connectors/cti-kb.md`.
+
+| ID | Property | Status | Enforced by | Tested by |
+|---|---|---|---|---|
+| **CTI-01** | Local-model output enters only as a `MODEL_ASSERTION` hypothesis or inference, never an observation or fact. | `IMPLEMENTED` | `ingest_model_assessment` mints `DerivationKind.MODEL_ASSERTION`; invariant 1 in `Claim`'s validator forbids a model observation regardless of caller. The model SDKs are banned outside `nemesis.collect` and the module imports none. | `test_cti_collection.py`, `test_cybertiel_ingest.py`; `scripts/check_prohibited.py` |
+| **CTI-02** | The CTI egress connector refuses unconfined collection and ships wired into no registry. | `IMPLEMENTED` (macOS) / `REFUSED` elsewhere for real collection | `RansomLookConnector.pivot` returns a failed result unless a transport was injected or it runs inside `collect_confined`; `is_simulated=False`, `handles_hostile_content=True`, host-pinned, absent from `simulated_connectors()`. | `test_cti_collection.py`, `test_ransomlook_connector.py` |
+| **CTI-03** | No CTI path names or attributes to a human identity. | `IMPLEMENTED` | The model ingester refuses a `HUMAN_IDENTITY` subject or object; the KB adapter emits only forum/marketplace targets; the tracker emits only `THREAT_ACTOR TARGETED ORGANIZATION`. | `test_cti_collection.py`, `test_cybertiel_ingest.py` |
+| **CTI-04** | Leak-site and illegal material is held, never indexed. | `IMPLEMENTED` | KB leak-site candidates are `MANDATORY_REPORT` (`must_not_be_indexed`); a tracker listing naming illegal content is escalated to `MANDATORY_REPORT`; a KB card naming illegal content is dropped, not proposed. | `test_cti_collection.py`, `test_cti_kb.py`, `test_ransomlook_connector.py` |
+| **CTI-05** | The pure CTI adapters carry no network capability; only the connector does, in the collection plane. | `IMPLEMENTED` | Static import-graph capability check: `cti_kb`, `cybertiel`, `cti_safety` are not network-capable; every network-capable module is under `nemesis.collect`. | `test_cti_collection.py`, `test_transitive_egress.py` |
+
+---
+
 ## SAFEFAIL — an investigation is allowed to fail
 
 | ID | Property | Status | Enforced by | Tested by |
@@ -312,6 +328,7 @@ the boundary the real controls defend, and it refuses nothing on its own.
 | MODEL-03 | 9 (narrow, expiring authorization) |
 | EFFECT-01, EFFECT-02, EFFECT-03 | 7, 8, 9 |
 | DARKWEB-01, DARKWEB-02 | 5, 15 |
+| CTI-01 … CTI-05 | 1 (model output is not evidence), 5, 6, 13, 15 |
 | SAFEFAIL-01, SAFEFAIL-02 | 4 (explicit uncertainty), 9, 14 (disruption closes no case) |
 | EVID-01 … EVID-03 | 2 (intelligence ≠ evidence), 10 (tamper-evident evidence) |
 | EVID-04 | 5 (external content is hostile), 10 |
