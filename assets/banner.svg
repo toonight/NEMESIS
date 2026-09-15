@@ -1,219 +1,240 @@
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
-     viewBox="0 0 1200 320" width="1200" height="320" role="img"
-     aria-label="NEMESIS — autonomous cyber-adversary pursuit, attribution and disruption">
-  <title>NEMESIS</title>
-  <desc>Detect, pursue, attribute, disrupt, watch — a closed pursuit loop.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="460" viewBox="0 0 1600 460" role="img" aria-labelledby="title desc">
+  <title id="title">NEMESIS banner</title>
+  <desc id="desc">Dark cyber security banner for NEMESIS showing a containment core, attribution graph, pursuit path, and the project wordmark.</desc>
 
   <defs>
-    <linearGradient id="ground" x1="0" y1="0" x2="0.35" y2="1">
-      <stop offset="0%"   stop-color="#0d1220"/>
-      <stop offset="55%"  stop-color="#080b13"/>
-      <stop offset="100%" stop-color="#05070d"/>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#071018"/>
+      <stop offset="0.55" stop-color="#0A1720"/>
+      <stop offset="1" stop-color="#061017"/>
     </linearGradient>
-
-    <linearGradient id="wordmark" x1="0" y1="0" x2="1" y2="0.4">
-      <stop offset="0%"   stop-color="#ffffff"/>
-      <stop offset="58%"  stop-color="#dce6f5"/>
-      <stop offset="100%" stop-color="#8fa6c9"/>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#51E5FF"/>
+      <stop offset="0.52" stop-color="#65F1B8"/>
+      <stop offset="1" stop-color="#D9FF7B"/>
     </linearGradient>
-
-    <linearGradient id="rule" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%"   stop-color="#ff8a3d" stop-opacity="0"/>
-      <stop offset="45%"  stop-color="#ff8a3d"/>
-      <stop offset="100%" stop-color="#ffd7a8" stop-opacity="0"/>
+    <linearGradient id="accentDim" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#51E5FF" stop-opacity="0.75"/>
+      <stop offset="1" stop-color="#65F1B8" stop-opacity="0.06"/>
     </linearGradient>
-
-    <radialGradient id="corona" cx="0.5" cy="0.5" r="0.5">
-      <stop offset="0%"   stop-color="#ff8a3d" stop-opacity="0.30"/>
-      <stop offset="55%"  stop-color="#ff8a3d" stop-opacity="0.06"/>
-      <stop offset="100%" stop-color="#ff8a3d" stop-opacity="0"/>
+    <radialGradient id="halo">
+      <stop offset="0" stop-color="#51E5FF" stop-opacity="0.22"/>
+      <stop offset="0.55" stop-color="#51E5FF" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#51E5FF" stop-opacity="0"/>
     </radialGradient>
-
-    <linearGradient id="sweep" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%"   stop-color="#ff8a3d" stop-opacity="0.42"/>
-      <stop offset="100%" stop-color="#ff8a3d" stop-opacity="0"/>
-    </linearGradient>
-
-    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
-      <feGaussianBlur stdDeviation="3.2" result="b"/>
-      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0H0V40" fill="none" stroke="#9CC7D3" stroke-opacity="0.055" stroke-width="1"/>
+    </pattern>
+    <pattern id="microgrid" width="10" height="10" patternUnits="userSpaceOnUse">
+      <path d="M10 0H0V10" fill="none" stroke="#9CC7D3" stroke-opacity="0.025" stroke-width="1"/>
+    </pattern>
+    <filter id="softGlow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
     </filter>
-    <filter id="softglow" x="-80%" y="-80%" width="260%" height="260%">
-      <feGaussianBlur stdDeviation="6" result="b"/>
-      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    <filter id="tinyGlow" x="-120%" y="-120%" width="340%" height="340%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
     </filter>
-
-    <!-- The pursuit loop. Nodes ride this; it is also the drawn ring. -->
-    <path id="loop" d="M 950,60 A 100,100 0 1,1 949.9,60" fill="none"/>
-    <path id="innerloop" d="M 950,96 A 64,64 0 1,0 950.1,96" fill="none"/>
-
-    <clipPath id="panel">
-      <rect x="8" y="8" width="1184" height="304" rx="18"/>
+    <clipPath id="roundClip">
+      <rect x="18" y="18" width="1564" height="424" rx="28"/>
     </clipPath>
   </defs>
 
-  <!-- ground -->
-  <rect x="8" y="8" width="1184" height="304" rx="18" fill="url(#ground)"/>
+  <rect width="1600" height="460" fill="#050B10"/>
+  <g clip-path="url(#roundClip)">
+    <rect x="18" y="18" width="1564" height="424" rx="28" fill="url(#bg)"/>
+    <rect x="18" y="18" width="1564" height="424" rx="28" fill="url(#grid)"/>
+    <rect x="18" y="18" width="1564" height="424" rx="28" fill="url(#microgrid)"/>
 
-  <g clip-path="url(#panel)">
-    <!-- faint survey grid: the graph, before anything is known -->
-    <g stroke="#7f93b5" stroke-width="0.5" opacity="0.07">
-      <path d="M8 76h1184M8 160h1184M8 244h1184"/>
-      <path d="M200 8v304M400 8v304M600 8v304M800 8v304M1000 8v304"/>
+    <!-- subtle left-to-right depth -->
+    <path d="M-70 410 C320 270 470 560 890 355 S1310 95 1700 180" fill="none" stroke="#42D9FF" stroke-opacity="0.045" stroke-width="130"/>
+    <path d="M230 -80 C500 90 670 65 930 180 S1370 360 1680 210" fill="none" stroke="#79FFB0" stroke-opacity="0.03" stroke-width="95"/>
+
+    <!-- left copy -->
+    <g font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+      <g transform="translate(86 70)">
+        <rect x="0" y="0" width="124" height="30" rx="15" fill="#0D222B" stroke="#4EDFF8" stroke-opacity="0.35"/>
+        <circle cx="16" cy="15" r="4" fill="#65F1B8" filter="url(#tinyGlow)">
+          <animate attributeName="r" values="3.5;5.8;3.5" dur="2.4s" repeatCount="indefinite"/>
+          <animate attributeName="opacity" values="0.65;1;0.65" dur="2.4s" repeatCount="indefinite"/>
+        </circle>
+        <text x="29" y="20" fill="#BDE9F3" font-size="12" font-weight="700" letter-spacing="2.2">NEMESIS</text>
+      </g>
+
+      <text x="82" y="205" fill="#F5FBFD" font-size="92" font-weight="800" letter-spacing="12">NEMESIS</text>
+      <rect x="84" y="226" width="590" height="4" rx="2" fill="url(#accent)"/>
+      <rect x="84" y="226" width="72" height="4" rx="2" fill="#F5FFFF" opacity="0.1">
+        <animate attributeName="x" values="84;602;84" keyTimes="0;0.72;1" dur="6s" repeatCount="indefinite"/>
+        <animate attributeName="opacity" values="0;0.58;0" keyTimes="0;0.5;1" dur="6s" repeatCount="indefinite"/>
+      </rect>
+
+      <text x="84" y="275" fill="#A9C2CC" font-size="20" font-weight="500" letter-spacing="2.1">AUTONOMOUS ADVERSARY PURSUIT &amp; ATTRIBUTION</text>
+      <text x="84" y="311" fill="#70909C" font-size="14" font-weight="500" letter-spacing="1.2">BOUND AUTONOMY  /  SEALED EVIDENCE  /  HUMAN AUTHORITY</text>
+
+      <g transform="translate(84 357)" font-size="12" font-weight="700" letter-spacing="1.3">
+        <text x="0" y="0" fill="#7C9CA8">DETECT</text>
+        <path d="M66 -4H94" stroke="#4EDFF8" stroke-opacity="0.45"/>
+        <circle cx="94" cy="-4" r="2" fill="#51E5FF"/>
+        <text x="112" y="0" fill="#8DB0BA">PURSUE</text>
+        <path d="M181 -4H209" stroke="#4EDFF8" stroke-opacity="0.45"/>
+        <circle cx="209" cy="-4" r="2" fill="#51E5FF"/>
+        <text x="227" y="0" fill="#A1C2C7">ATTRIBUTE</text>
+        <path d="M321 -4H349" stroke="#65F1B8" stroke-opacity="0.55"/>
+        <circle cx="349" cy="-4" r="2" fill="#65F1B8"/>
+        <text x="367" y="0" fill="#B5D6CE">DISRUPT</text>
+        <path d="M445 -4H473" stroke="#9BF09C" stroke-opacity="0.55"/>
+        <circle cx="473" cy="-4" r="2" fill="#A4F28A"/>
+        <text x="491" y="0" fill="#CBE4B4">WATCH</text>
+      </g>
     </g>
-    <ellipse cx="950" cy="160" rx="220" ry="170" fill="url(#corona)"/>
-  </g>
 
-  <rect x="8" y="8" width="1184" height="304" rx="18" fill="none"
-        stroke="#ff8a3d" stroke-opacity="0.16" stroke-width="1"/>
+    <!-- right technical visual -->
+    <g transform="translate(1075 230)">
+      <circle r="245" fill="url(#halo)">
+        <animate attributeName="opacity" values="0.68;1;0.68" dur="5.5s" repeatCount="indefinite"/>
+      </circle>
 
-  <!-- instrument ticks -->
-  <g stroke="#ff8a3d" stroke-opacity="0.45" stroke-width="1.4" fill="none" stroke-linecap="square">
-    <path d="M28 8v18M8 28h18"/>
-    <path d="M1172 8v18M1192 28h-18"/>
-    <path d="M28 312v-18M8 292h18"/>
-    <path d="M1172 312v-18M1192 292h-18"/>
-  </g>
+      <!-- orbit / containment rings -->
+      <circle r="152" fill="none" stroke="#5DE6FF" stroke-opacity="0.16" stroke-width="1.4" stroke-dasharray="7 8">
+        <animateTransform attributeName="transform" type="rotate" from="0" to="360" dur="24s" repeatCount="indefinite"/>
+      </circle>
+      <circle r="121" fill="none" stroke="#65F1B8" stroke-opacity="0.23" stroke-width="1.2">
+        <animate attributeName="stroke-opacity" values="0.16;0.42;0.16" dur="4.8s" repeatCount="indefinite"/>
+      </circle>
+      <circle r="88" fill="#081821" stroke="#71F0C3" stroke-opacity="0.65" stroke-width="1.6">
+        <animate attributeName="stroke-opacity" values="0.45;0.9;0.45" dur="3.6s" repeatCount="indefinite"/>
+      </circle>
+      <circle r="72" fill="none" stroke="#70EAF9" stroke-opacity="0.18" stroke-width="1" stroke-dasharray="3 6">
+        <animateTransform attributeName="transform" type="rotate" from="360" to="0" dur="12s" repeatCount="indefinite"/>
+      </circle>
 
-  <!-- ================= identity ================= -->
-  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
-    <text x="64" y="86" font-size="11.5" letter-spacing="4.2" fill="#ff8a3d" fill-opacity="0.92">
-      AUTONOMOUS ADVERSARY PURSUIT
-    </text>
-  </g>
+      <!-- directional arcs -->
+      <path d="M-146 -42 A152 152 0 0 1 15 -151" fill="none" stroke="#51E5FF" stroke-width="3" stroke-linecap="round" stroke-opacity="0.7"/>
+      <path d="M129 80 A152 152 0 0 1 68 136" fill="none" stroke="#9EFF8A" stroke-width="3" stroke-linecap="round" stroke-opacity="0.8"/>
+      <circle cx="14" cy="-151" r="5" fill="#51E5FF" filter="url(#tinyGlow)">
+        <animate attributeName="opacity" values="0.45;1;0.45" dur="2.6s" repeatCount="indefinite"/>
+      </circle>
+      <circle cx="68" cy="136" r="5" fill="#9EFF8A" filter="url(#tinyGlow)">
+        <animate attributeName="opacity" values="1;0.45;1" dur="2.6s" repeatCount="indefinite"/>
+      </circle>
 
-  <text x="61" y="168" font-size="76" font-weight="800" letter-spacing="4"
-        font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif"
-        fill="url(#wordmark)">NEMESIS</text>
-
-  <!-- accent rule, sweeping -->
-  <g>
-    <rect x="64" y="190" width="392" height="1.5" fill="#7f93b5" fill-opacity="0.22"/>
-    <rect y="189" width="150" height="3" rx="1.5" fill="url(#rule)">
-      <animate attributeName="x" values="46;350;46" dur="7s"
-               calcMode="spline" keyTimes="0;0.5;1"
-               keySplines="0.45 0 0.15 1;0.45 0 0.15 1" repeatCount="indefinite"/>
-    </rect>
-  </g>
-
-  <g font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
-    <text x="64" y="220" font-size="16.5" fill="#c3d0e4" fill-opacity="0.94">
-      Machine-speed investigation. Human-authorized effects.
-    </text>
-    <text x="64" y="246" font-size="16.5" fill="#8fa6c9" fill-opacity="0.80">
-      Evidence-backed attribution. Persistent adversary memory.
-    </text>
-  </g>
-
-  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5"
-     letter-spacing="1.6" fill="#6c7f9e">
-    <text x="64" y="278">Networked Engine for Malicious Entity Surveillance, Identification &amp; Suppression</text>
-  </g>
-
-  <!-- ================= the pursuit loop ================= -->
-  <g>
-    <!-- radar sweep, behind the ring -->
-    <g transform="translate(950,160)">
-      <path d="M0,0 L102,-30 A106,106 0 0,1 102,30 Z" fill="url(#sweep)">
-        <animateTransform attributeName="transform" type="rotate"
-                          from="0" to="360" dur="9s" repeatCount="indefinite"/>
+      <!-- animated pursuit tracers -->
+      <path d="M-146 -42 A152 152 0 0 1 15 -151" fill="none" stroke="#C8FAFF" stroke-width="3.2" stroke-linecap="round" stroke-dasharray="18 235" stroke-opacity="0.78">
+        <animate attributeName="stroke-dashoffset" from="253" to="0" dur="3.8s" repeatCount="indefinite"/>
       </path>
+      <path d="M129 80 A152 152 0 0 1 68 136" fill="none" stroke="#E3FFC0" stroke-width="3" stroke-linecap="round" stroke-dasharray="12 95" stroke-opacity="0.75">
+        <animate attributeName="stroke-dashoffset" from="107" to="0" dur="2.8s" repeatCount="indefinite"/>
+      </path>
+
+      <!-- graph connections -->
+      <g fill="none" stroke="#79DDEC" stroke-width="1.1" stroke-opacity="0.27">
+        <path d="M-247 -115 L-176 -64 L-149 9 L-79 36"/>
+        <path d="M-230 64 L-149 9"/>
+        <path d="M-195 141 L-132 104 L-79 36"/>
+        <path d="M195 -137 L131 -93 L88 -52"/>
+        <path d="M255 -32 L166 4 L88 -52"/>
+        <path d="M219 114 L143 80 L88 -52"/>
+        <path d="M-176 -64 L-113 -111 L-31 -85"/>
+        <path d="M131 -93 L65 -120 L-31 -85"/>
+        <path d="M-132 104 L-66 130 L13 88"/>
+        <path d="M143 80 L81 127 L13 88"/>
+      </g>
+
+      <!-- moving graph packets -->
+      <g filter="url(#tinyGlow)">
+        <circle r="2.8" fill="#51E5FF">
+          <animateMotion path="M-247 -115 L-176 -64 L-149 9 L-79 36" dur="4.4s" repeatCount="indefinite"/>
+          <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.12;0.84;1" dur="4.4s" repeatCount="indefinite"/>
+        </circle>
+        <circle r="2.6" fill="#65F1B8">
+          <animateMotion path="M195 -137 L131 -93 L88 -52" dur="3.8s" begin="0.8s" repeatCount="indefinite"/>
+          <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.12;0.84;1" dur="3.8s" begin="0.8s" repeatCount="indefinite"/>
+        </circle>
+        <circle r="2.4" fill="#D9FF7B">
+          <animateMotion path="M-195 141 L-132 104 L-79 36" dur="4.8s" begin="1.6s" repeatCount="indefinite"/>
+          <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.12;0.84;1" dur="4.8s" begin="1.6s" repeatCount="indefinite"/>
+        </circle>
+        <circle r="2.4" fill="#A7F6FF">
+          <animateMotion path="M255 -32 L166 4 L88 -52" dur="4.1s" begin="2.2s" repeatCount="indefinite"/>
+          <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.12;0.84;1" dur="4.1s" begin="2.2s" repeatCount="indefinite"/>
+        </circle>
+      </g>
+
+      <!-- graph nodes -->
+      <g fill="#0A1E27" stroke="#58DFF5" stroke-width="1.2">
+        <circle cx="-247" cy="-115" r="7"/>
+        <circle cx="-176" cy="-64" r="5"/>
+        <circle cx="-230" cy="64" r="6"/>
+        <circle cx="-195" cy="141" r="5"/>
+        <circle cx="-149" cy="9" r="7"/>
+        <circle cx="-132" cy="104" r="5"/>
+        <circle cx="195" cy="-137" r="6"/>
+        <circle cx="255" cy="-32" r="5"/>
+        <circle cx="219" cy="114" r="7"/>
+        <circle cx="131" cy="-93" r="5"/>
+        <circle cx="143" cy="80" r="5"/>
+      </g>
+      <g fill="#68F1BB">
+        <circle cx="-113" cy="-111" r="4"/>
+        <circle cx="65" cy="-120" r="4"/>
+        <circle cx="-66" cy="130" r="4"/>
+        <circle cx="81" cy="127" r="4"/>
+      </g>
+
+      <!-- central N / limiter mark -->
+      <g opacity="0.28" filter="url(#softGlow)">
+        <path d="M-46 42 V-42 H-25 L24 20 V-42 H46 V42 H24 L-24 -20 V42 Z" fill="none" stroke="url(#accent)" stroke-width="14" stroke-linejoin="round"/>
+        <animate attributeName="opacity" values="0.14;0.52;0.14" dur="3.2s" repeatCount="indefinite"/>
+        <animateTransform attributeName="transform" type="scale" values="0.98;1.035;0.98" dur="3.2s" repeatCount="indefinite"/>
+      </g>
+      <g filter="url(#softGlow)">
+        <path d="M-46 42 V-42 H-25 L24 20 V-42 H46 V42 H24 L-24 -20 V42 Z" fill="none" stroke="url(#accent)" stroke-width="8" stroke-linejoin="round"/>
+      </g>
+
+      <!-- seam markers -->
+      <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10" font-weight="700" letter-spacing="1.1" fill="#7FA8B4">
+        <text x="-49" y="-184">PILOT</text>
+        <text x="108" y="-148">SEAM</text>
+        <text x="180" y="30">LIMITER</text>
+        <text x="95" y="164">AUTH</text>
+        <text x="-205" y="184">EVIDENCE</text>
+      </g>
+
+      <!-- tiny crosshair -->
+      <g stroke="#D9FF7B" stroke-opacity="0.8" stroke-width="1.2">
+        <circle cx="255" cy="-32" r="11" fill="none">
+          <animate attributeName="r" values="9;18;9" dur="2.8s" repeatCount="indefinite"/>
+          <animate attributeName="stroke-opacity" values="0.9;0.18;0.9" dur="2.8s" repeatCount="indefinite"/>
+        </circle>
+        <path d="M255 -49V-42 M255 -22V-15 M238 -32H245 M265 -32H272"/>
+      </g>
     </g>
 
-    <!-- expanding pulse: a seed observation propagating -->
-    <g fill="none" stroke="#ff8a3d" stroke-width="1">
-      <circle cx="950" cy="160" r="6">
-        <animate attributeName="r" values="6;100" dur="4.5s" repeatCount="indefinite"/>
-        <animate attributeName="stroke-opacity" values="0.5;0" dur="4.5s" repeatCount="indefinite"/>
+    <!-- corner telemetry -->
+    <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10" fill="#52727F" letter-spacing="1.25">
+      <text x="1295" y="409">GRAPH / PROVENANCE / CONTROL</text>
+      <text x="84" y="414">NETWORKED ENGINE FOR MALICIOUS ENTITY SURVEILLANCE, IDENTIFICATION &amp; SUPPRESSION</text>
+    </g>
+
+    <!-- top right status strip -->
+    <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10" letter-spacing="1">
+      <rect x="1310" y="58" width="188" height="28" rx="14" fill="#0A1A21" stroke="#78EEC1" stroke-opacity="0.22"/>
+      <circle cx="1328" cy="72" r="4" fill="#65F1B8">
+        <animate attributeName="r" values="3.4;5.3;3.4" dur="2.4s" begin="0.4s" repeatCount="indefinite"/>
+        <animate attributeName="opacity" values="0.6;1;0.6" dur="2.4s" begin="0.4s" repeatCount="indefinite"/>
       </circle>
-      <circle cx="950" cy="160" r="6">
-        <animate attributeName="r" values="6;100" dur="4.5s" begin="-2.25s" repeatCount="indefinite"/>
-        <animate attributeName="stroke-opacity" values="0.5;0" dur="4.5s" begin="-2.25s" repeatCount="indefinite"/>
-      </circle>
+      <text x="1342" y="76" fill="#83AAB4">MODEL ≠ AUTHORITY
+        <animate attributeName="fill" values="#83AAB4;#B7E6DE;#83AAB4" dur="7s" repeatCount="indefinite"/>
+      </text>
     </g>
-
-    <use xlink:href="#loop" stroke="#7f93b5" stroke-opacity="0.30" stroke-width="1.25"/>
-    <use xlink:href="#innerloop" stroke="#7f93b5" stroke-opacity="0.16" stroke-width="1"
-         stroke-dasharray="3 7"/>
-
-    <!-- the adversary at the centre -->
-    <circle cx="950" cy="160" r="5.5" fill="#e8536b" filter="url(#glow)"/>
-    <circle cx="950" cy="160" r="12" fill="none" stroke="#e8536b" stroke-opacity="0.35" stroke-width="1"/>
-
-    <!-- five stages, fixed on the ring, lighting in sequence -->
-    <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
-       font-size="9.5" letter-spacing="1.5" text-anchor="middle">
-
-      <g>
-        <circle cx="950" cy="60" r="4.5" fill="#ff8a3d">
-          <animate attributeName="r" values="4.5;7;4.5" dur="6s" begin="0s" repeatCount="indefinite"/>
-        </circle>
-        <text x="950" y="42" fill="#d7e2f2">DETECT</text>
-      </g>
-      <g>
-        <circle cx="1045" cy="129" r="4.5" fill="#ff8a3d">
-          <animate attributeName="r" values="4.5;7;4.5" dur="6s" begin="1.2s" repeatCount="indefinite"/>
-        </circle>
-        <text x="1085" y="126" fill="#d7e2f2">PURSUE</text>
-      </g>
-      <g>
-        <circle cx="1009" cy="241" r="4.5" fill="#ff8a3d">
-          <animate attributeName="r" values="4.5;7;4.5" dur="6s" begin="2.4s" repeatCount="indefinite"/>
-        </circle>
-        <text x="1042" y="266" fill="#d7e2f2">ATTRIBUTE</text>
-      </g>
-      <g>
-        <circle cx="891" cy="241" r="4.5" fill="#ff8a3d">
-          <animate attributeName="r" values="4.5;7;4.5" dur="6s" begin="3.6s" repeatCount="indefinite"/>
-        </circle>
-        <text x="858" y="266" fill="#d7e2f2">DISRUPT</text>
-      </g>
-      <g>
-        <circle cx="855" cy="129" r="4.5" fill="#4dd4e0">
-          <animate attributeName="r" values="4.5;7;4.5" dur="6s" begin="4.8s" repeatCount="indefinite"/>
-        </circle>
-        <text x="817" y="126" fill="#d7e2f2">WATCH</text>
-      </g>
-    </g>
-
-    <!-- evidence riding the loop -->
-    <circle r="3.2" fill="#4dd4e0" filter="url(#glow)">
-      <animateMotion dur="11s" repeatCount="indefinite" rotate="auto">
-        <mpath xlink:href="#loop"/>
-      </animateMotion>
-    </circle>
-    <circle r="2.6" fill="#ffd7a8" fill-opacity="0.9">
-      <animateMotion dur="11s" begin="-4.4s" repeatCount="indefinite">
-        <mpath xlink:href="#loop"/>
-      </animateMotion>
-    </circle>
-    <circle r="2.2" fill="#8fa6c9">
-      <animateMotion dur="8s" begin="-3s" repeatCount="indefinite"
-                     keyPoints="1;0" keyTimes="0;1" calcMode="linear">
-        <mpath xlink:href="#innerloop"/>
-      </animateMotion>
-    </circle>
-
-    <!-- resurgence: the loop closing back on itself -->
-    <path d="M 843 108 A 100,100 0 0,1 903 66" fill="none" stroke="#4dd4e0"
-          stroke-opacity="0.55" stroke-width="1.6" stroke-linecap="round"
-          marker-end="none" filter="url(#softglow)">
-      <animate attributeName="stroke-opacity" values="0.1;0.65;0.1" dur="6s"
-               begin="4.6s" repeatCount="indefinite"/>
-    </path>
-    <path d="M 899 62 l 8 3 l -6 6" fill="none" stroke="#4dd4e0" stroke-opacity="0.7"
-          stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-      <animate attributeName="stroke-opacity" values="0.15;0.85;0.15" dur="6s"
-               begin="4.6s" repeatCount="indefinite"/>
-    </path>
   </g>
 
-  <!-- status strip -->
-  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="9.5"
-     letter-spacing="1.4">
-    <circle cx="912" cy="292" r="3" fill="#4dd4e0">
-      <animate attributeName="fill-opacity" values="1;0.25;1" dur="2.6s" repeatCount="indefinite"/>
-    </circle>
-    <text x="1148" y="295" text-anchor="end" fill="#6c7f9e">SIMULATED · NO EXTERNAL CONTACT</text>
-  </g>
+  <rect x="18.5" y="18.5" width="1563" height="423" rx="27.5" fill="none" stroke="#BCD6DD" stroke-opacity="0.09"/>
 </svg>
