@@ -240,24 +240,27 @@ The local seat remains the configuration under which this question does not aris
 
 Invariant 15 says "the **sole** egress is a fetch of specific URLs from an operator-supplied
 allowlist, off by default with no endpoint shipped, confined by the kernel and marked
-`NEMESIS-EGRESS-ALLOWED`." There are now **two** opt-in egress connectors — the Tor onion
-snapshot and the `ransomware.live` OSINT reader — which strains the word *sole*. Two sub-questions:
+`NEMESIS-EGRESS-ALLOWED`." There are now **three** opt-in egress connectors — the Tor onion
+snapshot, the `ransomware.live` OSINT reader, and (added 2026-09-14, ADR-0016) the `ransomlook.io`
+OSINT reader — which strains the word *sole* further. Two sub-questions:
 
 1. **Count.** Is "sole egress" a hard cap of one connector, or shorthand for "one disciplined
    egress *mechanism class*" — operator-approved, off by default, confined, marked — of which
    there may be several instances? The second reading is how the Tor connector was itself added;
    this makes it explicit rather than assumed.
 2. **Granularity.** The Tor connector allowlists **each target** (one approved onion at a time).
-   The OSINT connector pins the **host** (`ransomware.live`) but lets the pilot choose the actor
-   it queries within that host. Is a host-pin an acceptable "operator-supplied allowlist" for a
-   public search API where targets cannot be pre-enumerated, or must every query target be
-   pre-approved too?
+   The two OSINT tracker readers pin the **host** (`ransomware.live`, `ransomlook.io`) but let the
+   pilot choose the actor it queries within that host. Is a host-pin an acceptable
+   "operator-supplied allowlist" for a public search API where targets cannot be pre-enumerated, or
+   must every query target be pre-approved too?
 
-**Working default (implemented):** the connector exists, is host-pinned, confined, off by
+**Working default (implemented):** each connector exists, is host-pinned, confined, off by
 default and wired into no registry, so the *posture* (nothing egresses unless an operator turns
 it on under kernel confinement) is unchanged — only the literal count of egress connectors moved.
 Nothing in the code decides the wording of invariant 15; amending it is a founder act, and this
-entry is the tripwire that keeps the change from happening silently.
+entry is the tripwire that keeps the change from happening silently. A third connector on the same
+pattern (RansomLook, 2026-09-14) reinforces the "one disciplined mechanism class" reading without
+resolving the wording.
 
 ---
 

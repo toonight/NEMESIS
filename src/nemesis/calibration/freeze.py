@@ -25,7 +25,7 @@ guarantee, and it is the only one that sees a bare literal inside a function bod
 field default, or a two-line logic change that touches no constant at all. `engine_drifted()`
 names the modules that moved.
 
-**Every module-level constant**, by normalised syntax, in `CONSTANT_DIGESTS` — 822 of them,
+**Every module-level constant**, by normalised syntax, in `CONSTANT_DIGESTS` — 848 of them,
 with no classification whatsoever. A dial does not have to hold a digit and does not have to
 look like a table; four rules for deciding what counted were tried and all four excluded
 something load-bearing. `constants_drifted()` names what moved, appeared or vanished.
@@ -135,7 +135,7 @@ CALIBRATION_CONSTANTS: Final[tuple[str, ...]] = (
 """The curated epistemic subset, named as ``module:NAME`` and frozen by **imported value**.
 
 Not "every number": most of what decides a published figure here is not a number at all — of the
-822 dials `discovered_constants()` covers, 582 hold no numeric literal. And not the completeness
+848 dials `discovered_constants()` covers, 599 hold no numeric literal. And not the completeness
 guarantee either, which is the job of the two syntactic digests; this list is deliberately
 curated, so it is allowed to be incomplete in a way they are not.
 
@@ -332,6 +332,21 @@ CONSTANT_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis.collect.base:QUALIFIER_QUOTED_VERBATIM": "181e3362fec52edf",
         "nemesis.collect.base:QUALIFIER_SHARED_ATTRIBUTE": "14d41e5a7350470d",
         "nemesis.collect.base:QUALIFIER_SHARED_INFRASTRUCTURE_JUSTIFICATION": "6dfa3a8fb129d400",
+        "nemesis.collect.cti_kb:MAX_CARDS": "2ec62d074bf18b8f",
+        "nemesis.collect.cti_kb:MAX_NAME_CHARS": "5612c0d32be161e8",
+        "nemesis.collect.cti_kb:_ALLOWED_ENTITY_TYPES": "0f61da07b30d94e9",
+        "nemesis.collect.cti_kb:_CATEGORY_TO_ENTITY": "14a57f119b0728a2",
+        "nemesis.collect.cti_kb:_CREDENTIALS": "35062924fdaf8bba",
+        "nemesis.collect.cti_kb:_FRONTMATTER_TITLE": "211f5eb3ccee4e4a",
+        "nemesis.collect.cti_kb:_HEADING": "717917c6a24f453b",
+        "nemesis.collect.cti_kb:_ONION_URL": "9b88eb8b630d0bd9",
+        "nemesis.collect.cti_safety:ILLEGAL_CONTENT_PATTERN": "6886a98c2fd85913",
+        "nemesis.collect.cybertiel:_HUMAN_IDENTITY_VALUES": "83bd639e998fdde9",
+        "nemesis.collect.cybertiel:_LEAD_NOTE": "c79e14f90674c6de",
+        "nemesis.collect.cybertiel:_MAX_OBJECT_CHARS": "4c308a63b018d892",
+        "nemesis.collect.cybertiel:_MODEL_DECEPTION": "ecebe7d15795f2e9",
+        "nemesis.collect.cybertiel:_NAMESPACED_TAG": "66e3cff29405944c",
+        "nemesis.collect.cybertiel:_PARSE_FAILURE_NOTE": "f86889fb4f4c733e",
         "nemesis.collect.dark_web:CONNECTOR_VERSION": "8c33878168f37b09",
         "nemesis.collect.dark_web:DEFAULT_MAX_RESPONSE_BYTES": "ff5b4e7da625757f",
         "nemesis.collect.dark_web:DEFAULT_TIMEOUT_SECONDS": "536c610de68f9c12",
@@ -548,6 +563,17 @@ CONSTANT_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis.collect.isolation:WORKER_MODULE": "501c1273d74f3132",
         "nemesis.collect.quarantine:HELD_CLASSIFICATIONS": "6791ff6dd57cb037",
         "nemesis.collect.quarantine:MAX_ARTIFACT_BYTES": "7979bbf4b77a0d2c",
+        "nemesis.collect.ransomlook:CONNECTOR_VERSION": "897897ebf1679425",
+        "nemesis.collect.ransomlook:DEFAULT_BASE_URL": "880708f795ea4d22",
+        "nemesis.collect.ransomlook:DEFAULT_MAX_RECORDS": "c678c5ac1ce38e68",
+        "nemesis.collect.ransomlook:DEFAULT_MAX_RESPONSE_BYTES": "7e341391e0499868",
+        "nemesis.collect.ransomlook:DEFAULT_TIMEOUT_SECONDS": "d1c48832f7d50601",
+        "nemesis.collect.ransomlook:MAX_RESPONSE_BYTES": "106f33cb5ca49c50",
+        "nemesis.collect.ransomlook:MAX_TIMEOUT_SECONDS": "90514179f5000841",
+        "nemesis.collect.ransomlook:_ALLOWED_HOSTS": "19da013a3a7db45d",
+        "nemesis.collect.ransomlook:_GROUP_LABEL": "7985c35d61871f04",
+        "nemesis.collect.ransomlook:_JSON_MEDIA_TYPES": "f313f398db787cdf",
+        "nemesis.collect.ransomlook:_MAX_FIELD_CHARS": "20038b5677d4779f",
         "nemesis.collect.ransomware_live:CONNECTOR_VERSION": "fc8eb742887bae2f",
         "nemesis.collect.ransomware_live:DEFAULT_BASE_URL": "4bac371d1ec6bb5f",
         "nemesis.collect.ransomware_live:DEFAULT_MAX_RECORDS": "b3838ced0547cb1b",
@@ -1130,7 +1156,7 @@ def discovered_constants(tree: Path | None = None) -> dict[str, str]:
     `EXCLUDED_CONCLUSIONS`, four security tables made of plain strings. The module digest covered
     them, so it was never a bypass; the claim that every dial was *named* was simply false.
 
-    So there is no rule now. Every module-level upper-case assignment is a dial, 822 of them,
+    So there is no rule now. Every module-level upper-case assignment is a dial, 848 of them,
     and the cost of including the genuine prose is nothing: rewording a message already moves
     that module's syntax digest, so no new failure mode is introduced by naming it too.
 
@@ -1311,6 +1337,9 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/collect/__init__.py": "ad2e13b69c4fc1fd",
         "nemesis/collect/analyser_worker.py": "ce1270f80c81e9f8",
         "nemesis/collect/base.py": "2942f5ba711b0cc7",
+        "nemesis/collect/cti_kb.py": "96072f79fe9070ac",
+        "nemesis/collect/cti_safety.py": "e91b532a10df1ce3",
+        "nemesis/collect/cybertiel.py": "f7f98a714ea89d59",
         "nemesis/collect/dark_web.py": "2a1fa5c9e03df787",
         "nemesis/collect/deepdarkcti.py": "1464c386e157b4c3",
         "nemesis/collect/fixtures/__init__.py": "697cd02f522bbe51",
@@ -1319,6 +1348,7 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/collect/fixtures/papercut.py": "ee14835082abdac6",
         "nemesis/collect/isolation.py": "3c085a3c364d2c8c",
         "nemesis/collect/quarantine.py": "9491b7e246bf55b7",
+        "nemesis/collect/ransomlook.py": "16e04693ce4dfba2",
         "nemesis/collect/ransomware_live.py": "0921b4d66c8feae9",
         "nemesis/collect/simulated.py": "e96dc57efcf409d7",
         "nemesis/collect/wire.py": "0b2c5b0cf7ea8e40",

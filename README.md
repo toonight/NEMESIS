@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/toonight/NEMESIS/actions/workflows/ci.yml/badge.svg)](https://github.com/toonight/NEMESIS/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.13-1f6feb)
-![Tests](https://img.shields.io/badge/tests-2268-2ea043)
+![Tests](https://img.shields.io/badge/tests-2331-2ea043)
 ![Typing](https://img.shields.io/badge/mypy-strict-2ea043)
 ![Plane contracts](https://img.shields.io/badge/plane%20contracts-15%20enforced-ff8a3d)
 ![Status](https://img.shields.io/badge/status-default%20simulated%20%7C%20opt--in%20Tor-e5a50a)
@@ -111,9 +111,12 @@ is **not** an offensive platform and this repository will not become one.
   connectors read fixtures, and every address in the reference scenario is reserved for
   documentation. An opt-in [Tor onion snapshot connector](docs/connectors/dark-web.md) exists;
   it makes real external contact only when a deployment constructs it with an explicit v3
-  onion allowlist, and it refuses to run without kernel confinement. A separate opt-in
-  `ransomware.live` reader pins its API host; whether that host pin meets the MVP allowlist
-  requirement remains an explicit [founder decision](docs/architecture/FOUNDER_DECISIONS.md).
+  onion allowlist, and it refuses to run without kernel confinement. Two opt-in tracker readers
+  ([`ransomware.live`](docs/connectors/dark-web.md) and [`ransomlook.io`](docs/connectors/ransomlook.md))
+  pin their API host, and a defensive-CTI module wraps a local toolkit (KB-card allowlist adapter,
+  local-model output admitted only as hypotheses — see [docs/connectors/cti-kb.md](docs/connectors/cti-kb.md));
+  whether a host pin meets the MVP allowlist requirement, and whether the MVP may hold several such
+  readers, remains an explicit [founder decision](docs/architecture/FOUNDER_DECISIONS.md).
 - No autonomous purchasing, transactions, impersonation, or engagement with criminal
   personas.
 - No exploitation, persistence, credential attacks, malware deployment or destructive
@@ -198,7 +201,7 @@ them are the investigation pipeline; the twelfth sits above it and drives it.
 
 | Plane | | Status |
 |---|---|---|
-| 1 · Collection | sensors, connectors, quarantine — **hostile by definition** | `IMPLEMENTED` — simulated by default; opt-in Tor snapshot and ransomware.live readers |
+| 1 · Collection | sensors, connectors, quarantine — **hostile by definition** | `IMPLEMENTED` — simulated by default; opt-in Tor snapshot, ransomware.live & ransomlook.io readers, CTI-toolkit adapters |
 | 2 · Pursuit | investigation state, hypotheses, budget, pivot selection | `IMPLEMENTED` |
 | 3 · Graph | temporal, provenance-aware, confidence-scored | `IMPLEMENTED` |
 | 4 · Dark web | isolated observation | `IMPLEMENTED` snapshot / `SIMULATED` demo |
