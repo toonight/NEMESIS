@@ -294,6 +294,16 @@ def test_more_records_than_asked_for_are_truncated() -> None:
     assert result.truncated
 
 
+def test_trailing_malformed_items_are_not_counted_as_truncation() -> None:
+    # SYNTHETIC_FEED is 2 valid records + 3 malformed. With max_results=2 the result is complete —
+    # the trailing malformed items must not raise a false `truncated`, or an absence within the
+    # result reads as meaningless when in fact the source was fully carried.
+    result = asyncio.run(_connector().pivot(_request(max_results=2)))
+    assert result.succeeded
+    assert len(result.observations) == 2
+    assert not result.truncated
+
+
 def test_expected_transport_failure_is_a_failed_pivot_not_an_exception() -> None:
     connector = RansomwareLiveConnector(
         as_of=NOW, transport=RecordingTransport(error="Tor circuit unavailable")
