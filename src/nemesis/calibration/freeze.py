@@ -1349,7 +1349,7 @@ MODULE_DIGESTS: Final[Mapping[str, str]] = MappingProxyType(
         "nemesis/collect/isolation.py": "3c085a3c364d2c8c",
         "nemesis/collect/quarantine.py": "9491b7e246bf55b7",
         "nemesis/collect/ransomlook.py": "16e04693ce4dfba2",
-        "nemesis/collect/ransomware_live.py": "0921b4d66c8feae9",
+        "nemesis/collect/ransomware_live.py": "4dd37e3bf6f97f9c",
         "nemesis/collect/simulated.py": "e96dc57efcf409d7",
         "nemesis/collect/wire.py": "0b2c5b0cf7ea8e40",
         "nemesis/collect/worker.py": "a77d8e1382ee8768",
