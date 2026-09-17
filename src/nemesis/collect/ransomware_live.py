@@ -407,15 +407,18 @@ class RansomwareLiveConnector:
         seen: set[str] = set()
         truncated = False
         for item in parsed:
-            if len(observations) >= self._max_records or len(observations) >= request.max_results:
-                truncated = True
-                break
             record = self._observation_for(request, actor, url, feed.status_code, item)
             if record is None:
-                continue
+                continue  # a malformed item is dropped, never counted as "more we could not carry"
             ev, obs = record
             if ev.evidence_id in seen:
                 continue
+            # The cap is checked only once a *valid* record is in hand, so trailing malformed
+            # items do not raise a false `truncated` — an absence within a truncated result means
+            # nothing, and mislabelling a complete result as truncated hides evidence of absence.
+            if len(observations) >= self._max_records or len(observations) >= request.max_results:
+                truncated = True
+                break
             seen.add(ev.evidence_id)
             evidence.append(ev)
             observations.append(obs)
