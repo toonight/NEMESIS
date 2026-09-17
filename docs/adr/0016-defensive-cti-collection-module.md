@@ -84,6 +84,8 @@ The runtime *posture* is unchanged: nothing egresses unless an operator turns it
 confinement. But the literal count moved again, and RansomLook (like ransomware.live) pins a host
 while letting the pilot choose the actor queried. This is the exact tension the **D-egress** entry
 in `FOUNDER_DECISIONS.md` opened; this ADR does not resolve it and does not amend invariant 15.
+**(Resolved later in ADR-0017, 2026-09-16: invariant 15 reworded to "one disciplined egress class";
+AUTH-04 left unchanged.)**
 
 ## Consequences
 
@@ -91,8 +93,10 @@ in `FOUNDER_DECISIONS.md` opened; this ADR does not resolve it and does not amen
   model's triage into the graph — all inside the confinement and epistemic boundaries.
 - No default command or repository test contacts the network; the new connector ships with no
   endpoint wired and no live CI test, exactly like its two siblings.
-- Two founder decisions are made visible rather than pre-empted: whether to widen AUTH-04 for
-  in-plane credential representation, and the "sole egress" wording under a third connector.
+- Two founder decisions were made visible rather than pre-empted, and both were decided in
+  ADR-0017 (2026-09-16): **AUTH-04 stays unchanged** (no in-plane credential representation), and
+  **invariant 15 was reworded** to "one disciplined egress class" (host-pin an accepted allowlist
+  form).
 
 ## Status label
 

@@ -536,10 +536,10 @@ def test_the_connector_that_holds_egress_binds_it_to_an_operator_allowlist() -> 
 def test_no_egress_capable_module_sits_in_a_plane_that_should_not_have_one() -> None:
     """Where egress lives, asserted rather than assumed.
 
-    Invariant 15 says the sole egress is an allowlisted fetch from the collection plane. The
-    static analysis reports which modules can reach out; this asserts the answer is the one the
-    architecture claims, so a network client appearing in the pilot, effects or evolution plane
-    fails here as well as in `check_prohibited.py`. Two checks on one rule, deliberately: the
+    Invariant 15 confines all egress to one disciplined, allowlisted class inside the collection
+    plane. The static analysis reports which modules can reach out; this asserts the answer is the
+    one the architecture claims, so a network client appearing in the pilot, effects or evolution
+    plane fails here as well as in `check_prohibited.py`. Two checks on one rule, deliberately: the
     script covers the import and this covers the placement.
     """
     graph = build_graph(SRC)

@@ -74,6 +74,7 @@ the group name as the entity key; an unsafe key never reaches the transport.
 - Host-pinned to `www.ransomlook.io` / `ransomlook.io` over HTTPS; a redirect, a host-swapped final
   URL, a non-JSON body, an unexpected shape, or an oversized response all fail closed.
 - No endpoint is wired and no live integration test runs in CI.
-- Being a third egress connector, it puts invariant 15's "sole egress" wording under further strain
-  — see the **D-egress** entry in `docs/architecture/FOUNDER_DECISIONS.md`. The posture (off by
-  default, confined, unwired) is unchanged; the wording is a founder decision.
+- One connector on invariant 15's single disciplined egress class — operator-approved, off by
+  default, kernel-confined, `NEMESIS-EGRESS-ALLOWED`, wired into no default registry — with a
+  host-pin as an accepted allowlist form. Invariant 15 was reworded to this reading (**D-egress**
+  resolved, 2026-09-16; see `docs/architecture/FOUNDER_DECISIONS.md` and ADR-0017).
