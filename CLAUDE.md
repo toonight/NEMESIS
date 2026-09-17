@@ -49,9 +49,12 @@ the enforcement as a test, the design is wrong.
     not an afterthought.
 14. **A takedown is followed by resurgence monitoring.** Disruption closes no case.
 15. **The MVP never acts against external infrastructure.** No scanning, no probing,
-    no unsolicited contact. The sole egress is a fetch of specific URLs from an
-    operator-supplied allowlist, off by default with no endpoint shipped, confined by the
-    kernel and marked `NEMESIS-EGRESS-ALLOWED`. Everything else is synthetic.
+    no unsolicited contact. All egress belongs to one disciplined class — operator-
+    approved, off by default with no endpoint shipped, kernel-confined and marked
+    `NEMESIS-EGRESS-ALLOWED` — a bounded fetch of a pre-approved allowlist. Several
+    connectors may instantiate that class; each pins its reach (a specific onion URL, or
+    a single host whose public API is queried within it) and none is wired into a default
+    registry. Everything else is synthetic.
 
 ## Boundary discipline
 

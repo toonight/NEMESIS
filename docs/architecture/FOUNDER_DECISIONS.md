@@ -236,9 +236,19 @@ The local seat remains the configuration under which this question does not aris
 
 ## D-egress: may the MVP hold more than one live-egress connector, and is a host-pin an "allowlist"?
 
-**Raised 2026-08-26 while wiring `RansomwareLiveConnector`. Not answered here.**
+**Raised 2026-08-26 while wiring `RansomwareLiveConnector`. RESOLVED 2026-09-16 (ADR-0017).**
 
-Invariant 15 says "the **sole** egress is a fetch of specific URLs from an operator-supplied
+> **Decision (founder, 2026-09-16).** Both sub-questions answered *yes*: "sole egress" was
+> shorthand for **one disciplined egress mechanism *class*** — operator-approved, off by default,
+> kernel-confined, `NEMESIS-EGRESS-ALLOWED`, wired into no default registry — of which several
+> connectors may be instances; and a **host-pin is an accepted allowlist form** for a public API
+> whose targets cannot be pre-enumerated, alongside per-URL onion allowlisting. Invariant 15 was
+> reworded to say exactly this (see `CLAUDE.md` invariant 15 and ADR-0017). The runtime posture is
+> unchanged; only the wording moved, deliberately and with the test coverage intact.
+
+The original tension, kept for the record:
+
+Invariant 15 formerly said "the **sole** egress is a fetch of specific URLs from an operator-supplied
 allowlist, off by default with no endpoint shipped, confined by the kernel and marked
 `NEMESIS-EGRESS-ALLOWED`." There are now **three** opt-in egress connectors — the Tor onion
 snapshot, the `ransomware.live` OSINT reader, and (added 2026-09-14, ADR-0016) the `ransomlook.io`
@@ -261,6 +271,22 @@ Nothing in the code decides the wording of invariant 15; amending it is a founde
 entry is the tripwire that keeps the change from happening silently. A third connector on the same
 pattern (RansomLook, 2026-09-14) reinforces the "one disciplined mechanism class" reading without
 resolving the wording.
+
+---
+
+## D-credentials: may a collection-plane connector represent a discovered credential? **[ANSWERED 2026-09-16]**
+
+**Raised 2026-09-14 while building the defensive-CTI module (ADR-0016).** Invariant **AUTH-04**
+keeps `nemesis.core.credentials` importable by exactly one module (`core/entities.py`), so a
+collector cannot mint a keyed `CredentialIndicator` or run `redact_credential_material`; the CTI
+module instead never stores adversary-authored free text (there is nothing to redact) and leaves
+credential representation to the engine, behind AUTH-04's authorization path.
+
+> **Decision (founder, 2026-09-16): no.** AUTH-04 stays as written; the collection plane does not
+> represent credentials. The stronger structural guarantee (store no adversary free text) is the
+> posture, and minting a `CredentialIndicator` remains the engine's job. The question is closed —
+> not deferred — and reopening it would mean a deliberate AUTH-04 amendment with its own test. See
+> ADR-0017 and ADR-0016.
 
 ---
 

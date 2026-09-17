@@ -43,8 +43,9 @@ Like its siblings this is real external collection and is **off by default**: no
 into any registry, the response is treated as adversary-controlled material, and the connector
 refuses to run outside kernel confinement (:func:`~nemesis.collect.isolation.collect_confined`). It
 ships as one more instance of the operator-allowlisted, confined, ``NEMESIS-EGRESS-ALLOWED`` egress
-pattern rather than as a new kind of reach — see ``docs/architecture/FOUNDER_DECISIONS.md`` on the
-"sole egress" wording, which a third egress connector puts under further strain.
+pattern rather than as a new kind of reach — one connector on invariant 15's single disciplined
+egress class (host-pinning is an accepted allowlist form; see ADR-0017 and the D-egress entry in
+``docs/architecture/FOUNDER_DECISIONS.md``).
 
 Install the optional transport with ``pip install 'nemesis[darkweb]'`` (the same ``httpx`` extra) —
 tests inject an inert transport and never contact the network.
