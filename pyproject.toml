@@ -17,7 +17,7 @@ dependencies = [
 [project.optional-dependencies]
 api = [
     "fastapi>=0.115",
-    "uvicorn[standard]>=0.52.4",
+    "uvicorn[standard]>=0.54.0",
 ]
 cli = [
     "typer>=0.27.2",
@@ -32,17 +32,17 @@ darkweb = [
 dev = [
     "pytest>=8.3",
     "pytest-cov>=6.0",
-    "hypothesis>=6.165.10",
+    "hypothesis>=6.168.3",
     "mypy>=1.14",
-    "ruff>=0.16.5",
-    "import-linter>=2.14",
+    "ruff>=0.16.9",
+    "import-linter>=2.15",
     "httpx>=0.28",
     # Required, despite never appearing in an `import` here. Starlette's TestClient
     # deprecates httpx in favour of httpx2, and this project turns warnings into errors,
     # so its absence fails collection in three test modules. Three separate reviewers have
     # now flagged this line as an unused dependency or a typo — including one who removed
     # it and broke the suite in thirty seconds. "Not imported" is not "not needed".
-    "httpx2>=2.10.0",
+    "httpx2>=2.13.1",
 ]
 
 [project.scripts]
