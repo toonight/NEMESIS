@@ -7,20 +7,20 @@ requires-python = ">=3.13"
 license = "LicenseRef-Nemesis-Source-Available"
 license-files = ["LICENSE"]
 dependencies = [
-    "pydantic>=2.13.5",
+    "pydantic>=2.14.2",
     "annotated-types>=0.7",
     # Ed25519 signing for authorization capabilities and evidence-vault log heads.
     # Used only in nemesis.authz and nemesis.evidence; core stays dependency-light.
-    "cryptography>=50.0.1",
+    "cryptography>=50.0.2",
 ]
 
 [project.optional-dependencies]
 api = [
-    "fastapi>=0.115",
+    "fastapi>=0.162.0",
     "uvicorn[standard]>=0.54.0",
 ]
 cli = [
-    "typer>=0.27.2",
+    "typer>=0.27.3",
     "rich>=13.9",
 ]
 darkweb = [
@@ -30,11 +30,11 @@ darkweb = [
 
 [dependency-groups]
 dev = [
-    "pytest>=8.3",
+    "pytest>=9.2.0",
     "pytest-cov>=6.0",
-    "hypothesis>=6.168.3",
-    "mypy>=1.14",
-    "ruff>=0.16.9",
+    "hypothesis>=6.170.13",
+    "mypy>=2.4.1",
+    "ruff>=0.17.3",
     "import-linter>=2.15",
     "httpx>=0.28",
     # Required, despite never appearing in an `import` here. Starlette's TestClient
@@ -42,7 +42,7 @@ dev = [
     # so its absence fails collection in three test modules. Three separate reviewers have
     # now flagged this line as an unused dependency or a typo — including one who removed
     # it and broke the suite in thirty seconds. "Not imported" is not "not needed".
-    "httpx2>=2.13.1",
+    "httpx2>=2.16.0",
 ]
 
 [project.scripts]
